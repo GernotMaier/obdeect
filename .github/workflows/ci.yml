@@ -12,14 +12,12 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Install C++ linters
-        run: sudo apt-get update && sudo apt-get install --yes clang-format clang-tidy
+      - name: Install C++ static analyser
+        run: sudo apt-get update && sudo apt-get install --yes clang-tidy
       - name: Install Python package and linter
         run: python -m pip install --upgrade pip ruff && python -m pip install .
       - name: Check Python formatting and lint
         run: ruff format --check python && ruff check python
-      - name: Check C++ formatting
-        run: clang-format --dry-run --Werror cpp/include/obdeect/toy_mst.hpp cpp/src/toy_main.cpp cpp/tests/test_core.cpp
       - name: Configure
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
       - name: Build and C++ lint

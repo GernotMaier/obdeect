@@ -38,6 +38,14 @@ For contributor workflow, acceptance rules and local lint commands, see
 [CONTRIBUTING.md](CONTRIBUTING.md). The project is BSD-3-Clause licensed;
 citation metadata is in [CITATION.cff](CITATION.cff).
 
+## Validation status
+
+The analytic one-sphere path has an executable IACTrace cross-check and the
+published MST central-facet `f=R/2` relation has a C++ test. Full 86-facet MST
+area, PSF and timing validation is intentionally not claimed yet; see
+[VALIDATION.md](VALIDATION.md) for measured residuals, literature references
+and the remaining eligibility criteria.
+
 ## Coordinate and model convention
 
 The mirror vertex is at `z=0 m`; incoming artificial Cherenkov photons begin

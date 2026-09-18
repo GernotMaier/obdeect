@@ -2,6 +2,7 @@
 
 #include <charconv>
 #include <fstream>
+#include <iomanip>
 #include <iostream>
 #include <string>
 
@@ -45,6 +46,7 @@ int main(int argc, char** argv) {
     std::cerr << "Cannot write " << output_path << '\n';
     return 1;
   }
+  output << std::setprecision(17);
   output << "photon_id,wavelength_nm,status,point_count,path_length_m,x0_m,y0_m,z0_m,x1_m,y1_m,z1_m,x2_m,y2_m,z2_m\n";
 
   std::size_t detected = 0;
