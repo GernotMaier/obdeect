@@ -7,7 +7,7 @@
 namespace obdeect {
 
 struct TraceSummary {
-  std::array<std::size_t, 6> status_count{};
+  std::array<std::size_t, kPhotonStatusCount> status_count{};
   double input_weight{};
   double detected_weight{};
 

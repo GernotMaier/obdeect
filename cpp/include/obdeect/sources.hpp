@@ -104,7 +104,7 @@ inline std::vector<OpticalPhoton> illuminator_photons(std::size_t count, double 
     const auto direction = normalised_checked(separation);
     if (!direction || distance_m <= kEpsilon) return {};
     photons.push_back({{source.position_m, *direction}, static_cast<std::uint64_t>(index), source.wavelength_nm,
-                       distance_m / 0.299792458, source.emitted_weight / (distance_m * distance_m)});
+                       0.0, source.emitted_weight / (distance_m * distance_m)});
   }
   return photons;
 }

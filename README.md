@@ -63,6 +63,9 @@ citation metadata is in [CITATION.cff](CITATION.cff).
 The implemented C++ core layout and explicitly deferred integration layers are
 described in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
+The exact, test-gated path to a sim_telarray-replacement claim is maintained in
+[docs/SIMTELARRAY_REPLACEMENT.md](docs/SIMTELARRAY_REPLACEMENT.md).
+
 ## Validation status
 
 The analytic one-sphere path has an executable IACTrace cross-check and the

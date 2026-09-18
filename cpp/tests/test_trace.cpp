@@ -1,6 +1,7 @@
 #include "obdeect/trace.hpp"
 
 #include <cstdlib>
+#include <cmath>
 #include <iostream>
 #include <vector>
 
@@ -34,6 +35,8 @@ int main() {
   require(result.photons.status[1] == PhotonStatus::missed_primary, "outside aperture ray missed");
   require(result.photons.weight[0] == 2.0 && result.photons.weight[1] == 0.0,
           "terminal optical weights retained exactly once");
+  require(result.photons.direction[0].z > 0.0, "detected ray exposes reflected direction");
+  require(result.photons.time_ns[0] > time[0], "trace adds geometric flight time once");
   require(result.summary.status_count[static_cast<std::size_t>(PhotonStatus::detected)] == 1,
           "summary detected count");
   require(result.summary.status_count[static_cast<std::size_t>(PhotonStatus::missed_primary)] == 1,
@@ -43,6 +46,8 @@ int main() {
   const auto invalid = trace(*scene, malformed);
   require(invalid.photons.status[0] == PhotonStatus::invalid_input,
           "inconsistent public block fails closed");
+  require(invalid.summary.status_count[static_cast<std::size_t>(PhotonStatus::invalid_input)] == positions.size(),
+          "invalid block summary closes status count");
 
   std::cout << "trace tests passed\n";
 }

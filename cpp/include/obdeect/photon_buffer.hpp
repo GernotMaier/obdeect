@@ -18,7 +18,10 @@ enum class PhotonStatus : std::uint8_t {
   missed_primary,
   missed_screen,
   invalid_input,
+  count,
 };
+
+constexpr std::size_t kPhotonStatusCount = static_cast<std::size_t>(PhotonStatus::count);
 
 inline std::string_view to_string(PhotonStatus status) {
   switch (status) {
@@ -28,6 +31,7 @@ inline std::string_view to_string(PhotonStatus status) {
     case PhotonStatus::missed_primary: return "missed_primary";
     case PhotonStatus::missed_screen: return "missed_screen";
     case PhotonStatus::invalid_input: return "invalid_input";
+    case PhotonStatus::count: break;
   }
   return "unknown";
 }
@@ -68,6 +72,7 @@ struct PathRecord {
   std::array<Vec3, 3> points_m{};
   std::uint8_t point_count{};
   double path_length_m{};
+  Vec3 final_direction{};
 };
 
 }  // namespace obdeect

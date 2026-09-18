@@ -35,6 +35,8 @@ int main() {
           "finite illuminator directions differ across pupil");
   require(illuminator.front().weight > 0.0 && illuminator.back().weight > 0.0,
           "finite illuminator weights are positive");
+  require(illuminator.front().time_ns == 0.0 && illuminator.back().time_ns == 0.0,
+          "illuminator emission time is not preloaded with flight time");
 
   // T-SRC-013: laser directions stay inside configured divergence cone.
   constexpr double divergence_rad = 0.02;

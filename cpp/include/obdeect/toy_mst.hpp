@@ -65,6 +65,7 @@ inline PathRecord trace_toy_mst(const Ray& input, std::uint64_t photon_id, const
     return record;
   }
   Ray ray{input.position_m, *direction};
+  record.final_direction = ray.direction;
   if (config.include_structure) {
     std::optional<std::pair<double, PhotonStatus>> nearest_obstruction;
     const auto consider_obstruction = [&nearest_obstruction](std::optional<double> candidate,
@@ -85,6 +86,7 @@ inline PathRecord trace_toy_mst(const Ray& input, std::uint64_t photon_id, const
       record.points_m[1] = ray.position_m + ray.direction * nearest_obstruction->first;
       record.point_count = 2;
       record.path_length_m = nearest_obstruction->first;
+      record.final_direction = ray.direction;
       return record;
     }
   }
@@ -102,6 +104,7 @@ inline PathRecord trace_toy_mst(const Ray& input, std::uint64_t photon_id, const
     record.points_m[1] = mirror_hit;
     record.point_count = 2;
     record.path_length_m = *mirror_t;
+    record.final_direction = ray.direction;
     return record;
   }
 
@@ -110,12 +113,13 @@ inline PathRecord trace_toy_mst(const Ray& input, std::uint64_t photon_id, const
     record.status = PhotonStatus::invalid_input;
     return record;
   }
-  const auto reflected = normalised_checked(ray.direction - *normal * (2.0 * dot(ray.direction, *normal)));
+  const auto reflected = reflect_specular(ray.direction, *normal);
   if (!reflected) {
     record.status = PhotonStatus::invalid_input;
     return record;
   }
   ray = {mirror_hit, *reflected};
+  record.final_direction = ray.direction;
   record.points_m[1] = mirror_hit;
   record.point_count = 2;
   record.path_length_m = *mirror_t;
@@ -123,6 +127,7 @@ inline PathRecord trace_toy_mst(const Ray& input, std::uint64_t photon_id, const
   const auto screen_t = intersect_plane_z(ray, config.focal_length_m);
   if (!screen_t) {
     record.status = PhotonStatus::missed_screen;
+    record.final_direction = ray.direction;
     return record;
   }
   const Vec3 screen_hit = ray.position_m + ray.direction * *screen_t;
@@ -133,6 +138,7 @@ inline PathRecord trace_toy_mst(const Ray& input, std::uint64_t photon_id, const
                           config.screen_radius_m * config.screen_radius_m
                       ? PhotonStatus::detected
                       : PhotonStatus::missed_screen;
+  record.final_direction = ray.direction;
   return record;
 }
 
