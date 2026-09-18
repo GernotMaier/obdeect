@@ -1,4 +1,5 @@
 #include "obdeect/sources.hpp"
+#include "obdeect/toy_mst.hpp"
 
 #include <charconv>
 #include <fstream>

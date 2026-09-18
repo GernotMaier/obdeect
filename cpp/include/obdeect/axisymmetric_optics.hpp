@@ -1,6 +1,7 @@
 #pragma once
 
-#include "obdeect/toy_mst.hpp"
+#include "obdeect/interactions.hpp"
+#include "obdeect/intersections.hpp"
 
 #include <array>
 #include <cstddef>

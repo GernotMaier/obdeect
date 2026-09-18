@@ -14,6 +14,7 @@ cpp/src/              executable entry points
 cpp/tests/            dependency-free C++ tests
 python/obdeect/       Python diagnostic package
 python/tests/         dependency-free Python tests
+docs/                 core architecture and implementation status
 .github/workflows/    formatting, lint, build and test CI
 ```
 
@@ -58,6 +59,9 @@ for the analytic one-mirror focus baseline.
 For contributor workflow, acceptance rules and local lint commands, see
 [CONTRIBUTING.md](CONTRIBUTING.md). The project is BSD-3-Clause licensed;
 citation metadata is in [CITATION.cff](CITATION.cff).
+
+The implemented C++ core layout and explicitly deferred integration layers are
+described in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Validation status
 

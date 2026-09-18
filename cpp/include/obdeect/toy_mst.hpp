@@ -1,73 +1,15 @@
 #pragma once
 
-#include <algorithm>
-#include <array>
+#include "obdeect/interactions.hpp"
+#include "obdeect/intersections.hpp"
+#include "obdeect/photon_buffer.hpp"
+
 #include <cmath>
-#include <cstddef>
-#include <cstdint>
 #include <numbers>
-#include <optional>
-#include <string_view>
 #include <utility>
 #include <vector>
 
 namespace obdeect {
-
-constexpr double kEpsilon = 1e-9;
-
-struct Vec3 {
-  double x{};
-  double y{};
-  double z{};
-
-  constexpr Vec3 operator+(const Vec3& other) const { return {x + other.x, y + other.y, z + other.z}; }
-  constexpr Vec3 operator-(const Vec3& other) const { return {x - other.x, y - other.y, z - other.z}; }
-  constexpr Vec3 operator*(double value) const { return {x * value, y * value, z * value}; }
-};
-
-inline double dot(const Vec3& a, const Vec3& b) { return a.x * b.x + a.y * b.y + a.z * b.z; }
-inline double norm(const Vec3& value) { return std::sqrt(dot(value, value)); }
-
-inline std::optional<Vec3> normalised_checked(const Vec3& value) {
-  const double length = norm(value);
-  if (!std::isfinite(length) || length <= kEpsilon) return std::nullopt;
-  return value * (1.0 / length);
-}
-
-struct Ray {
-  Vec3 position_m;
-  Vec3 direction;  // Must be unit length.
-};
-
-enum class PhotonStatus : std::uint8_t {
-  detected,
-  blocked_camera,
-  blocked_mast,
-  missed_primary,
-  missed_screen,
-  invalid_input,
-};
-
-inline std::string_view to_string(PhotonStatus status) {
-  switch (status) {
-    case PhotonStatus::detected: return "detected";
-    case PhotonStatus::blocked_camera: return "blocked_camera";
-    case PhotonStatus::blocked_mast: return "blocked_mast";
-    case PhotonStatus::missed_primary: return "missed_primary";
-    case PhotonStatus::missed_screen: return "missed_screen";
-    case PhotonStatus::invalid_input: return "invalid_input";
-  }
-  return "unknown";
-}
-
-struct PathRecord {
-  std::uint64_t photon_id{};
-  double wavelength_nm{400.0};
-  PhotonStatus status{PhotonStatus::missed_primary};
-  std::array<Vec3, 3> points_m{};
-  std::uint8_t point_count{};
-  double path_length_m{};
-};
 
 // An intentionally small MST-inspired optical model.  It is not a CTAO
 // production model: it has one continuous spherical mirror, a camera disk and
@@ -96,79 +38,6 @@ inline bool is_valid(const ToyMstConfig& config) {
          std::isfinite(config.focal_length_m + config.camera_half_depth_m) && config.mast_radius_m >= 0.0;
 }
 
-inline std::optional<double> intersect_sphere(const Ray& ray, const Vec3& center, double radius) {
-  if (!std::isfinite(radius) || radius <= kEpsilon) return std::nullopt;
-  const Vec3 oc = ray.position_m - center;
-  const double b = dot(oc, ray.direction);
-  const double c = dot(oc, oc) - radius * radius;
-  const double discriminant = b * b - c;
-  if (discriminant < 0.0) return std::nullopt;
-  const double root = std::sqrt(std::max(0.0, discriminant));
-  const double first = -b - root;
-  const double second = -b + root;
-  if (first > kEpsilon) return first;
-  if (second > kEpsilon) return second;
-  return std::nullopt;
-}
-
-// The primary is the lower spherical cap (vertex z=0), not a closed sphere.
-// Selecting this cap explicitly prevents an incoming ray from spuriously
-// hitting the mathematically valid but physically absent upper hemisphere.
-inline std::optional<double> intersect_lower_spherical_cap(const Ray& ray, const Vec3& center, double radius) {
-  if (!std::isfinite(radius) || radius <= kEpsilon) return std::nullopt;
-  const Vec3 oc = ray.position_m - center;
-  const double b = dot(oc, ray.direction);
-  const double c = dot(oc, oc) - radius * radius;
-  const double discriminant = b * b - c;
-  if (discriminant < 0.0) return std::nullopt;
-  const double root = std::sqrt(std::max(0.0, discriminant));
-  for (const double t : {-b - root, -b + root}) {
-    if (t > kEpsilon && (ray.position_m + ray.direction * t).z <= center.z + kEpsilon) return t;
-  }
-  return std::nullopt;
-}
-
-inline std::optional<double> intersect_plane_z(const Ray& ray, double z) {
-  if (!std::isfinite(z) || !std::isfinite(ray.position_m.z) || !std::isfinite(ray.direction.z) ||
-      std::abs(ray.direction.z) < kEpsilon) {
-    return std::nullopt;
-  }
-  const double t = (z - ray.position_m.z) / ray.direction.z;
-  return std::isfinite(t) && t > kEpsilon ? std::optional<double>{t} : std::nullopt;
-}
-
-inline std::optional<double> intersect_disk_z(const Ray& ray, double z, double radius) {
-  if (!std::isfinite(radius) || radius <= kEpsilon) return std::nullopt;
-  const auto t = intersect_plane_z(ray, z);
-  if (!t) return std::nullopt;
-  const Vec3 point = ray.position_m + ray.direction * *t;
-  return point.x * point.x + point.y * point.y <= radius * radius ? t : std::nullopt;
-}
-
-// Side intersection of a finite circular cylinder from a to b.  The support
-// legs have physical finite extent; caps are intentionally omitted because a
-// grazing ray should be tested by the next stage rather than a zero-area cap.
-inline std::optional<double> intersect_finite_cylinder(const Ray& ray, const Vec3& a, const Vec3& b,
-                                                        double radius) {
-  if (!std::isfinite(radius) || radius <= kEpsilon) return std::nullopt;
-  const Vec3 axis = b - a;
-  const Vec3 offset = ray.position_m - a;
-  const double axis2 = dot(axis, axis);
-  if (!std::isfinite(axis2) || axis2 <= kEpsilon) return std::nullopt;
-  const double d_axis = dot(ray.direction, axis);
-  const double o_axis = dot(offset, axis);
-  const double A = dot(ray.direction, ray.direction) - d_axis * d_axis / axis2;
-  const double B = dot(ray.direction, offset) - d_axis * o_axis / axis2;
-  const double C = dot(offset, offset) - o_axis * o_axis / axis2 - radius * radius;
-  const double discriminant = B * B - A * C;
-  if (A <= kEpsilon || discriminant < 0.0) return std::nullopt;
-  const double root = std::sqrt(std::max(0.0, discriminant));
-  for (const double t : {(-B - root) / A, (-B + root) / A}) {
-    const double along = o_axis + t * d_axis;
-    if (t > kEpsilon && along >= 0.0 && along <= axis2) return t;
-  }
-  return std::nullopt;
-}
 
 inline std::vector<std::pair<Vec3, Vec3>> mast_legs(const ToyMstConfig& config) {
   std::vector<std::pair<Vec3, Vec3>> legs;

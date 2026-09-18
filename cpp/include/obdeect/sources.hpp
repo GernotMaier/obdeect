@@ -1,9 +1,11 @@
 #pragma once
 
-#include "obdeect/toy_mst.hpp"
+#include "obdeect/math.hpp"
 
+#include <cstdint>
 #include <numbers>
 #include <string_view>
+#include <vector>
 
 namespace obdeect {
 
