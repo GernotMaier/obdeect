@@ -56,6 +56,7 @@ def main():
     axis.legend(loc="upper right")
     fig.tight_layout()
     fig.savefig(args.output, dpi=160)
+    plt.close(fig)
 
 
 if __name__ == "__main__":

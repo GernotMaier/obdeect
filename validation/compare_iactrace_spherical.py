@@ -43,8 +43,10 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--executable", type=Path, required=True)
     parser.add_argument("--photons", type=int, default=256)
-    parser.add_argument("--tolerance-m", type=float, default=2.0e-5)
+    parser.add_argument("--tolerance-m", type=float, default=1.0e-10)
     args = parser.parse_args()
+    if args.photons <= 0 or args.tolerance_m <= 0.0:
+        parser.error("--photons and --tolerance-m must be positive")
 
     with tempfile.TemporaryDirectory() as directory:
         output = Path(directory) / "paths.csv"
@@ -55,6 +57,9 @@ def main() -> None:
             text=True,
         )
         rows = load_csv(output)
+
+    if len(rows) != args.photons:
+        raise AssertionError(f"obdeect emitted {len(rows)} rows for {args.photons} photons")
 
     origins = jnp.asarray(points(rows, 0))
     directions = jnp.broadcast_to(jnp.array([0.0, 0.0, -1.0]), origins.shape)
@@ -71,7 +76,8 @@ def main() -> None:
         name="matched_spherical_reference",
     )
     trace = telescope.trace(origins, directions, jnp.ones(args.photons), record_trajectory=True)
-    assert trace.trajectory is not None
+    if trace.trajectory is None:
+        raise AssertionError("iactrace did not return the requested trajectory")
     reference = np.asarray(trace.trajectory.points)
     if reference.shape != (3, args.photons, 3):
         raise AssertionError(f"unexpected iactrace trajectory shape: {reference.shape}")

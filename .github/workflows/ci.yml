@@ -21,6 +21,13 @@ jobs:
       - name: Configure
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
       - name: Build and C++ lint
-        run: cmake --build build --parallel && clang-tidy -p build cpp/src/toy_main.cpp cpp/tests/test_core.cpp
+        run: cmake --build build --parallel && clang-tidy -p build cpp/src/toy_main.cpp cpp/tests/test_core.cpp cpp/tests/test_literature_mst.cpp
       - name: Test
         run: ctest --test-dir build --output-on-failure && python -m unittest python/tests/test_plot_toy_mst.py
+      - name: Sanitiser tests
+        run: >-
+          cmake -S . -B build-sanitize -DCMAKE_BUILD_TYPE=Debug
+          -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer"
+          -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined"
+          && cmake --build build-sanitize --parallel
+          && ctest --test-dir build-sanitize --output-on-failure

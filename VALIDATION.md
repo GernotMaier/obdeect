@@ -36,11 +36,13 @@ is not a normal project dependency.
 
 ### Local MST literature check — pass at the supported scope
 
-`literature/170927_MST_MCparameters.pdf`, p. 2, specifies a modified
-Davies-Cotton MST with a 13.77-m dish, 16.00-m central-mirror-to-focal-plane
-distance, spherical 1.2-m hexagonal facets, and up to 90 mirrors. Page 19
-lists the central facet radius of curvature `32.14 m` and focal length
-`16.07 m`, satisfying the single-spherical-facet relation `f=R/2`.
+Garczarczyk, *MST MC parameters* (27 September 2017), p. 2, specifies a
+modified Davies-Cotton MST with a 13.77-m dish, 16.00-m
+central-mirror-to-focal-plane distance, spherical 1.2-m hexagonal facets, and
+up to 90 mirrors. Page 19 lists the central facet radius of curvature
+`32.14 m` and focal length `16.07 m`, satisfying the single-spherical-facet
+relation `f=R/2`. The PDF was examined in the parent research workspace and
+is not redistributed in this repository.
 
 `T-LIT-001` in `cpp/tests/test_literature_mst.cpp` traces the corresponding
 on-axis, one-facet analytic case and verifies a focal-plane-origin landing.
@@ -50,9 +52,10 @@ This test passes.
 
 The same paper specifies effective mirror area above `88 m²`, optical
 `theta_80 < 0.18°`, and RMS optical time spread below `0.8 ns` for the
-modified Davies-Cotton telescope. `literature/200320_MST_optics.pdf`, pp. 1–2,
-also reports the 86-facet CSS design, approximately `90.68 m²` effective mirror
-area, `15.37 m²` total shadowing, and off-axis PSF values.
+modified Davies-Cotton telescope. Garczarczyk, *MST Optics Parameters*
+(20 March 2020), pp. 1–2, also reports the 86-facet CSS design, approximately
+`90.68 m²` effective mirror area, `15.37 m²` total shadowing, and off-axis
+PSF values. This slide deck likewise is not redistributed here.
 
 The current executable is a continuous spherical dish with an illustrative
 camera disk and four masts. It has no hexagonal facet layout, Davies-Cotton

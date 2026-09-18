@@ -3,11 +3,12 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
-#include <limits>
 #include <numbers>
 #include <optional>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace obdeect {
@@ -26,7 +27,12 @@ struct Vec3 {
 
 inline double dot(const Vec3& a, const Vec3& b) { return a.x * b.x + a.y * b.y + a.z * b.z; }
 inline double norm(const Vec3& value) { return std::sqrt(dot(value, value)); }
-inline Vec3 normalised(const Vec3& value) { return value * (1.0 / norm(value)); }
+
+inline std::optional<Vec3> normalised_checked(const Vec3& value) {
+  const double length = norm(value);
+  if (!std::isfinite(length) || length <= kEpsilon) return std::nullopt;
+  return value * (1.0 / length);
+}
 
 struct Ray {
   Vec3 position_m;
@@ -39,6 +45,7 @@ enum class PhotonStatus : std::uint8_t {
   blocked_mast,
   missed_primary,
   missed_screen,
+  invalid_input,
 };
 
 inline std::string_view to_string(PhotonStatus status) {
@@ -48,6 +55,7 @@ inline std::string_view to_string(PhotonStatus status) {
     case PhotonStatus::blocked_mast: return "blocked_mast";
     case PhotonStatus::missed_primary: return "missed_primary";
     case PhotonStatus::missed_screen: return "missed_screen";
+    case PhotonStatus::invalid_input: return "invalid_input";
   }
   return "unknown";
 }
@@ -76,7 +84,20 @@ struct ToyMstConfig {
   bool include_structure{true};
 };
 
+inline bool is_valid(const ToyMstConfig& config) {
+  return std::isfinite(config.mirror_radius_m) && std::isfinite(config.mirror_aperture_radius_m) &&
+         std::isfinite(config.focal_length_m) && std::isfinite(config.screen_radius_m) &&
+         std::isfinite(config.camera_radius_m) && std::isfinite(config.camera_half_depth_m) &&
+         std::isfinite(config.mast_radius_m) && config.mirror_radius_m > kEpsilon &&
+         config.mirror_aperture_radius_m > kEpsilon &&
+         config.mirror_aperture_radius_m <= config.mirror_radius_m && config.focal_length_m > kEpsilon &&
+         config.screen_radius_m > kEpsilon && config.camera_radius_m >= 0.0 &&
+         config.camera_half_depth_m >= 0.0 && config.camera_half_depth_m < config.focal_length_m &&
+         std::isfinite(config.focal_length_m + config.camera_half_depth_m) && config.mast_radius_m >= 0.0;
+}
+
 inline std::optional<double> intersect_sphere(const Ray& ray, const Vec3& center, double radius) {
+  if (!std::isfinite(radius) || radius <= kEpsilon) return std::nullopt;
   const Vec3 oc = ray.position_m - center;
   const double b = dot(oc, ray.direction);
   const double c = dot(oc, oc) - radius * radius;
@@ -94,6 +115,7 @@ inline std::optional<double> intersect_sphere(const Ray& ray, const Vec3& center
 // Selecting this cap explicitly prevents an incoming ray from spuriously
 // hitting the mathematically valid but physically absent upper hemisphere.
 inline std::optional<double> intersect_lower_spherical_cap(const Ray& ray, const Vec3& center, double radius) {
+  if (!std::isfinite(radius) || radius <= kEpsilon) return std::nullopt;
   const Vec3 oc = ray.position_m - center;
   const double b = dot(oc, ray.direction);
   const double c = dot(oc, oc) - radius * radius;
@@ -107,12 +129,16 @@ inline std::optional<double> intersect_lower_spherical_cap(const Ray& ray, const
 }
 
 inline std::optional<double> intersect_plane_z(const Ray& ray, double z) {
-  if (std::abs(ray.direction.z) < kEpsilon) return std::nullopt;
+  if (!std::isfinite(z) || !std::isfinite(ray.position_m.z) || !std::isfinite(ray.direction.z) ||
+      std::abs(ray.direction.z) < kEpsilon) {
+    return std::nullopt;
+  }
   const double t = (z - ray.position_m.z) / ray.direction.z;
-  return t > kEpsilon ? std::optional<double>{t} : std::nullopt;
+  return std::isfinite(t) && t > kEpsilon ? std::optional<double>{t} : std::nullopt;
 }
 
 inline std::optional<double> intersect_disk_z(const Ray& ray, double z, double radius) {
+  if (!std::isfinite(radius) || radius <= kEpsilon) return std::nullopt;
   const auto t = intersect_plane_z(ray, z);
   if (!t) return std::nullopt;
   const Vec3 point = ray.position_m + ray.direction * *t;
@@ -124,9 +150,11 @@ inline std::optional<double> intersect_disk_z(const Ray& ray, double z, double r
 // grazing ray should be tested by the next stage rather than a zero-area cap.
 inline std::optional<double> intersect_finite_cylinder(const Ray& ray, const Vec3& a, const Vec3& b,
                                                         double radius) {
+  if (!std::isfinite(radius) || radius <= kEpsilon) return std::nullopt;
   const Vec3 axis = b - a;
   const Vec3 offset = ray.position_m - a;
   const double axis2 = dot(axis, axis);
+  if (!std::isfinite(axis2) || axis2 <= kEpsilon) return std::nullopt;
   const double d_axis = dot(ray.direction, axis);
   const double o_axis = dot(offset, axis);
   const double A = dot(ray.direction, ray.direction) - d_axis * d_axis / axis2;
@@ -161,24 +189,34 @@ inline PathRecord trace_toy_mst(const Ray& input, std::uint64_t photon_id, const
   record.points_m[0] = input.position_m;
   record.point_count = 1;
 
-  Ray ray{input.position_m, normalised(input.direction)};
+  const auto direction = normalised_checked(input.direction);
+  if (!is_valid(config) || !direction || !std::isfinite(input.position_m.x) ||
+      !std::isfinite(input.position_m.y) || !std::isfinite(input.position_m.z)) {
+    record.status = PhotonStatus::invalid_input;
+    return record;
+  }
+  Ray ray{input.position_m, *direction};
   if (config.include_structure) {
-    const double camera_front_z = config.focal_length_m + config.camera_half_depth_m;
-    if (const auto t = intersect_disk_z(ray, camera_front_z, config.camera_radius_m)) {
-      record.status = PhotonStatus::blocked_camera;
-      record.points_m[1] = ray.position_m + ray.direction * *t;
-      record.point_count = 2;
-      record.path_length_m = *t;
-      return record;
-    }
-    for (const auto& [a, b] : mast_legs(config)) {
-      if (const auto t = intersect_finite_cylinder(ray, a, b, config.mast_radius_m)) {
-        record.status = PhotonStatus::blocked_mast;
-        record.points_m[1] = ray.position_m + ray.direction * *t;
-        record.point_count = 2;
-        record.path_length_m = *t;
-        return record;
+    std::optional<std::pair<double, PhotonStatus>> nearest_obstruction;
+    const auto consider_obstruction = [&nearest_obstruction](std::optional<double> candidate,
+                                                               PhotonStatus status) {
+      if (candidate && (!nearest_obstruction || *candidate < nearest_obstruction->first)) {
+        nearest_obstruction = std::make_pair(*candidate, status);
       }
+    };
+    const double camera_front_z = config.focal_length_m + config.camera_half_depth_m;
+    consider_obstruction(intersect_disk_z(ray, camera_front_z, config.camera_radius_m),
+                         PhotonStatus::blocked_camera);
+    for (const auto& [a, b] : mast_legs(config)) {
+      consider_obstruction(intersect_finite_cylinder(ray, a, b, config.mast_radius_m),
+                           PhotonStatus::blocked_mast);
+    }
+    if (nearest_obstruction) {
+      record.status = nearest_obstruction->second;
+      record.points_m[1] = ray.position_m + ray.direction * nearest_obstruction->first;
+      record.point_count = 2;
+      record.path_length_m = nearest_obstruction->first;
+      return record;
     }
   }
 
@@ -198,8 +236,17 @@ inline PathRecord trace_toy_mst(const Ray& input, std::uint64_t photon_id, const
     return record;
   }
 
-  const Vec3 normal = normalised(mirror_hit - mirror_center);
-  ray = {mirror_hit, normalised(ray.direction - normal * (2.0 * dot(ray.direction, normal)))};
+  const auto normal = normalised_checked(mirror_hit - mirror_center);
+  if (!normal) {
+    record.status = PhotonStatus::invalid_input;
+    return record;
+  }
+  const auto reflected = normalised_checked(ray.direction - *normal * (2.0 * dot(ray.direction, *normal)));
+  if (!reflected) {
+    record.status = PhotonStatus::invalid_input;
+    return record;
+  }
+  ray = {mirror_hit, *reflected};
   record.points_m[1] = mirror_hit;
   record.point_count = 2;
   record.path_length_m = *mirror_t;
@@ -224,6 +271,7 @@ inline PathRecord trace_toy_mst(const Ray& input, std::uint64_t photon_id, const
 inline std::vector<Ray> parallel_blue_cherenkov_rays(std::size_t count, const ToyMstConfig& config,
                                                       double source_z_m = 20.0) {
   std::vector<Ray> rays;
+  if (!is_valid(config) || !std::isfinite(source_z_m) || count == 0) return rays;
   rays.reserve(count);
   constexpr double golden_ratio_conjugate = 0.6180339887498948482;
   for (std::size_t index = 0; index < count; ++index) {

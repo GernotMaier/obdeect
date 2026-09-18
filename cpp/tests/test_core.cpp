@@ -48,6 +48,27 @@ int main() {
                 structured.mirror_aperture_radius_m * structured.mirror_aperture_radius_m + 1e-12,
             "source samples must stay inside pupil");
   }
+  require(parallel_blue_cherenkov_rays(0, structured).empty(), "zero source count must be empty");
+
+  // T-ABI-001: invalid vectors/configuration fail closed rather than divide by zero.
+  const auto zero_direction = trace_toy_mst({{0.0, 0.0, 20.0}, {0.0, 0.0, 0.0}}, 4, bare);
+  require(zero_direction.status == PhotonStatus::invalid_input, "zero direction must be rejected");
+  ToyMstConfig invalid = bare;
+  invalid.mirror_aperture_radius_m = invalid.mirror_radius_m + 1.0;
+  const auto invalid_scene = trace_toy_mst({{0.0, 0.0, 20.0}, {0.0, 0.0, -1.0}}, 5, invalid);
+  require(invalid_scene.status == PhotonStatus::invalid_input, "impossible spherical cap must be rejected");
+  invalid = bare;
+  invalid.camera_half_depth_m = invalid.focal_length_m;
+  const auto inverted_camera = trace_toy_mst({{0.0, 0.0, 20.0}, {0.0, 0.0, -1.0}}, 6, invalid);
+  require(inverted_camera.status == PhotonStatus::invalid_input,
+          "camera support endpoint behind the primary must be rejected");
+
+  // T-OBS-003: zero-radius camera/masts are disabled, not zero-area blockers.
+  ToyMstConfig no_obstruction = structured;
+  no_obstruction.camera_radius_m = 0.0;
+  no_obstruction.mast_radius_m = 0.0;
+  const auto unobscured = trace_toy_mst({{0.0, 0.0, 20.0}, {0.0, 0.0, -1.0}}, 7, no_obstruction);
+  require(unobscured.status == PhotonStatus::detected, "zero-radius obstructions must not block");
 
   std::cout << "obdeect core tests passed\n";
 }
