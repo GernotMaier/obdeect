@@ -1,0 +1,16 @@
+Checks: >
+  -*,
+  bugprone-argument-comment,
+  bugprone-branch-clone,
+  bugprone-empty-catch,
+  bugprone-exception-escape,
+  bugprone-infinite-loop,
+  bugprone-macro-parentheses,
+  bugprone-suspicious-memset-usage,
+  bugprone-undefined-memory-manipulation,
+  performance-for-range-copy
+WarningsAsErrors: '*'
+HeaderFilterRegex: 'cpp/include/obdeect/.*'
+CheckOptions:
+  - key: readability-identifier-length.MinimumVariableNameLength
+    value: '2'

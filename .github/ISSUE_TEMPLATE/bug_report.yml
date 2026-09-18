@@ -1,0 +1,22 @@
+name: Bug report
+description: Report an incorrect IACT photon-tracing result or project defect.
+title: "bug: "
+labels: [bug]
+body:
+  - type: textarea
+    attributes:
+      label: Expected optical behaviour
+      description: Include the telescope frame, units and photon source convention.
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Actual behaviour
+      description: Include a minimal input and output/status values.
+    validations:
+      required: true
+  - type: input
+    attributes:
+      label: Version or commit
+    validations:
+      required: true
