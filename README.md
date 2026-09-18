@@ -29,6 +29,27 @@ obdeect-plot-toy toy_mst_paths.csv --output toy_mst_paths.png
 python -m unittest python/tests/test_plot_toy_mst.py
 ```
 
+## Artificial calibration sources
+
+The baseline executable uses 400-nm photons and supports three deterministic
+source models over the same entrance pupil:
+
+```bash
+# Plane wave from an on/off-axis star; angles are telescope-frame degrees.
+./build/obdeect_toy --source star --field-x-deg 0.5 --field-y-deg 0.0
+
+# Finite-distance point flasher, with per-ray inverse-square weights.
+./build/obdeect_toy --source illuminator --distance-m 50
+
+# Collimated or finite-divergence calibration laser.
+./build/obdeect_toy --source laser --distance-m 50 --divergence-deg 0.1
+```
+
+The current CSV stores the traced path and wavelength. Time and source weight
+are retained by the C++ `OpticalPhoton` type and will be added to the public
+result table together with wavelength-dependent throughput in the next API
+revision.
+
 The executable needs only a C++20 compiler and the standard library. The
 Python package declares Matplotlib as its only runtime dependency and installs
 the `obdeect-plot-toy` command. `--no-structure` removes the camera and masts
