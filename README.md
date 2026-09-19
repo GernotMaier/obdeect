@@ -70,6 +70,22 @@ model, so this must not be interpreted as segmented CTAO telescope support.
 The explicit evidence required before claiming sim_telarray/ROBAST-level
 coverage is in [docs/SIMTELARRAY_REPLACEMENT.md](docs/SIMTELARRAY_REPLACEMENT.md).
 
+### Import a pinned simulation-models production
+
+The standard-library importer records every selected parameter record and all
+declared model-file assets with SHA-256 hashes. It neither downloads nor copies
+external model data.
+
+```bash
+python tools/import_simulation_models.py /path/to/simulation-models LSTN-design \
+  --version 6.3.0 --output lstn-design.ir.json
+```
+
+The emitted `obdeect.simulation-models-ir.v1` JSON is the auditable hand-off
+from model selection to the future C++ scene compiler. An unresolved parameter
+file, missing declared asset, identity mismatch, or unsafe path fails the
+import; no field is silently discarded.
+
 The executable needs only a C++20 compiler and the standard library. The
 Python package declares Matplotlib as its only runtime dependency and installs
 the `obdeect-plot-toy` command. `--no-structure` removes the camera and masts
