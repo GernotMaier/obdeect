@@ -41,7 +41,9 @@ def run_examples(build: Path, output: Path, photons: int) -> None:
         subprocess.run(command, check=True)
         with csv_path.open(newline="") as handle:
             rows = list(csv.DictReader(handle))
-        if len(rows) != photons or any(None in row for row in rows):
+        if len(rows) != photons or any(
+            None in row or any(value is None for value in row.values()) for row in rows
+        ):
             raise ValueError(f"{name}: malformed CSV or missing photons")
         counts = {}
         for row in rows:
