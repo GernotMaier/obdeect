@@ -2,7 +2,7 @@
 
 `obdeect` is fast ray-tracing code for imaging atmospheric Cherenkov telescopes (IACTs).
 
-Dependencies area C++20 compiler and the standard library for the core ray-tracing code.
+Dependencies are a C++20 compiler and the standard library for the core ray-tracing code.
 
 ## Repository layout
 
