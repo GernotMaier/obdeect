@@ -2,6 +2,8 @@
 
 #include "obdeect/axisymmetric_optics.hpp"
 
+#include <cstdint>
+
 namespace obdeect {
 
 enum class TelescopeOpticalFamily : std::uint8_t { lst_parabolic, mst_modified_davies_cotton, sst_sc, sct_sc };

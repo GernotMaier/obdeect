@@ -2,6 +2,7 @@
 
 #include "obdeect/ctao_optical_specs.hpp"
 
+#include <cstdint>
 #include <optional>
 #include <string_view>
 
