@@ -53,6 +53,14 @@ class TestTracePathReader(unittest.TestCase):
             hits = list(PLOT.focal_plane_hits(path))
         self.assertEqual(hits, [(0.3, 0.4, 1.0)])
 
+    def test_rejects_invalid_detected_focal_plane_data(self):
+        csv_text = "status,point_count,x0_m,y0_m\ndetected,1,nan,0\n"
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "paths.csv"
+            path.write_text(csv_text)
+            with self.assertRaisesRegex(ValueError, "non-finite"):
+                list(PLOT.focal_plane_hits(path))
+
 
 if __name__ == "__main__":
     unittest.main()

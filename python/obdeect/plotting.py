@@ -29,16 +29,29 @@ def focal_plane_hits(path: Path):
     """
     with path.open(newline="") as handle:
         for row in csv.DictReader(handle):
-            if row["status"] != "detected":
+            if row.get("status") != "detected":
                 continue
-            point_index = int(row["point_count"]) - 1
+            try:
+                point_index = int(row["point_count"]) - 1
+            except (KeyError, TypeError, ValueError) as error:
+                raise ValueError(f"{path}: detected row has an invalid point_count") from error
             if point_index < 0:
-                continue
-            weight = float(row.get("source_weight") or 1.0) * float(row.get("throughput") or 1.0)
+                raise ValueError(f"{path}: detected row has no path vertices")
+            try:
+                source_weight = float(row.get("source_weight") or 1.0)
+                throughput = float(row.get("throughput") or 1.0)
+                x = float(row[f"x{point_index}_m"])
+                y = float(row[f"y{point_index}_m"])
+            except (KeyError, TypeError, ValueError) as error:
+                raise ValueError(f"{path}: detected row has invalid focal-plane data") from error
+            if not all(math.isfinite(value) for value in (source_weight, throughput, x, y)):
+                raise ValueError(f"{path}: detected row has non-finite focal-plane data")
+            if source_weight < 0.0 or throughput < 0.0:
+                raise ValueError(f"{path}: detected row has negative optical weight")
             yield (
-                float(row[f"x{point_index}_m"]),
-                float(row[f"y{point_index}_m"]),
-                weight,
+                x,
+                y,
+                source_weight * throughput,
             )
 
 
@@ -208,7 +221,7 @@ def main():
     axis.set(
         xlabel="telescope x [m]",
         ylabel="telescope z [m]",
-        title=f"obdeect: 400-nm {args.telescope} reference paths",
+        title=f"obdeect: {args.telescope} traced paths",
     )
     axis.set_aspect("equal", adjustable="box")
     axis.legend(loc="upper right")

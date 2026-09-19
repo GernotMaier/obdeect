@@ -1,14 +1,65 @@
+---
+default_language_version:
+  python: python3.14
+
 repos:
-  - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v5.0.0
-    hooks:
-      - id: check-yaml
-      - id: check-json
-      - id: end-of-file-fixer
-      - id: trailing-whitespace
-  - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.12.7
-    hooks:
-      - id: ruff-check
-        args: [--fix]
-      - id: ruff-format
+- repo: https://github.com/pre-commit/pre-commit-hooks
+  rev: v5.0.0
+  hooks:
+  - id: check-yaml
+  - id: check-json
+  - id: end-of-file-fixer
+  - id: trailing-whitespace
+- repo: https://github.com/astral-sh/ruff-pre-commit
+  rev: v0.12.7
+  hooks:
+  - id: ruff-check
+    args: [--fix]
+  - id: ruff-format
+# Github action
+- repo: https://github.com/rhysd/actionlint
+  rev: v1.7.12
+  hooks:
+  - id: actionlint
+# https://pyproject-fmt.readthedocs.io/en/latest/
+- repo: https://github.com/tox-dev/pyproject-fmt
+  rev: "v2.29.2"
+  hooks:
+  - id: pyproject-fmt
+# codespell
+- repo: https://github.com/codespell-project/codespell
+  rev: v2.4.3
+  hooks:
+  - id: codespell
+    args: [
+      "--ignore-words-list=als,hel",
+    ]
+# markdownlint
+- repo: https://github.com/igorshubovych/markdownlint-cli
+  rev: v0.49.1
+  hooks:
+  - id: markdownlint
+    args: ["--disable", "MD041"]
+# yamllint
+- repo: https://github.com/adrienverge/yamllint.git
+  rev: v1.38.0
+  hooks:
+  - id: yamllint
+    args:
+      [
+        "--strict",
+        "-d",
+        '{extends: default, rules: {line-length: {max: 300}, indentation: {spaces: 2, indent-sequences: consistent}, truthy: {allowed-values: ["true", "false", "on", "off"]}}}'
+      ]
+# towncrier
+- repo: https://github.com/twisted/towncrier
+  rev: 25.8.0
+  hooks:
+  - id: towncrier-update
+    files: $docs/changes/
+    args: ['--keep']
+# shellcheck
+- repo: https://github.com/shellcheck-py/shellcheck-py
+  rev: v0.11.0.1-1
+  hooks:
+  - id: shellcheck

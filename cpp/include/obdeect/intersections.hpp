@@ -54,8 +54,11 @@ inline std::optional<double> intersect_disk_z(const Ray& ray, double z, double r
   return point.x * point.x + point.y * point.y <= radius * radius ? distance_m : std::nullopt;
 }
 
-inline std::optional<double> intersect_finite_cylinder(const Ray& ray, const Vec3& a, const Vec3& b,
-                                                        double radius) {
+// Intersect the side wall and both end caps of a finite, closed cylinder.
+// Returning the nearest positive root makes the result suitable for opaque
+// solids, regardless of which side of the solid the ray starts on.
+inline std::optional<double> intersect_closed_finite_cylinder(const Ray& ray, const Vec3& a, const Vec3& b,
+                                                               double radius) {
   if (!std::isfinite(radius) || radius <= kEpsilon) return std::nullopt;
   const Vec3 axis = b - a;
   const Vec3 offset = ray.position_m - a;
@@ -67,14 +70,36 @@ inline std::optional<double> intersect_finite_cylinder(const Ray& ray, const Vec
   const double quadratic_b = dot(ray.direction, offset) - direction_axis * offset_axis / axis_squared;
   const double quadratic_c = dot(offset, offset) - offset_axis * offset_axis / axis_squared - radius * radius;
   const double discriminant = quadratic_b * quadratic_b - quadratic_a * quadratic_c;
-  if (quadratic_a <= kEpsilon || discriminant < 0.0) return std::nullopt;
-  const double root = std::sqrt(std::max(0.0, discriminant));
-  for (const double distance_m : {(-quadratic_b - root) / quadratic_a,
-                                  (-quadratic_b + root) / quadratic_a}) {
-    const double along_axis = offset_axis + distance_m * direction_axis;
-    if (distance_m > kEpsilon && along_axis >= 0.0 && along_axis <= axis_squared) return distance_m;
+  std::optional<double> nearest;
+  const auto consider = [&nearest](double distance_m) {
+    if (std::isfinite(distance_m) && distance_m > kEpsilon && (!nearest || distance_m < *nearest)) {
+      nearest = distance_m;
+    }
+  };
+
+  if (quadratic_a > kEpsilon && discriminant >= 0.0) {
+    const double root = std::sqrt(std::max(0.0, discriminant));
+    for (const double distance_m : {(-quadratic_b - root) / quadratic_a,
+                                    (-quadratic_b + root) / quadratic_a}) {
+      const double along_axis = offset_axis + distance_m * direction_axis;
+      if (along_axis >= -kEpsilon && along_axis <= axis_squared + kEpsilon) consider(distance_m);
+    }
   }
-  return std::nullopt;
+
+  if (std::abs(direction_axis) > kEpsilon) {
+    for (const double cap_position : {0.0, axis_squared}) {
+      const double distance_m = (cap_position - offset_axis) / direction_axis;
+      const Vec3 radial = offset + ray.direction * distance_m - axis * (cap_position / axis_squared);
+      if (dot(radial, radial) <= radius * radius + kEpsilon) consider(distance_m);
+    }
+  }
+  return nearest;
+}
+
+// Backwards-compatible spelling for callers that model an opaque support.
+inline std::optional<double> intersect_finite_cylinder(const Ray& ray, const Vec3& a, const Vec3& b,
+                                                        double radius) {
+  return intersect_closed_finite_cylinder(ray, a, b, radius);
 }
 
 }  // namespace obdeect

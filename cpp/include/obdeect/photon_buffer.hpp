@@ -5,6 +5,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <span>
 #include <string_view>
 #include <vector>
@@ -17,6 +18,7 @@ enum class PhotonStatus : std::uint8_t {
   blocked_mast,
   missed_primary,
   missed_screen,
+  no_detector,
   invalid_input,
   count,
 };
@@ -30,6 +32,7 @@ inline std::string_view to_string(PhotonStatus status) {
     case PhotonStatus::blocked_mast: return "blocked_mast";
     case PhotonStatus::missed_primary: return "missed_primary";
     case PhotonStatus::missed_screen: return "missed_screen";
+    case PhotonStatus::no_detector: return "no_detector";
     case PhotonStatus::invalid_input: return "invalid_input";
     case PhotonStatus::count: break;
   }
@@ -60,9 +63,14 @@ struct PhotonResultBlock {
   std::vector<double> time_ns;
   std::vector<double> weight;
   std::vector<PhotonStatus> status;
+  // Terminal optical surface, or kNoSurfaceId if none was reached.
+  std::vector<std::uint32_t> surface_id;
+
+  static constexpr std::uint32_t kNoSurfaceId = std::numeric_limits<std::uint32_t>::max();
 
   explicit PhotonResultBlock(std::size_t size = 0)
-      : position_m(size), direction(size), optical_path_m(size), time_ns(size), weight(size), status(size) {}
+      : position_m(size), direction(size), optical_path_m(size), time_ns(size), weight(size), status(size),
+        surface_id(size, kNoSurfaceId) {}
 };
 
 struct PathRecord {
