@@ -13,6 +13,7 @@ plotting dependency.
 | `intersections.hpp`, `geometry.hpp` | Plane, sphere/cap, disk, finite cylinder and axisymmetric-surface dispatch. |
 | `interactions.hpp` | Checked specular reflection. |
 | `axisymmetric_optics.hpp` | Paraboloid/even-polynomial SC surfaces and forward Newton intersection. |
+| `facets.hpp` | Finite circular facet intersection, nearest-hit selection and tabulated coating response. |
 | `scene.hpp`, `trace.hpp` | Immutable directed toy-scene compilation and scalar SoA block tracing. |
 | `diagnostics.hpp` | Status/weight closure summary. |
 | `model_import.hpp` | Canonical CTAO model provenance/import target. |

@@ -64,6 +64,12 @@ transform. LST ideal-paraboloid and MST central-sphere baselines are executable
 and tested; SST/SCT are two-mirror prescription scaffolding awaiting their
 model-specific geometry validation.
 
+The core now also has a finite-facet and tabulated-coating kernel for use by a
+future model importer. A facet list is not currently embedded in any reference
+model, so this must not be interpreted as segmented CTAO telescope support.
+The explicit evidence required before claiming sim_telarray/ROBAST-level
+coverage is in [docs/SIMTELARRAY_REPLACEMENT.md](docs/SIMTELARRAY_REPLACEMENT.md).
+
 The executable needs only a C++20 compiler and the standard library. The
 Python package declares Matplotlib as its only runtime dependency and installs
 the `obdeect-plot-toy` command. `--no-structure` removes the camera and masts
