@@ -67,7 +67,7 @@ source models over the same entrance pupil:
 # Plane wave from an on/off-axis star; angles are telescope-frame degrees.
 ./build/obdeect_toy --source star --field-x-deg 0.5 --field-y-deg 0.0
 
-# Finite-distance point flasher, with per-ray inverse-square weights.
+# Finite-distance point flasher, with per-photon inverse-square weights.
 ./build/obdeect_toy --source illuminator --distance-m 50
 
 # Collimated or finite-divergence calibration laser.
@@ -81,7 +81,7 @@ coating/material scene will replace it with wavelength-dependent transport.
 
 ## CTAO reference models
 
-`obdeect_ctao --telescope LST|MST|SST|SCT` writes ragged ray paths for the
+`obdeect_ctao --telescope LST|MST|SST|SCT` writes ragged photon paths for the
 same Python plotter. The catalogue is pinned to public `simulation-models`
 6.3.0 identifiers and its import API requires explicit provenance. It contains
 optical prescriptions only: it does not load model JSON, facet positions,

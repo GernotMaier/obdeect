@@ -46,7 +46,7 @@ TELESCOPE_NAMES = ("toy-mst", "LST", "MST", "SST", "SCT")
 
 
 def draw_reference_telescope(axis, telescope: str):
-    """Draw only a labelled diagnostic outline; rays always originate in CSV."""
+    """Draw only a labelled diagnostic outline; photon paths originate in CSV."""
     from matplotlib.patches import Rectangle
 
     if telescope == "toy-mst":
@@ -101,12 +101,12 @@ def draw_reference_telescope(axis, telescope: str):
 
 
 def draw_focal_plane(plt, path: Path, output: Path, bins: int, telescope: str):
-    """Render weighted 2-D focal-plane intensity and its Cartesian projections."""
+    """Render surviving-photon intensity and its Cartesian projections."""
     import numpy as np
 
     samples = list(focal_plane_hits(path))
     if not samples:
-        raise SystemExit("No detected focal-plane hits were found in the trace CSV")
+        raise SystemExit("No surviving photons reached the focal plane in this CSV")
     values = np.asarray(samples, dtype=float)
     x, y, weights = values.T
     extent = max(float(np.max(np.abs(x))), float(np.max(np.abs(y))), 1.0e-6)
@@ -127,16 +127,18 @@ def draw_focal_plane(plt, path: Path, output: Path, bins: int, telescope: str):
         weights=weights,
         cmap="viridis",
     )
-    figure.colorbar(histogram[3], ax=image, label="weighted photons / bin")
+    figure.colorbar(histogram[3], ax=image, label="weighted surviving photons / bin")
     bin_edges = np.linspace(-extent, extent, bins + 1)
     top.hist(x, bins=bin_edges, weights=weights, color="tab:blue")
     right.hist(y, bins=bin_edges, weights=weights, orientation="horizontal", color="tab:blue")
     image.set(
-        xlabel="focal-plane x [m]", ylabel="focal-plane y [m]", title=f"{telescope} focal plane"
+        xlabel="focal-plane x [m]",
+        ylabel="focal-plane y [m]",
+        title=f"{telescope} focal plane",
     )
     image.set_aspect("equal", adjustable="box")
-    top.set(ylabel="weighted photons")
-    right.set(xlabel="weighted photons")
+    top.set(ylabel="weighted surviving photons")
+    right.set(xlabel="weighted surviving photons")
     top.tick_params(labelbottom=False)
     right.tick_params(labelleft=False)
     figure.savefig(output, dpi=160, bbox_inches="tight")
@@ -153,7 +155,10 @@ def main():
     parser.add_argument(
         "--focal-plane",
         action="store_true",
-        help="plot detected focal-plane hits and weighted x/y projections instead of ray paths",
+        help=(
+            "plot surviving focal-plane photons and weighted x/y projections "
+            "instead of photon paths"
+        ),
     )
     parser.add_argument("--bins", type=int, default=64, help="focal-plane histogram bins per axis")
     parser.add_argument(
