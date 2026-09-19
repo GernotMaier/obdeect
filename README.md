@@ -32,7 +32,7 @@ cmake --build build
 # Run the tests and executables
 ctest --test-dir build --output-on-failure
 # Run the Python unit tests
-pytest python/tests/test_plot_toy_mst.py
+python -m unittest discover -s python/tests
 ```
 
 ## Plotting and testing
