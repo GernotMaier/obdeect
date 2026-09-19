@@ -44,7 +44,7 @@ preview = true
 select = ["E", "F", "I", "UP"]
 
 [tool.towncrier]
-directory = "changes"
+directory = "doc/changes"
 filename = "CHANGELOG.md"
 package = "obdeect"
 underlines = ["", "", ""]
