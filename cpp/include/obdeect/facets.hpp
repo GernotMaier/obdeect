@@ -4,6 +4,7 @@
 #include "obdeect/tables.hpp"
 
 #include <limits>
+#include <cstdint>
 #include <vector>
 
 namespace obdeect {
@@ -28,6 +29,9 @@ struct FacetHit {
 };
 
 [[nodiscard]] inline bool is_valid(const CircularFacet& facet) {
+  for (const double value : facet.reflectivity.value) {
+    if (value > 1.0) return false;
+  }
   const auto normal = normalised_checked(facet.unit_normal);
   return normal.has_value() && std::isfinite(facet.centre_m.x) && std::isfinite(facet.centre_m.y) &&
          std::isfinite(facet.centre_m.z) && std::isfinite(facet.radius_m) && facet.radius_m > kEpsilon &&

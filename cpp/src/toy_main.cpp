@@ -89,7 +89,8 @@ int main(int argc, char** argv) {
     return 1;
   }
   output << std::setprecision(17);
-  output << "photon_id,wavelength_nm,status,point_count,path_length_m,x0_m,y0_m,z0_m,x1_m,y1_m,z1_m,x2_m,y2_m,z2_m\n";
+  output << "photon_id,wavelength_nm,emission_time_ns,source_weight,throughput,status,point_count,path_length_m,"
+            "x0_m,y0_m,z0_m,x1_m,y1_m,z1_m,x2_m,y2_m,z2_m,x3_m,y3_m,z3_m\n";
 
   std::size_t detected = 0;
   std::size_t camera_blocked = 0;
@@ -118,8 +119,10 @@ int main(int argc, char** argv) {
     detected += record.status == obdeect::PhotonStatus::detected;
     camera_blocked += record.status == obdeect::PhotonStatus::blocked_camera;
     mast_blocked += record.status == obdeect::PhotonStatus::blocked_mast;
-    output << record.photon_id << ',' << record.wavelength_nm << ',' << obdeect::to_string(record.status) << ','
-           << static_cast<int>(record.point_count) << ',' << record.path_length_m;
+    const double throughput = record.status == obdeect::PhotonStatus::detected ? 1.0 : 0.0;
+    output << record.photon_id << ',' << record.wavelength_nm << ',' << photon.time_ns << ',' << photon.weight << ','
+           << throughput << ',' << obdeect::to_string(record.status) << ',' << static_cast<int>(record.point_count)
+           << ',' << record.path_length_m;
     for (const auto& point : record.points_m) output << ',' << point.x << ',' << point.y << ',' << point.z;
     output << '\n';
   }

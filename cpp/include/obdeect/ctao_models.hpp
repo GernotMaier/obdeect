@@ -2,6 +2,7 @@
 
 #include "obdeect/ctao_optical_specs.hpp"
 
+#include <cstdint>
 #include <optional>
 #include <string_view>
 
@@ -77,7 +78,7 @@ struct CtaoReferenceModel {
           reference.primary_diameter_m / 2.0, 0.0, 0.0, std::nullopt, reference.primary,
           AxisymmetricMirror{reference.secondary.coefficient_m[0], 0.0,
                               reference.secondary_diameter_m / 2.0, secondary_surface},
-          reference.focal_length_m, 0.30};
+          2.5888, 0.30};
 }
 
 [[nodiscard]] inline CtaoReferenceModel sct_reference_model() {
@@ -88,7 +89,7 @@ struct CtaoReferenceModel {
           reference.primary_diameter_m / 2.0, 0.0, 0.0, std::nullopt, reference.primary,
           AxisymmetricMirror{reference.secondary.coefficient_m[0], 0.0,
                               reference.secondary_diameter_m / 2.0, secondary_surface},
-          reference.focal_length_m, 0.40};
+          1.16667 * 5.5863, 0.40};
 }
 
 [[nodiscard]] inline std::optional<CtaoReferenceModel> ctao_reference_model(std::string_view name) {

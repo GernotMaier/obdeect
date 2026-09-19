@@ -1,10 +1,13 @@
 cff-version: 1.2.0
 message: "If you use obdeect, please cite it using the metadata below."
-title: "obdeect: IACT Cherenkov-photon ray-tracing prototype"
+title: "obdeect: Ray tracing for imaging atmospheric Cherenkov telescopes"
 version: 0.1.0
 date-released: 2026-09-18
 license: BSD-3-Clause
 type: software
 authors:
-  - name: obdeect contributors
-abstract: "A C++20 IACT-only prototype for tracing blue Cherenkov photons through telescope optics and structure."
+  - given-names: Gernot
+    family-names: Maier
+    affiliation: DESY
+    orcid: 'https://orcid.org/0000-0001-9868-4700'
+abstract: "A C++20 IACT-only prototype for tracing photons through telescope optics and structure."

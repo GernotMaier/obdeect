@@ -58,15 +58,18 @@ int main(int argc, char** argv) {
     return 1;
   }
   output << std::setprecision(17)
-         << "photon_id,wavelength_nm,status,point_count,path_length_m,x0_m,y0_m,z0_m,x1_m,y1_m,z1_m,"
+         << "photon_id,wavelength_nm,emission_time_ns,source_weight,throughput,status,point_count,path_length_m,"
+            "x0_m,y0_m,z0_m,x1_m,y1_m,z1_m,"
             "x2_m,y2_m,z2_m,x3_m,y3_m,z3_m\n";
   std::size_t detected = 0;
   for (const auto& photon : photons) {
     auto path = obdeect::trace_ctao_reference(photon.ray, photon.photon_id, *model);
     path.wavelength_nm = photon.wavelength_nm;
     detected += path.status == obdeect::PhotonStatus::detected;
-    output << path.photon_id << ',' << path.wavelength_nm << ',' << obdeect::to_string(path.status) << ','
-           << static_cast<int>(path.point_count) << ',' << path.path_length_m;
+    const double throughput = path.status == obdeect::PhotonStatus::detected ? 1.0 : 0.0;
+    output << path.photon_id << ',' << path.wavelength_nm << ',' << photon.time_ns << ',' << photon.weight << ','
+           << throughput << ',' << obdeect::to_string(path.status) << ',' << static_cast<int>(path.point_count)
+           << ',' << path.path_length_m;
     for (const auto& point : path.points_m) output << ',' << point.x << ',' << point.y << ',' << point.z;
     output << '\n';
   }

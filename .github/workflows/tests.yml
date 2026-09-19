@@ -1,0 +1,33 @@
+name: Build and tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.14'
+      - name: Install Python package and test dependencies
+        run: python -m pip install --upgrade pip && python -m pip install . pytest
+      - name: Configure and build
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build --parallel
+      - name: Run native and Python tests
+        run: ctest --test-dir build --output-on-failure && pytest python/tests
+      - name: Run and render examples
+        run: python examples/run_examples.py --build build --output out/examples --photons 128
+  sanitizers:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Configure, build, and test with sanitizers
+        run: >-
+          cmake -S . -B build-sanitize -DCMAKE_BUILD_TYPE=Debug
+          -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer"
+          -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined"
+          && cmake --build build-sanitize --parallel
+          && ctest --test-dir build-sanitize --output-on-failure

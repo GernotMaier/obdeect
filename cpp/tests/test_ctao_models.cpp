@@ -32,7 +32,7 @@ int main() {
   invalid_model.focal_plane_radius_m = 0.0;
   require(!is_valid(invalid_model), "invalid reference aperture must fail closed");
   const auto imported = import_ctao_reference_model(
-      "LST", {"LSTN-design", "6.3.0", "sha256:fixture-for-test"});
+      "LST", {"LST", "6.3.0", "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"});
   require(imported.has_value() && imported->import.requires_segment_list,
           "import boundary must preserve explicit provenance and requirements");
   require(!import_ctao_reference_model("LST", {"", "6.3.0", "hash"}),

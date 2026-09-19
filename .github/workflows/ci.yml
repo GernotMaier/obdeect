@@ -1,33 +1,20 @@
-name: CI
+name: Quality
 
 on:
   push:
   pull_request:
 
 jobs:
-  lint-and-test:
+  lint:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
-          python-version: '3.12'
-      - name: Install C++ static analyser
-        run: sudo apt-get update && sudo apt-get install --yes clang-tidy
-      - name: Install Python package and linter
-        run: python -m pip install --upgrade pip ruff && python -m pip install .
+          python-version: '3.14'
+      - name: Install linters
+        run: python -m pip install --upgrade pip pre-commit ruff
+      - name: Run repository hooks
+        run: pre-commit run --all-files
       - name: Check Python formatting and lint
-        run: ruff format --check python tools && ruff check python tools
-      - name: Configure
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
-      - name: Build and C++ lint
-        run: cmake --build build --parallel && clang-tidy -p build cpp/src/toy_main.cpp cpp/tests/test_core.cpp cpp/tests/test_literature_mst.cpp
-      - name: Test
-        run: ctest --test-dir build --output-on-failure && python -m unittest discover python/tests
-      - name: Sanitiser tests
-        run: >-
-          cmake -S . -B build-sanitize -DCMAKE_BUILD_TYPE=Debug
-          -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer"
-          -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined"
-          && cmake --build build-sanitize --parallel
-          && ctest --test-dir build-sanitize --output-on-failure
+        run: ruff format --check python tools examples && ruff check python tools examples

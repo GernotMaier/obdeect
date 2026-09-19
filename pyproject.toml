@@ -5,9 +5,9 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "obdeect"
 version = "0.1.0"
-description = "IACT-only Cherenkov photon ray-tracing prototype"
+description = "Ray tracing for imaging atmospheric Cherenkov telescopes"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.14"
 license = {file = "LICENSE"}
 authors = [{name = "obdeect contributors"}]
 classifiers = [
@@ -16,10 +16,18 @@ classifiers = [
   "Programming Language :: C++",
   "Programming Language :: Python :: 3",
 ]
-dependencies = ["matplotlib>=3.8"]
+dependencies = [
+  "matplotlib",
+  "cmake",
+  "ninja",
+]
+
+[project.optional-dependencies]
+dev = ["pre-commit", "pytest", "ruff", "towncrier"]
 
 [project.scripts]
 obdeect-plot-toy = "obdeect.plotting:main"
+obdeect-import-simulation-models = "obdeect.model_import:main"
 
 [tool.setuptools]
 package-dir = {"" = "python"}
@@ -28,8 +36,27 @@ package-dir = {"" = "python"}
 where = ["python"]
 
 [tool.ruff]
-target-version = "py310"
+target-version = "py314"
 line-length = 100
+preview = true
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP"]
+
+[tool.towncrier]
+directory = "docs/changes"
+filename = "CHANGELOG.md"
+package = "obdeect"
+underlines = ["", "", ""]
+title_format = "## [{version}] - {project_date}"
+issue_format = "#{issue}"
+
+[[tool.towncrier.type]]
+directory = "feature"
+name = "Added"
+showcontent = true
+
+[[tool.towncrier.type]]
+directory = "bugfix"
+name = "Fixed"
+showcontent = true

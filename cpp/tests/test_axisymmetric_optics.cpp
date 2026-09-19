@@ -49,6 +49,16 @@ int main() {
           "normalised-radius conversion at reference radius");
   const auto ssts = ssts_design_reference();
   const auto scts = scts_design_reference();
+  require(std::abs(scts.secondary.sag(0.0) - 8.37945) < 1e-12,
+          "SCT secondary vertex uses sag scale R, not centimetres or aperture radius");
+  const auto scaled = reference_radius_polynomial({1.5, 0.25}, 4.0);
+  require(std::abs(scaled.sag(4.0) - 7.0) < 1e-12 &&
+              std::abs(scaled.radial_slope(4.0) - 0.5) < 1e-12,
+          "reference radius scales both height and radial slope");
+  const AxisymmetricMirror offset_plane{0, 0, 2, reference_radius_polynomial({1.5}, 4.0)};
+  const auto offset_hit = intersect_axisymmetric_mirror({{0, 0, 1}, {0, 0, 1}}, offset_plane);
+  require(offset_hit && std::abs(offset_hit->point_m.z - 6.0) < 1e-12,
+          "nonzero constant sag must enter intersection seed");
   require(std::isfinite(ssts.primary.sag(0.5 * ssts.primary_diameter_m)), "SSTS primary profile finite");
   require(std::isfinite(scts.secondary.sag(0.5 * scts.secondary_diameter_m)), "SCTS secondary profile finite");
   require(kMstNectarCam.family == TelescopeOpticalFamily::mst_modified_davies_cotton,

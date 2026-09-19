@@ -57,6 +57,10 @@ struct AxisymmetricHit {
 };
 
 [[nodiscard]] inline bool is_valid(const AxisymmetricMirror& mirror) {
+  if (!std::isfinite(mirror.surface.radial_scale_m) || mirror.surface.radial_scale_m <= kEpsilon)
+    return false;
+  for (const double coefficient : mirror.surface.coefficient_m)
+    if (!std::isfinite(coefficient)) return false;
   return std::isfinite(mirror.vertex_z_m) && std::isfinite(mirror.inner_radius_m) &&
          std::isfinite(mirror.outer_radius_m) && mirror.inner_radius_m >= 0.0 &&
          mirror.outer_radius_m > kEpsilon && mirror.inner_radius_m < mirror.outer_radius_m;
@@ -74,7 +78,7 @@ struct AxisymmetricHit {
   }
   if (std::abs(direction->z) < kEpsilon) return std::nullopt;
 
-  double distance_m = (mirror.vertex_z_m - ray.position_m.z) / direction->z;
+  double distance_m = (mirror.vertex_z_m + mirror.surface.sag(0.0) - ray.position_m.z) / direction->z;
   if (!std::isfinite(distance_m) || distance_m <= minimum_t_m) return std::nullopt;
   constexpr int maximum_iterations = 24;
   constexpr double residual_tolerance_m = 1.0e-12;
@@ -133,7 +137,7 @@ struct AxisymmetricHit {
   return surface;
 }
 
-// Some sim_telarray SC prescriptions specify centimetre sag coefficients in
+// A general polynomial can specify centimetre sag coefficients in
 // powers of r/R, where R is an explicit reference radius. Keep this distinct
 // from centimetre_even_polynomial_to_metres(): conflating the conventions can
 // produce physically nonsensical large-radius surfaces.
@@ -145,6 +149,18 @@ struct AxisymmetricHit {
   for (std::size_t index = 0; index < coefficient_cm.size(); ++index) {
     surface.coefficient_m[index] = coefficient_cm[index] * 0.01;
   }
+  return surface;
+}
+
+// sim_telarray's reference-radius convention is z = R sum a_i (r/R)^(2i).
+// R is in metres here. It scales BOTH sag and radius, independently of the
+// physical aperture. See sim_config.c's parameter / R^(2i-1) conversion.
+[[nodiscard]] inline EvenPolynomialSurface reference_radius_polynomial(
+    const std::array<double, 13>& coefficients, double reference_radius_m) {
+  EvenPolynomialSurface surface{};
+  surface.radial_scale_m = reference_radius_m;
+  for (std::size_t i = 0; i < coefficients.size(); ++i)
+    surface.coefficient_m[i] = coefficients[i] * reference_radius_m;
   return surface;
 }
 
