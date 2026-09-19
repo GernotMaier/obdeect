@@ -96,14 +96,6 @@ declared model-file assets with SHA-256 hashes. It neither downloads nor copies
 external model data.
 
 ```bash
-python tools/import_simulation_models.py /path/to/simulation-models LSTN-design \
-  --version 6.3.0 --output lstn-design.ir.json
-```
-
-After installation, use the equivalent stable command without relying on the
-checkout layout:
-
-```bash
 obdeect-import-simulation-models /path/to/simulation-models LSTN-design \
   --version 6.3.0 --output lstn-design.ir.json
 ```
@@ -116,8 +108,6 @@ The emitted `obdeect.simulation-models-ir.v1` JSON is the auditable hand-off
 from model selection to the future C++ scene compiler. An unresolved parameter
 file, missing declared asset, identity mismatch, or unsafe path fails the
 import; no field is silently discarded.
-
-
 
 ## Coordinate and model convention
 
@@ -145,7 +135,6 @@ The C++20 core is split by responsibility so a photon kernel never needs Python,
 | `scene.hpp`, `trace.hpp` | Immutable directed toy-scene compilation and scalar SoA block tracing. |
 | `diagnostics.hpp` | Status/weight closure summary. |
 | `model_import.hpp` | Canonical CTAO model provenance/import target. |
-
 
 ## Linting
 
