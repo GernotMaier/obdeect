@@ -32,8 +32,9 @@ struct SchwarzschildCouderReference {
 };
 
 // Coefficients are converted from the simulation-models 6.3.0 SSTS/SCTS
-// records. They are surfaces only; segment layout, reference radii, holes and
-// mirror vertex transforms remain model-import responsibilities.
+// records. SSTS states physical centimetre powers; SCTS is retained with its
+// separately normalised convention. These are surfaces only: segment layout,
+// holes and mirror vertex transforms remain import work.
 [[nodiscard]] inline SchwarzschildCouderReference ssts_design_reference() {
   return {TelescopeOpticalFamily::sst_sc,
           2.15,
@@ -52,12 +53,12 @@ struct SchwarzschildCouderReference {
           5.5863,
           9.6638,
           5.4166,
-          centimetre_even_polynomial_to_metres(
+          centimetre_normalised_radius_polynomial_to_metres(
               {0.0, 0.111112, -0.00698726, -0.00206487, -0.00689219, 0.0301911, -0.119762,
-               0.319791, -0.602077, 0.777846, -0.661167, 0.333439, -0.0764291}),
-          centimetre_even_polynomial_to_metres(
+               0.319791, -0.602077, 0.777846, -0.661167, 0.333439, -0.0764291}, 9.6638 / 2.0),
+          centimetre_normalised_radius_polynomial_to_metres(
               {1.5, 0.416667, 0.145816, -0.712012, 4.17685, -23.1617, 118.844, -520.501,
-               1802.98, -4605.3, 8019.1, -8422.9, 4004.61})};
+               1802.98, -4605.3, 8019.1, -8422.9, 4004.61}, 5.4166 / 2.0)};
 }
 
 }  // namespace obdeect

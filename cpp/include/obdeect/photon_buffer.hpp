@@ -69,7 +69,9 @@ struct PathRecord {
   std::uint64_t photon_id{};
   double wavelength_nm{400.0};
   PhotonStatus status{PhotonStatus::missed_primary};
-  std::array<Vec3, 3> points_m{};
+  // entrance, M1, M2 (when present), focal plane.  Single-reflector paths
+  // simply use the first three entries.
+  std::array<Vec3, 4> points_m{};
   std::uint8_t point_count{};
   double path_length_m{};
   Vec3 final_direction{};

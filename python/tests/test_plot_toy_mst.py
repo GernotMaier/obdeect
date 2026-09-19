@@ -28,6 +28,10 @@ class TestTracePathReader(unittest.TestCase):
         self.assertEqual(paths[0], ("detected", [(1.0, 2.0, 20.0), (1.0, 2.0, 0.0), (0.1, 0.2, 4.875)]))
         self.assertEqual(paths[1], ("blocked_mast", [(3.0, 4.0, 20.0), (3.0, 4.0, 8.0)]))
 
+    def test_all_reference_telescope_outlines_are_declared(self):
+        # T-VIS-010: every C++ catalogue name is selectable by the plot CLI.
+        self.assertEqual(PLOT.TELESCOPE_NAMES, ("toy-mst", "LST", "MST", "SST", "SCT"))
+
 
 if __name__ == "__main__":
     unittest.main()

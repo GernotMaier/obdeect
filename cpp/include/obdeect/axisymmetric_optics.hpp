@@ -5,6 +5,7 @@
 
 #include <array>
 #include <cstddef>
+#include <limits>
 
 namespace obdeect {
 
@@ -14,9 +15,14 @@ namespace obdeect {
 // deliberately independent of segmentation and material response.
 struct EvenPolynomialSurface {
   std::array<double, 13> coefficient_m{};
+  // One metre retains the conventional physical-power form.  SC imported
+  // prescriptions may instead state powers of r / radial_scale_m.
+  double radial_scale_m{1.0};
 
   [[nodiscard]] double sag(double radius_m) const {
-    const double radius_squared = radius_m * radius_m;
+    if (!std::isfinite(radial_scale_m) || radial_scale_m <= kEpsilon) return std::numeric_limits<double>::quiet_NaN();
+    const double normalised_radius = radius_m / radial_scale_m;
+    const double radius_squared = normalised_radius * normalised_radius;
     double value = 0.0;
     for (auto iterator = coefficient_m.rbegin(); iterator != coefficient_m.rend(); ++iterator) {
       value = value * radius_squared + *iterator;
@@ -25,13 +31,15 @@ struct EvenPolynomialSurface {
   }
 
   [[nodiscard]] double radial_slope(double radius_m) const {
-    const double radius_squared = radius_m * radius_m;
+    if (!std::isfinite(radial_scale_m) || radial_scale_m <= kEpsilon) return std::numeric_limits<double>::quiet_NaN();
+    const double normalised_radius = radius_m / radial_scale_m;
+    const double radius_squared = normalised_radius * normalised_radius;
     double derivative_over_radius = 0.0;
     for (std::size_t index = coefficient_m.size(); index-- > 1;) {
       derivative_over_radius = derivative_over_radius * radius_squared +
                                2.0 * static_cast<double>(index) * coefficient_m[index];
     }
-    return radius_m * derivative_over_radius;
+    return radius_m * derivative_over_radius / (radial_scale_m * radial_scale_m);
   }
 };
 
@@ -121,6 +129,21 @@ struct AxisymmetricHit {
   EvenPolynomialSurface surface{};
   for (std::size_t index = 0; index < coefficient_cm.size(); ++index) {
     surface.coefficient_m[index] = coefficient_cm[index] * std::pow(0.01, 1.0 - 2.0 * index);
+  }
+  return surface;
+}
+
+// Some sim_telarray SC prescriptions specify centimetre sag coefficients in
+// powers of r/R, where R is an explicit reference radius. Keep this distinct
+// from centimetre_even_polynomial_to_metres(): conflating the conventions can
+// produce physically nonsensical large-radius surfaces.
+[[nodiscard]] inline EvenPolynomialSurface centimetre_normalised_radius_polynomial_to_metres(
+    const std::array<double, 13>& coefficient_cm, double radial_scale_m) {
+  EvenPolynomialSurface surface{};
+  if (!std::isfinite(radial_scale_m) || radial_scale_m <= kEpsilon) return surface;
+  surface.radial_scale_m = radial_scale_m;
+  for (std::size_t index = 0; index < coefficient_cm.size(); ++index) {
+    surface.coefficient_m[index] = coefficient_cm[index] * 0.01;
   }
   return surface;
 }

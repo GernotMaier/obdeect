@@ -1,10 +1,10 @@
 # obdeect
 
 `obdeect` is an IACT-only ray-tracing prototype for blue Cherenkov photons.
-The first runnable slice is deliberately small: it traces a 400-nm parallel
-artificial source through one spherical, MST-inspired primary mirror, a camera
-shadow and four mast supports to a focal screen. It is not yet a CTAO model or
-a CORSIKA7 reader; those remain later compatibility milestones.
+Its first runnable slice traces a 400-nm artificial source through a simple
+MST structure. A separate reference executable provides the common optical
+chain for CTAO LST, MST, SST and SCT families. It is not a CORSIKA7 reader or a
+sim_telarray replacement.
 
 ## Repository layout
 
@@ -25,8 +25,10 @@ cmake -S . -B build
 cmake --build build
 ctest --test-dir build --output-on-failure
 ./build/obdeect_toy --photons 100000 --output toy_mst_paths.csv
+./build/obdeect_ctao --telescope LST --photons 100000 --output lst_paths.csv
 python -m pip install .
 obdeect-plot-toy toy_mst_paths.csv --output toy_mst_paths.png
+obdeect-plot-toy lst_paths.csv --telescope LST --output lst_paths.png
 python -m unittest python/tests/test_plot_toy_mst.py
 ```
 
@@ -50,6 +52,17 @@ The current CSV stores the traced path and wavelength. Time and source weight
 are retained by the C++ `OpticalPhoton` type and will be added to the public
 result table together with wavelength-dependent throughput in the next API
 revision.
+
+## CTAO reference models
+
+`obdeect_ctao --telescope LST|MST|SST|SCT` writes ragged ray paths for the
+same Python plotter. The catalogue is pinned to public `simulation-models`
+6.3.0 identifiers and its import API requires explicit provenance. It contains
+optical prescriptions only: it does not load model JSON, facet positions,
+camera pixels, alignment, structures, throughput, or the SCT coordinate
+transform. LST ideal-paraboloid and MST central-sphere baselines are executable
+and tested; SST/SCT are two-mirror prescription scaffolding awaiting their
+model-specific geometry validation.
 
 The executable needs only a C++20 compiler and the standard library. The
 Python package declares Matplotlib as its only runtime dependency and installs

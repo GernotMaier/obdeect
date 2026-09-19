@@ -44,6 +44,9 @@ int main() {
   const std::array<double, 13> centimetre_profile{0.0, 0.25};
   const auto metre_profile = centimetre_even_polynomial_to_metres(centimetre_profile);
   require(std::abs(metre_profile.sag(1.0) - 25.0) < 1e-12, "cm polynomial conversion at 1 m");
+  const auto normalised_profile = centimetre_normalised_radius_polynomial_to_metres({0.0, 25.0}, 2.0);
+  require(std::abs(normalised_profile.sag(2.0) - 0.25) < 1e-12,
+          "normalised-radius conversion at reference radius");
   const auto ssts = ssts_design_reference();
   const auto scts = scts_design_reference();
   require(std::isfinite(ssts.primary.sag(0.5 * ssts.primary_diameter_m)), "SSTS primary profile finite");
