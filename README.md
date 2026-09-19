@@ -51,6 +51,13 @@ LST (Large-Sized Telescope) example run:
 obdeect-plot-toy lst_paths.csv --telescope LST --output lst_paths.png
 ```
 
+Create a focal-plane intensity image with weighted 1-D projections:
+
+```bash
+obdeect-plot-toy lst_paths.csv --telescope LST --focal-plane --bins 96 \
+  --output lst_focal_plane.png
+```
+
 ## Artificial calibration sources
 
 The baseline executable uses 400-nm photons and supports three deterministic

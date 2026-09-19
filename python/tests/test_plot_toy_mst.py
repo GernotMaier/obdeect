@@ -33,6 +33,26 @@ class TestTracePathReader(unittest.TestCase):
         # T-VIS-010: every C++ catalogue name is selectable by the plot CLI.
         self.assertEqual(PLOT.TELESCOPE_NAMES, ("toy-mst", "LST", "MST", "SST", "SCT"))
 
+    def test_extracts_weighted_detected_focal_plane_hits(self):
+        csv_text = (
+            "photon_id,status,point_count,source_weight,throughput,x0_m,y0_m,z0_m,x1_m,y1_m,z1_m\n"
+            "1,detected,2,4,0.5,0,0,20,0.1,-0.2,4.875\n"
+            "2,missed_screen,2,8,0,0,0,20,2,2,4.875\n"
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "paths.csv"
+            path.write_text(csv_text)
+            hits = list(PLOT.focal_plane_hits(path))
+        self.assertEqual(hits, [(0.1, -0.2, 2.0)])
+
+    def test_old_csv_defaults_focal_plane_weight_to_one(self):
+        csv_text = "status,point_count,x0_m,y0_m,z0_m\ndetected,1,0.3,0.4,4.875\n"
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "paths.csv"
+            path.write_text(csv_text)
+            hits = list(PLOT.focal_plane_hits(path))
+        self.assertEqual(hits, [(0.3, 0.4, 1.0)])
+
 
 if __name__ == "__main__":
     unittest.main()
