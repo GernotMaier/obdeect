@@ -158,7 +158,7 @@ inline std::vector<OpticalPhoton> laser_photons(std::size_t count, double pupil_
                                 2.0 * std::numbers::pi;
     const Vec3 position = beam_origin + *basis_x * (position_radius * std::cos(position_phi)) +
                           basis_y * (position_radius * std::sin(position_phi));
-    const std::size_t direction_index = (index * 37U + 17U) % count;
+    const std::size_t direction_index = (index * (count - 1U) + 17U) % count;
     const double u = (static_cast<double>(direction_index) + 0.5) / static_cast<double>(count);
     const double angle = source.divergence_half_angle_rad * std::sqrt(u);
     const double phi = std::fmod(static_cast<double>(direction_index) * golden_ratio_conjugate, 1.0) *
