@@ -10,8 +10,7 @@ from pathlib import Path
 # while the supported installed entry point remains ``obdeect-import-simulation-models``.
 sys.path.insert(0, str(Path(__file__).parents[1] / "python"))
 
-from obdeect.model_import import ImportError, main, resolve_model
-
+from obdeect.model_import import main
 
 if __name__ == "__main__":
     main()

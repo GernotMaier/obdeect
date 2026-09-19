@@ -20,41 +20,35 @@ class TestSimulationModelsImport(unittest.TestCase):
         production.mkdir(parents=True)
         parameter.mkdir(parents=True)
         (production / "TEST.json").write_text(
-            json.dumps(
-                {
-                    "model_version": "1.2.3",
-                    "production_table_name": "TEST",
-                    "parameters": {"TEST": {"focal_length": "1.0.0", "mirror_list": "1.0.0"}},
-                }
-            )
+            json.dumps({
+                "model_version": "1.2.3",
+                "production_table_name": "TEST",
+                "parameters": {"TEST": {"focal_length": "1.0.0", "mirror_list": "1.0.0"}},
+            })
         )
         (parameter / "focal_length-1.0.0.json").write_text(
-            json.dumps(
-                {
-                    "instrument": "TEST",
-                    "parameter": "focal_length",
-                    "parameter_version": "1.0.0",
-                    "type": "float64",
-                    "unit": "cm",
-                    "value": 123.0,
-                    "file": False,
-                }
-            )
+            json.dumps({
+                "instrument": "TEST",
+                "parameter": "focal_length",
+                "parameter_version": "1.0.0",
+                "type": "float64",
+                "unit": "cm",
+                "value": 123.0,
+                "file": False,
+            })
         )
         mirror = root / "model_parameters" / "TEST" / "mirror_list"
         mirror.mkdir()
         (mirror / "mirror_list-1.0.0.json").write_text(
-            json.dumps(
-                {
-                    "instrument": "TEST",
-                    "parameter": "mirror_list",
-                    "parameter_version": "1.0.0",
-                    "type": "string",
-                    "unit": None,
-                    "value": "mirrors.dat",
-                    "file": True,
-                }
-            )
+            json.dumps({
+                "instrument": "TEST",
+                "parameter": "mirror_list",
+                "parameter_version": "1.0.0",
+                "type": "string",
+                "unit": None,
+                "value": "mirrors.dat",
+                "file": True,
+            })
         )
         if asset_exists:
             assets = root / "model_parameters" / "Files"

@@ -27,7 +27,12 @@ def sha256(path: Path) -> str:
 
 
 def component(value: str) -> bool:
-    return isinstance(value, str) and value not in ("", ".", "..") and "/" not in value and "\\" not in value
+    return (
+        isinstance(value, str)
+        and value not in ("", ".", "..")
+        and "/" not in value
+        and "\\" not in value
+    )
 
 
 def within_root(path: Path, root: Path) -> Path:
@@ -69,7 +74,11 @@ def resolve_model(root: Path, model: str, version: str) -> dict[str, Any]:
     if manifest.get("production_table_name") != model:
         raise ImportError(f"manifest table name mismatch in {manifest_path}")
     tables = manifest.get("parameters")
-    if not isinstance(tables, dict) or set(tables) != {model} or not isinstance(tables[model], dict):
+    if (
+        not isinstance(tables, dict)
+        or set(tables) != {model}
+        or not isinstance(tables[model], dict)
+    ):
         raise ImportError("production manifest must contain exactly the requested parameter table")
 
     parameters: dict[str, Any] = {}
@@ -78,7 +87,9 @@ def resolve_model(root: Path, model: str, version: str) -> dict[str, Any]:
     for name, parameter_version in sorted(tables[model].items()):
         if not component(name) or not component(parameter_version):
             raise ImportError("parameter names and versions must be strings")
-        parameter_path = root / "model_parameters" / model / name / f"{name}-{parameter_version}.json"
+        parameter_path = (
+            root / "model_parameters" / model / name / f"{name}-{parameter_version}.json"
+        )
         parameter = load_json(within_root(parameter_path, root))
         if parameter.get("instrument") != model or parameter.get("parameter") != name:
             raise ImportError(f"parameter identity mismatch in {parameter_path}")
@@ -110,7 +121,9 @@ def resolve_model(root: Path, model: str, version: str) -> dict[str, Any]:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Import a pinned simulation-models production manifest.")
+    parser = argparse.ArgumentParser(
+        description="Import a pinned simulation-models production manifest."
+    )
     parser.add_argument("root", type=Path, help="path to the simulation-models repository root")
     parser.add_argument("model", help="production table, e.g. LSTN-design")
     parser.add_argument("--version", default="6.3.0", help="production model version")

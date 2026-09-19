@@ -12,13 +12,11 @@ def read_paths(path: Path):
         for row in csv.DictReader(handle):
             points = []
             for index in range(int(row["point_count"])):
-                points.append(
-                    (
-                        float(row[f"x{index}_m"]),
-                        float(row[f"y{index}_m"]),
-                        float(row[f"z{index}_m"]),
-                    )
-                )
+                points.append((
+                    float(row[f"x{index}_m"]),
+                    float(row[f"y{index}_m"]),
+                    float(row[f"z{index}_m"]),
+                ))
             yield row["status"], points
 
 

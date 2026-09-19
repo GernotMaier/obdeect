@@ -22,10 +22,12 @@ import jax
 # rather than an optical disagreement.
 jax.config.update("jax_enable_x64", True)
 
-import jax.numpy as jnp
-import numpy as np
-from iactrace import Telescope
-from iactrace.telescope.mirrors import spherical
+# JAX must be configured before importing jax.numpy; these imports therefore
+# intentionally follow the configuration call.
+import jax.numpy as jnp  # noqa: E402
+import numpy as np  # noqa: E402
+from iactrace import Telescope  # noqa: E402
+from iactrace.telescope.mirrors import spherical  # noqa: E402
 
 
 def load_csv(path: Path) -> list[dict[str, str]]:
@@ -34,9 +36,10 @@ def load_csv(path: Path) -> list[dict[str, str]]:
 
 
 def points(rows: list[dict[str, str]], index: int) -> np.ndarray:
-    return np.asarray(
-        [[float(row[f"x{index}_m"]), float(row[f"y{index}_m"]), float(row[f"z{index}_m"])] for row in rows]
-    )
+    return np.asarray([
+        [float(row[f"x{index}_m"]), float(row[f"y{index}_m"]), float(row[f"z{index}_m"])]
+        for row in rows
+    ])
 
 
 def main() -> None:
@@ -51,7 +54,14 @@ def main() -> None:
     with tempfile.TemporaryDirectory() as directory:
         output = Path(directory) / "paths.csv"
         subprocess.run(
-            [args.executable, "--photons", str(args.photons), "--no-structure", "--output", str(output)],
+            [
+                args.executable,
+                "--photons",
+                str(args.photons),
+                "--no-structure",
+                "--output",
+                str(output),
+            ],
             check=True,
             capture_output=True,
             text=True,
