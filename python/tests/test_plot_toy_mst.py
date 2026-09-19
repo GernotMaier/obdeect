@@ -5,7 +5,6 @@ import tempfile
 import unittest
 from pathlib import Path
 
-
 SCRIPT = Path(__file__).parents[1] / "obdeect" / "plotting.py"
 SPEC = importlib.util.spec_from_file_location("plot_toy_mst", SCRIPT)
 PLOT = importlib.util.module_from_spec(SPEC)
@@ -25,7 +24,9 @@ class TestTracePathReader(unittest.TestCase):
             path = Path(directory) / "paths.csv"
             path.write_text(csv_text)
             paths = list(PLOT.read_paths(path))
-        self.assertEqual(paths[0], ("detected", [(1.0, 2.0, 20.0), (1.0, 2.0, 0.0), (0.1, 0.2, 4.875)]))
+        self.assertEqual(
+            paths[0], ("detected", [(1.0, 2.0, 20.0), (1.0, 2.0, 0.0), (0.1, 0.2, 4.875)])
+        )
         self.assertEqual(paths[1], ("blocked_mast", [(3.0, 4.0, 20.0), (3.0, 4.0, 8.0)]))
 
     def test_all_reference_telescope_outlines_are_declared(self):

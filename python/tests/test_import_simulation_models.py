@@ -6,7 +6,6 @@ import tempfile
 import unittest
 from pathlib import Path
 
-
 SCRIPT = Path(__file__).parents[2] / "tools" / "import_simulation_models.py"
 SPEC = importlib.util.spec_from_file_location("import_simulation_models", SCRIPT)
 IMPORTER = importlib.util.module_from_spec(SPEC)
@@ -70,7 +69,10 @@ class TestSimulationModelsImport(unittest.TestCase):
             scene = IMPORTER.resolve_model(root, "TEST", "1.2.3")
         self.assertEqual(scene["format"], "obdeect.simulation-models-ir.v1")
         self.assertEqual(scene["parameters"]["focal_length"]["value"], 123.0)
-        self.assertEqual(set(scene["input_records"]), {"production_manifest", "parameter:focal_length", "parameter:mirror_list"})
+        self.assertEqual(
+            set(scene["input_records"]),
+            {"production_manifest", "parameter:focal_length", "parameter:mirror_list"},
+        )
         self.assertIn("mirror_list", scene["assets"])
         self.assertEqual(len(scene["assets"]["mirror_list"]["sha256"]), 64)
 
@@ -89,6 +91,35 @@ class TestSimulationModelsImport(unittest.TestCase):
             self.make_tree(root)
             with self.assertRaises(IMPORTER.ImportError):
                 IMPORTER.resolve_model(root, "../TEST", "1.2.3")
+
+    def test_manifest_parameter_traversal_and_missing_type(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "simulation-models"
+            self.make_tree(root)
+            parameter = root / "model_parameters/TEST/focal_length/focal_length-1.0.0.json"
+            data = json.loads(parameter.read_text())
+            del data["type"]
+            parameter.write_text(json.dumps(data))
+            with self.assertRaisesRegex(IMPORTER.ImportError, "incomplete"):
+                IMPORTER.resolve_model(root, "TEST", "1.2.3")
+            manifest = root / "productions/1.2.3/TEST.json"
+            data = json.loads(manifest.read_text())
+            data["parameters"]["TEST"] = {"../outside": "1.0.0"}
+            manifest.write_text(json.dumps(data))
+            with self.assertRaises(IMPORTER.ImportError):
+                IMPORTER.resolve_model(root, "TEST", "1.2.3")
+
+    def test_disabled_asset_and_metadata_preserved(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "simulation-models"
+            self.make_tree(root)
+            parameter = root / "model_parameters/TEST/mirror_list/mirror_list-1.0.0.json"
+            data = json.loads(parameter.read_text())
+            data.update(value=None, site="North", schema_version="0.4.0")
+            parameter.write_text(json.dumps(data))
+            result = IMPORTER.resolve_model(root, "TEST", "1.2.3")
+            self.assertEqual(result["parameters"]["mirror_list"]["site"], "North")
+            self.assertNotIn("mirror_list", result["assets"])
 
 
 if __name__ == "__main__":

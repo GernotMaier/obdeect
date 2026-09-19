@@ -21,7 +21,25 @@ class ImportError(ValueError):
 
 
 def sha256(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def component(value: str) -> bool:
+    return (
+        isinstance(value, str)
+        and value not in ("", ".", "..")
+        and ("/" not in value and "\\" not in value)
+    )
+
+
+def within_root(path: Path, root: Path) -> Path:
+    if not path.resolve().is_relative_to(root):
+        raise ImportError(f"source path escapes checkout: {path}")
+    return path
 
 
 def load_json(path: Path) -> dict[str, Any]:
@@ -41,33 +59,41 @@ def record(path: Path, root: Path) -> dict[str, str]:
 def resolve_model(root: Path, model: str, version: str) -> dict[str, Any]:
     """Return a complete, JSON-serializable model IR or raise ImportError."""
     root = root.resolve()
-    if Path(model).name != model or Path(version).name != version:
+    if not component(model) or not component(version):
         raise ImportError("model and version must be simple path components")
     manifest_path = root / "productions" / version / f"{model}.json"
-    manifest = load_json(manifest_path)
+    manifest = load_json(within_root(manifest_path, root))
     if manifest.get("model_version") != version:
         raise ImportError(f"manifest version mismatch in {manifest_path}")
     if manifest.get("production_table_name") != model:
         raise ImportError(f"manifest table name mismatch in {manifest_path}")
     tables = manifest.get("parameters")
-    if not isinstance(tables, dict) or set(tables) != {model} or not isinstance(tables[model], dict):
+    if (
+        not isinstance(tables, dict)
+        or set(tables) != {model}
+        or not isinstance(tables[model], dict)
+    ):
         raise ImportError("production manifest must contain exactly the requested parameter table")
 
     parameters: dict[str, Any] = {}
     records: dict[str, dict[str, str]] = {"production_manifest": record(manifest_path, root)}
     assets: dict[str, dict[str, str]] = {}
     for name, parameter_version in sorted(tables[model].items()):
-        if not isinstance(name, str) or not isinstance(parameter_version, str):
+        if not component(name) or not component(parameter_version):
             raise ImportError("parameter names and versions must be strings")
-        parameter_path = root / "model_parameters" / model / name / f"{name}-{parameter_version}.json"
-        parameter = load_json(parameter_path)
+        parameter_path = (
+            root / "model_parameters" / model / name / f"{name}-{parameter_version}.json"
+        )
+        parameter = load_json(within_root(parameter_path, root))
         if parameter.get("instrument") != model or parameter.get("parameter") != name:
             raise ImportError(f"parameter identity mismatch in {parameter_path}")
         if parameter.get("parameter_version") != parameter_version:
             raise ImportError(f"parameter version mismatch in {parameter_path}")
-        if "value" not in parameter or "unit" not in parameter or "file" not in parameter:
+        if not all(key in parameter for key in ("type", "value", "unit", "file")):
             raise ImportError(f"parameter record is incomplete: {parameter_path}")
-        parameters[name] = {key: parameter[key] for key in ("type", "unit", "value", "file")}
+        if not isinstance(parameter["file"], bool):
+            raise ImportError(f"file flag must be boolean: {parameter_path}")
+        parameters[name] = parameter
         records[f"parameter:{name}"] = record(parameter_path, root)
         if parameter["file"]:
             value = parameter["value"]
@@ -76,9 +102,9 @@ def resolve_model(root: Path, model: str, version: str) -> dict[str, Any]:
             # manufacturing an asset dependency.
             if value is None:
                 continue
-            if not isinstance(value, str) or Path(value).name != value:
+            if not component(value):
                 raise ImportError(f"unsafe or invalid asset name in {parameter_path}")
-            asset_path = root / "model_parameters" / "Files" / value
+            asset_path = within_root(root / "model_parameters" / "Files" / value, root)
             if not asset_path.is_file():
                 raise ImportError(f"declared model asset is missing: {asset_path}")
             assets[name] = record(asset_path, root)
@@ -95,7 +121,9 @@ def resolve_model(root: Path, model: str, version: str) -> dict[str, Any]:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Import a pinned simulation-models production manifest.")
+    parser = argparse.ArgumentParser(
+        description="Import a pinned simulation-models production manifest."
+    )
     parser.add_argument("root", type=Path, help="path to the simulation-models repository root")
     parser.add_argument("model", help="production table, e.g. LSTN-design")
     parser.add_argument("--version", default="6.3.0", help="production model version")

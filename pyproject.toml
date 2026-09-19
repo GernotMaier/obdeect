@@ -5,9 +5,9 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "obdeect"
 version = "0.1.0"
-description = "IACT-only Cherenkov photon ray-tracing prototype"
+description = "Ray tracing for imaging atmospheric Cherenkov telescopes"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.14"
 license = {file = "LICENSE"}
 authors = [{name = "obdeect contributors"}]
 classifiers = [
@@ -16,7 +16,11 @@ classifiers = [
   "Programming Language :: C++",
   "Programming Language :: Python :: 3",
 ]
-dependencies = ["matplotlib>=3.8"]
+dependencies = [
+  "matplotlib",
+  "cmake",
+  "ninja",
+]
 
 [project.scripts]
 obdeect-plot-toy = "obdeect.plotting:main"
@@ -28,7 +32,7 @@ package-dir = {"" = "python"}
 where = ["python"]
 
 [tool.ruff]
-target-version = "py310"
+target-version = "py314"
 line-length = 100
 
 [tool.ruff.lint]

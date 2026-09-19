@@ -89,7 +89,7 @@ int main(int argc, char** argv) {
     return 1;
   }
   output << std::setprecision(17);
-  output << "photon_id,wavelength_nm,status,point_count,path_length_m,x0_m,y0_m,z0_m,x1_m,y1_m,z1_m,x2_m,y2_m,z2_m\n";
+  output << "photon_id,wavelength_nm,status,point_count,path_length_m,x0_m,y0_m,z0_m,x1_m,y1_m,z1_m,x2_m,y2_m,z2_m,x3_m,y3_m,z3_m\n";
 
   std::size_t detected = 0;
   std::size_t camera_blocked = 0;

@@ -1,4 +1,7 @@
 #include "obdeect/sources.hpp"
+#include "obdeect/photon_input.hpp"
+#include <algorithm>
+#include <array>
 
 #include <cmath>
 #include <cstdlib>
@@ -20,6 +23,19 @@ int main() {
 
   // T-SRC-011: a zenith star is a parallel 400-nm source over the pupil.
   const auto star = star_photons(128, 6.0, {});
+  MemoryPhotonReader reader(star, {1, 2, 3, 4});
+  std::array<OpticalPhoton, 7> batch{};
+  std::size_t consumed = 0;
+  for (;;) {
+    const auto result = reader.read(batch);
+    require(result.context.event_id == 2 && result.context.telescope_id == 4,
+            "batch context is preserved");
+    for (std::size_t i = 0; i < result.count; ++i)
+      require(batch[i].photon_id == consumed + i, "chunking preserves photon identity and order");
+    consumed += result.count;
+    if (result.eof) break;
+  }
+  require(consumed == star.size() && reader.read(batch).count == 0, "EOF loses no photons");
   require(star.size() == 128, "star count");
   for (const auto& photon : star) {
     require(std::abs(norm(photon.ray.direction) - 1.0) < 1e-14, "star directions are unit");

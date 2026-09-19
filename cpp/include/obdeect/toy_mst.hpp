@@ -39,15 +39,15 @@ inline bool is_valid(const ToyMstConfig& config) {
 }
 
 
-inline std::vector<std::pair<Vec3, Vec3>> mast_legs(const ToyMstConfig& config) {
-  std::vector<std::pair<Vec3, Vec3>> legs;
+inline std::array<std::pair<Vec3, Vec3>, 4> mast_legs(const ToyMstConfig& config) {
+  std::array<std::pair<Vec3, Vec3>, 4> legs{};
   constexpr double base_radius_m = 4.2;
   constexpr double camera_support_radius_m = 0.7;
   for (int leg = 0; leg < 4; ++leg) {
     const double angle = static_cast<double>(leg) * std::numbers::pi / 2.0;
-    legs.push_back({{base_radius_m * std::cos(angle), base_radius_m * std::sin(angle), 0.30},
+    legs[leg] = {{base_radius_m * std::cos(angle), base_radius_m * std::sin(angle), 0.30},
                     {camera_support_radius_m * std::cos(angle), camera_support_radius_m * std::sin(angle),
-                     config.focal_length_m - config.camera_half_depth_m}});
+                     config.focal_length_m - config.camera_half_depth_m}};
   }
   return legs;
 }

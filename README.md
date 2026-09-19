@@ -1,35 +1,54 @@
 # obdeect
 
-`obdeect` is an IACT-only ray-tracing prototype for blue Cherenkov photons.
-Its first runnable slice traces a 400-nm artificial source through a simple
-MST structure. A separate reference executable provides the common optical
-chain for CTAO LST, MST, SST and SCT families. It is not a CORSIKA7 reader or a
-sim_telarray replacement.
+`obdeect` is fast ray-tracing code for imaging atmospheric Cherenkov telescopes (IACTs).
+
+Dependencies area C++20 compiler and the standard library for the core ray-tracing code.
 
 ## Repository layout
 
 ```text
 cpp/include/obdeect/  C++20 trace kernels and model types
 cpp/src/              executable entry points
-cpp/tests/            dependency-free C++ tests
 python/obdeect/       Python diagnostic package
-python/tests/         dependency-free Python tests
-docs/                 core architecture and implementation status
-.github/workflows/    formatting, lint, build and test CI
 ```
 
-## Build and run
+## Installation and testing
+
+Set up the environment:
 
 ```bash
-cmake -S . -B build
-cmake --build build
-ctest --test-dir build --output-on-failure
-./build/obdeect_toy --photons 100000 --output toy_mst_paths.csv
-./build/obdeect_ctao --telescope LST --photons 100000 --output lst_paths.csv
+python -m venv .venv
+source .venv/bin/activate
 python -m pip install .
+```
+
+Compile and run the C++ executables:
+
+```bash
+# Configure the build system
+cmake -S . -B build
+# Build the project
+cmake --build build
+# Run the tests and executables
+ctest --test-dir build --output-on-failure
+# Run the Python unit tests
+pytest python/tests/test_plot_toy_mst.py
+```
+
+## Plotting and testing
+
+MST (Medium-Sized Telescope) example run:
+
+```bash
+./build/obdeect_toy --photons 100000 --output toy_mst_paths.csv
 obdeect-plot-toy toy_mst_paths.csv --output toy_mst_paths.png
+```
+
+LST (Large-Sized Telescope) example run:
+
+```bash
+./build/obdeect_ctao --telescope LST --photons 100000 --output lst_paths.csv
 obdeect-plot-toy lst_paths.csv --telescope LST --output lst_paths.png
-python -m unittest python/tests/test_plot_toy_mst.py
 ```
 
 ## Artificial calibration sources
@@ -86,28 +105,7 @@ from model selection to the future C++ scene compiler. An unresolved parameter
 file, missing declared asset, identity mismatch, or unsafe path fails the
 import; no field is silently discarded.
 
-The executable needs only a C++20 compiler and the standard library. The
-Python package declares Matplotlib as its only runtime dependency and installs
-the `obdeect-plot-toy` command. `--no-structure` removes the camera and masts
-for the analytic one-mirror focus baseline.
 
-For contributor workflow, acceptance rules and local lint commands, see
-[CONTRIBUTING.md](CONTRIBUTING.md). The project is BSD-3-Clause licensed;
-citation metadata is in [CITATION.cff](CITATION.cff).
-
-The implemented C++ core layout and explicitly deferred integration layers are
-described in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
-
-The exact, test-gated path to a sim_telarray-replacement claim is maintained in
-[docs/SIMTELARRAY_REPLACEMENT.md](docs/SIMTELARRAY_REPLACEMENT.md).
-
-## Validation status
-
-The analytic one-sphere path has an executable IACTrace cross-check and the
-published MST central-facet `f=R/2` relation has a C++ test. Full 86-facet MST
-area, PSF and timing validation is intentionally not claimed yet; see
-[VALIDATION.md](VALIDATION.md) for measured residuals, literature references
-and the remaining eligibility criteria.
 
 ## Coordinate and model convention
 
@@ -117,3 +115,39 @@ the paraxial screen location `z=4.875 m`. The simple structure is four
 finite-cylinder support legs plus a circular camera face evaluated before the
 primary reflection. CSV records source, termination/mirror, and focal-screen
 vertices so the plot displays the actual traced path.
+
+## Core architecture status
+
+The C++20 core is split by responsibility so a photon kernel never needs Python, YAML, EventIO or a plotting dependency.
+
+| Component | Current implementation |
+| --- | --- |
+| `math.hpp` | `Vec3`, dot/cross/norm and checked direction normalisation. |
+| `photon_buffer.hpp`, `abi.hpp` | SoA input contract, result buffers, status values and validation. |
+| `source.hpp` | Deterministic 400-nm star, point illuminator and laser sources. |
+| `tables.hpp` | Immutable no-extrapolation 1-D response interpolation. |
+| `intersections.hpp`, `geometry.hpp` | Plane, sphere/cap, disk, finite cylinder and axisymmetric-surface dispatch. |
+| `interactions.hpp` | Checked specular reflection. |
+| `axisymmetric_optics.hpp` | Paraboloid/even-polynomial SC surfaces and forward Newton intersection. |
+| `facets.hpp` | Finite circular facet intersection, nearest-hit selection and tabulated coating response. |
+| `scene.hpp`, `trace.hpp` | Immutable directed toy-scene compilation and scalar SoA block tracing. |
+| `diagnostics.hpp` | Status/weight closure summary. |
+| `model_import.hpp` | Canonical CTAO model provenance/import target. |
+
+
+## Linting
+
+Install CMake, Ninja, a C++20 compiler, Python 3.14+, and the development
+tools:
+
+```bash
+python -m pip install --upgrade pip ruff
+python -m pip install .
+cmake --preset debug
+cmake --build --preset debug
+ctest --test-dir build/debug --output-on-failure
+python -m unittest python/tests/test_plot_toy_mst.py
+ruff format --check python
+ruff check python
+clang-format --dry-run --Werror cpp/include/obdeect/toy_mst.hpp cpp/src/toy_main.cpp cpp/tests/test_core.cpp
+```

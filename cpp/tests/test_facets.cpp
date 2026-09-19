@@ -38,6 +38,10 @@ int main() {
   require(!intersect_facet({{2.0, 0.0, 5.0}, {0.0, 0.0, -1.0}}, near, 400.0),
           "ray outside finite facet aperture must miss");
   require(!intersect_facet(on_axis, near, 700.0), "out-of-table wavelength must fail closed");
+  const std::array<double, 2> unphysical{1.1, 0.9};
+  auto invalid = near;
+  invalid.reflectivity = {wavelength_nm, unphysical};
+  require(!is_valid(invalid), "mirror coating cannot amplify photon weight");
 
   std::cout << "facet tests passed\n";
 }
