@@ -121,6 +121,14 @@ class TestSimulationModelsImport(unittest.TestCase):
             self.assertEqual(result["parameters"]["mirror_list"]["site"], "North")
             self.assertNotIn("mirror_list", result["assets"])
 
+    def test_accepts_repository_root_containing_data_package(self):
+        with tempfile.TemporaryDirectory() as directory:
+            checkout = Path(directory) / "simulation-models-repository"
+            root = checkout / "simulation-models"
+            self.make_tree(root)
+            result = IMPORTER.resolve_model(checkout, "TEST", "1.2.3")
+            self.assertEqual(result["model"], "TEST")
+
 
 if __name__ == "__main__":
     unittest.main()

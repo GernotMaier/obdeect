@@ -3,6 +3,7 @@
 #include "obdeect/ctao_models.hpp"
 
 #include <optional>
+#include <string>
 #include <string_view>
 
 namespace obdeect {
@@ -10,9 +11,9 @@ namespace obdeect {
 // Canonical import target. Parsers live outside the hot C++ kernels and must
 // populate provenance before a model can be compiled into a scene.
 struct ModelProvenance {
-  std::string_view model_name;
-  std::string_view model_version;
-  std::string_view content_hash;
+  std::string model_name;
+  std::string model_version;
+  std::string content_hash;
 };
 
 struct ImportedOpticalModel {
@@ -34,7 +35,14 @@ struct ImportedCtaoReferenceModel {
     std::string_view name, ModelProvenance provenance) {
   const auto optical = ctao_reference_model(name);
   if (!optical || provenance.model_name.empty() || provenance.model_version.empty() ||
-      provenance.content_hash.empty()) return std::nullopt;
+      provenance.content_hash.size() != 64 || provenance.model_name != name) {
+    return std::nullopt;
+  }
+  for (const char character : provenance.content_hash) {
+    if (!((character >= '0' && character <= '9') || (character >= 'a' && character <= 'f'))) {
+      return std::nullopt;
+    }
+  }
   return ImportedCtaoReferenceModel{*optical, {optical->family, provenance, true, true}};
 }
 

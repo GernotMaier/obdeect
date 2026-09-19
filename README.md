@@ -67,10 +67,10 @@ source models over the same entrance pupil:
 ./build/obdeect_toy --source laser --distance-m 50 --divergence-deg 0.1
 ```
 
-The current CSV stores the traced path and wavelength. Time and source weight
-are retained by the C++ `OpticalPhoton` type and will be added to the public
-result table together with wavelength-dependent throughput in the next API
-revision.
+CSV output stores every traced path vertex plus wavelength, emission time,
+source weight and the trace's wavelength-independent throughput. The latter is
+currently one for a detector-surface hit and zero for every loss; a compiled
+coating/material scene will replace it with wavelength-dependent transport.
 
 ## CTAO reference models
 
@@ -99,6 +99,18 @@ external model data.
 python tools/import_simulation_models.py /path/to/simulation-models LSTN-design \
   --version 6.3.0 --output lstn-design.ir.json
 ```
+
+After installation, use the equivalent stable command without relying on the
+checkout layout:
+
+```bash
+obdeect-import-simulation-models /path/to/simulation-models LSTN-design \
+  --version 6.3.0 --output lstn-design.ir.json
+```
+
+This command selects and hashes the source parameter records and their declared
+assets. It is provenance input for scene compilation, not a ray-tracing command
+and does not download, copy, or silently interpret model files.
 
 The emitted `obdeect.simulation-models-ir.v1` JSON is the auditable hand-off
 from model selection to the future C++ scene compiler. An unresolved parameter

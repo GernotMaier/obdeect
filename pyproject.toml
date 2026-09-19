@@ -22,8 +22,12 @@ dependencies = [
   "ninja",
 ]
 
+[project.optional-dependencies]
+dev = ["pre-commit", "pytest", "ruff", "towncrier"]
+
 [project.scripts]
 obdeect-plot-toy = "obdeect.plotting:main"
+obdeect-import-simulation-models = "obdeect.model_import:main"
 
 [tool.setuptools]
 package-dir = {"" = "python"}
@@ -37,3 +41,21 @@ line-length = 100
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP"]
+
+[tool.towncrier]
+directory = "changes"
+filename = "CHANGELOG.md"
+package = "obdeect"
+underlines = ["", "", ""]
+title_format = "## [{version}] - {project_date}"
+issue_format = "#{issue}"
+
+[[tool.towncrier.type]]
+directory = "feature"
+name = "Added"
+showcontent = true
+
+[[tool.towncrier.type]]
+directory = "bugfix"
+name = "Fixed"
+showcontent = true
