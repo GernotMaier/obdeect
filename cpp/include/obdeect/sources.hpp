@@ -3,6 +3,7 @@
 #include "obdeect/math.hpp"
 
 #include <cstdint>
+#include <limits>
 #include <numbers>
 #include <string_view>
 #include <vector>
@@ -15,6 +16,12 @@ struct OpticalPhoton {
   double wavelength_nm{400.0};
   double time_ns{};
   double weight{1.0};
+  // Input adapters retain raw-bunch provenance here.  A wavelength of zero
+  // means that the input did not specify a spectrum; it must be resolved by a
+  // spectrum adapter before wavelength-dependent transport.
+  std::uint64_t bunch_id{};
+  double emission_height_m{std::numeric_limits<double>::quiet_NaN()};
+  double emission_distance_m{std::numeric_limits<double>::quiet_NaN()};
 };
 
 enum class ArtificialSourceKind : std::uint8_t { star, illuminator, laser };
@@ -85,12 +92,11 @@ inline std::vector<OpticalPhoton> star_photons(std::size_t count, double pupil_r
   // Samples on a horizontal launch plane have different phases for an
   // off-axis plane wave.  Carry that phase as an emission time so translating
   // the launch plane cannot change arrival-time differences at the pupil.
-  constexpr double speed_of_light_m_per_ns = 0.299792458;
   const Vec3 reference{0.0, 0.0, source.source_plane_z_m};
   for (std::size_t index = 0; index < positions.size(); ++index) {
     photons.push_back({{positions[index], *direction}, static_cast<std::uint64_t>(index),
                        source.wavelength_nm, dot(*direction, positions[index] - reference) /
-                                                 speed_of_light_m_per_ns,
+                                                 kSpeedOfLightMPerNs,
                        1.0});
   }
   return photons;

@@ -42,7 +42,8 @@ void usage() {
   std::cout << "Usage: obdeect_toy [--photons N] [--output paths.csv] [--no-structure]\n"
             << "                    [--source star|illuminator|laser] [--field-x-deg D]\n"
             << "                    [--field-y-deg D] [--distance-m D] [--divergence-deg D]\n"
-            << "Trace 400-nm artificial photons through a simple MST-inspired spherical\n"
+            << "                    [--wavelength-nm D]\n"
+            << "Trace monochromatic artificial photons through a simple MST-inspired spherical\n"
             << "mirror, camera shadow and four mast supports.\n";
 }
 
@@ -57,6 +58,7 @@ int main(int argc, char** argv) {
   double field_y_deg = 0.0;
   double distance_m = 50.0;
   double divergence_deg = 0.0;
+  double wavelength_nm = 400.0;
   for (int index = 1; index < argc; ++index) {
     const std::string argument{argv[index]};
     if (argument == "--photons" && index + 1 < argc && parse_size(argv[++index], photon_count)) continue;
@@ -77,6 +79,10 @@ int main(int argc, char** argv) {
     }
     if (argument == "--divergence-deg" && index + 1 < argc && parse_double(argv[++index], divergence_deg) &&
         divergence_deg >= 0.0) {
+      continue;
+    }
+    if (argument == "--wavelength-nm" && index + 1 < argc && parse_double(argv[++index], wavelength_nm) &&
+        wavelength_nm > 0.0) {
       continue;
     }
     usage();
@@ -100,14 +106,14 @@ int main(int argc, char** argv) {
   if (source_kind == obdeect::ArtificialSourceKind::star) {
     photons = obdeect::star_photons(photon_count, config.mirror_aperture_radius_m,
                                     {field_x_deg * radians_per_degree, field_y_deg * radians_per_degree,
-                                     distance_m, 400.0});
+                                     distance_m, wavelength_nm});
   } else if (source_kind == obdeect::ArtificialSourceKind::illuminator) {
     photons = obdeect::illuminator_photons(photon_count, config.mirror_aperture_radius_m,
-                                            {{0.0, 0.0, distance_m}, 400.0, 1.0});
+                                            {{0.0, 0.0, distance_m}, wavelength_nm, 1.0});
   } else {
     photons = obdeect::laser_photons(photon_count, config.mirror_aperture_radius_m,
                                       {{0.0, 0.0, -1.0}, distance_m,
-                                       divergence_deg * radians_per_degree, 400.0});
+                                       divergence_deg * radians_per_degree, wavelength_nm});
   }
   if (photons.size() != photon_count) {
     std::cerr << "Cannot generate the requested source photons\n";
@@ -127,7 +133,7 @@ int main(int argc, char** argv) {
     output << '\n';
   }
 
-  std::cout << "MST baseline: " << photon_count << " artificial 400-nm " << obdeect::to_string(source_kind)
+  std::cout << "MST baseline: " << photon_count << " artificial " << wavelength_nm << "-nm " << obdeect::to_string(source_kind)
             << " photons\n"
             << "  detected: " << detected << " (" << 100.0 * detected / photon_count << "%)\n"
             << "  camera shadow: " << camera_blocked << "\n"

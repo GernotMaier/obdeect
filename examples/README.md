@@ -13,7 +13,7 @@ The script runs a toy telescope with a star, point flasher and divergent laser;
 an ideal parabolic LST on/off axis; and the continuous MST sphere reference.
 Each case writes CSV, a PNG of the actual paths, and status counts in
 `summary.json`. The script fails on subprocess errors, malformed CSV,
-missing photons or a setup with no focal-plane hits.
+missing photons, or missing focal-plane hits for cases that are expected to detect light.
 
 These examples exercise analytic geometry and source sampling. Their focal
 screen counts are not photoelectron counts or CTAO effective areas. The point

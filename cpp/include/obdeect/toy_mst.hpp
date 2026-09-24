@@ -52,6 +52,40 @@ inline std::array<std::pair<Vec3, Vec3>, 4> mast_legs(const ToyMstConfig& config
   return legs;
 }
 
+struct ToyObstructionHit {
+  double distance_m{};
+  PhotonStatus status{PhotonStatus::blocked_camera};
+};
+
+[[nodiscard]] inline std::optional<ToyObstructionHit> nearest_toy_obstruction(const Ray& ray,
+                                                                                 const ToyMstConfig& config) {
+  if (!config.include_structure) return std::nullopt;
+  std::optional<ToyObstructionHit> nearest;
+  const auto consider = [&nearest](std::optional<double> candidate, PhotonStatus status) {
+    if (candidate && (!nearest || *candidate < nearest->distance_m)) {
+      nearest = ToyObstructionHit{*candidate, status};
+    }
+  };
+
+  const Vec3 camera_front{0.0, 0.0, config.focal_length_m + config.camera_half_depth_m};
+  const Vec3 camera_back{0.0, 0.0, config.focal_length_m - config.camera_half_depth_m};
+  if (config.camera_half_depth_m <= kEpsilon) {
+    // Preserve the documented zero-depth configuration as an opaque disk.
+    consider(intersect_disk_z(ray, config.focal_length_m, config.camera_radius_m), PhotonStatus::blocked_camera);
+  } else {
+    consider(intersect_closed_finite_cylinder(ray, camera_front, camera_back, config.camera_radius_m),
+             PhotonStatus::blocked_camera);
+  }
+  for (const auto& [a, b] : mast_legs(config)) {
+    consider(intersect_closed_finite_cylinder(ray, a, b, config.mast_radius_m), PhotonStatus::blocked_mast);
+  }
+  return nearest;
+}
+
+[[nodiscard]] inline bool occurs_before(const ToyObstructionHit& obstruction, double boundary_m) {
+  return obstruction.distance_m < boundary_m;
+}
+
 inline PathRecord trace_toy_mst(const Ray& input, std::uint64_t photon_id, const ToyMstConfig& config) {
   PathRecord record{};
   record.photon_id = photon_id;
@@ -66,33 +100,16 @@ inline PathRecord trace_toy_mst(const Ray& input, std::uint64_t photon_id, const
   }
   Ray ray{input.position_m, *direction};
   record.final_direction = ray.direction;
-  if (config.include_structure) {
-    std::optional<std::pair<double, PhotonStatus>> nearest_obstruction;
-    const auto consider_obstruction = [&nearest_obstruction](std::optional<double> candidate,
-                                                               PhotonStatus status) {
-      if (candidate && (!nearest_obstruction || *candidate < nearest_obstruction->first)) {
-        nearest_obstruction = std::make_pair(*candidate, status);
-      }
-    };
-    const double camera_front_z = config.focal_length_m + config.camera_half_depth_m;
-    consider_obstruction(intersect_disk_z(ray, camera_front_z, config.camera_radius_m),
-                         PhotonStatus::blocked_camera);
-    for (const auto& [a, b] : mast_legs(config)) {
-      consider_obstruction(intersect_finite_cylinder(ray, a, b, config.mast_radius_m),
-                           PhotonStatus::blocked_mast);
-    }
-    if (nearest_obstruction) {
-      record.status = nearest_obstruction->second;
-      record.points_m[1] = ray.position_m + ray.direction * nearest_obstruction->first;
-      record.point_count = 2;
-      record.path_length_m = nearest_obstruction->first;
-      record.final_direction = ray.direction;
-      return record;
-    }
-  }
-
   const Vec3 mirror_center{0.0, 0.0, config.mirror_radius_m};
   const auto mirror_t = intersect_lower_spherical_cap(ray, mirror_center, config.mirror_radius_m);
+  const auto incoming_obstruction = nearest_toy_obstruction(ray, config);
+  if (incoming_obstruction && (!mirror_t || occurs_before(*incoming_obstruction, *mirror_t))) {
+    record.status = incoming_obstruction->status;
+    record.points_m[1] = ray.position_m + ray.direction * incoming_obstruction->distance_m;
+    record.point_count = 2;
+    record.path_length_m = incoming_obstruction->distance_m;
+    return record;
+  }
   if (!mirror_t) {
     record.status = PhotonStatus::missed_primary;
     return record;
@@ -128,6 +145,14 @@ inline PathRecord trace_toy_mst(const Ray& input, std::uint64_t photon_id, const
   if (!screen_t) {
     record.status = PhotonStatus::missed_screen;
     record.final_direction = ray.direction;
+    return record;
+  }
+  const auto outgoing_obstruction = nearest_toy_obstruction(ray, config);
+  if (outgoing_obstruction && occurs_before(*outgoing_obstruction, *screen_t)) {
+    record.status = outgoing_obstruction->status;
+    record.points_m[2] = ray.position_m + ray.direction * outgoing_obstruction->distance_m;
+    record.point_count = 3;
+    record.path_length_m += outgoing_obstruction->distance_m;
     return record;
   }
   const Vec3 screen_hit = ray.position_m + ray.direction * *screen_t;

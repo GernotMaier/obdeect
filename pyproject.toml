@@ -1,62 +1,54 @@
 [build-system]
-requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
+requires = [ "setuptools>=68" ]
 
 [project]
 name = "obdeect"
 version = "0.1.0"
 description = "Ray tracing for imaging atmospheric Cherenkov telescopes"
 readme = "README.md"
-requires-python = ">=3.14"
-license = {file = "LICENSE"}
-authors = [{name = "obdeect contributors"}]
+license = { file = "LICENSE" }
+authors = [ { name = "obdeect contributors" } ]
+requires-python = ">=3.10"
 classifiers = [
   "Development Status :: 2 - Pre-Alpha",
   "License :: OSI Approved :: BSD License",
   "Programming Language :: C++",
-  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
 ]
 dependencies = [
-  "matplotlib",
-  "cmake",
-  "ninja",
+  "matplotlib>=3.8",
 ]
-
-[project.optional-dependencies]
-dev = ["pre-commit", "pytest", "ruff", "towncrier"]
-
-[project.scripts]
-obdeect-plot-toy = "obdeect.plotting:main"
-obdeect-import-simulation-models = "obdeect.model_import:main"
+optional-dependencies.dev = [ "pre-commit", "pytest", "ruff", "towncrier" ]
+scripts.obdeect-compile-scene = "obdeect.scene_compiler:main"
+scripts.obdeect-import-simulation-models = "obdeect.model_import:main"
+scripts.obdeect-plot-toy = "obdeect.plotting:main"
+scripts.obdeect-psf = "obdeect.analysis:main"
 
 [tool.setuptools]
-package-dir = {"" = "python"}
-
-[tool.setuptools.packages.find]
-where = ["python"]
+packages.find.where = [ "python" ]
+package-dir = { "" = "python" }
 
 [tool.ruff]
 target-version = "py314"
 line-length = 100
 preview = true
-
-[tool.ruff.lint]
-select = ["E", "F", "I", "UP"]
+lint.select = [ "E", "F", "I", "UP" ]
 
 [tool.towncrier]
+package = "obdeect"
+package_dir = "python"
 directory = "docs/changes"
 filename = "CHANGELOG.md"
-package = "obdeect"
-underlines = ["", "", ""]
 title_format = "## [{version}] - {project_date}"
 issue_format = "#{issue}"
-
-[[tool.towncrier.type]]
-directory = "feature"
-name = "Added"
-showcontent = true
-
-[[tool.towncrier.type]]
-directory = "bugfix"
-name = "Fixed"
-showcontent = true
+underlines = [ "", "", "" ]
+type = [
+  { directory = "feature", name = "Added", showcontent = true },
+  { directory = "bugfix", name = "Fixed", showcontent = true },
+]

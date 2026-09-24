@@ -34,10 +34,29 @@ int main() {
   require(camera.status == PhotonStatus::blocked_camera, "camera must shadow the central incoming ray");
   require(camera.point_count == 2, "blocked path terminates at the obstruction");
 
+  // T-OBS-004: camera and supports are closed solids.  This ray clears the
+  // incoming camera aperture, reflects from M1, then enters the camera rear.
+  const auto post_reflection_camera = trace_toy_mst({{0.6, 0.0, 20.0}, {0.0, 0.0, -1.0}}, 8, structured);
+  require(post_reflection_camera.status == PhotonStatus::blocked_camera,
+          "camera must also obstruct the reflected segment");
+  require(post_reflection_camera.point_count == 3,
+          "post-reflection obstruction retains entrance, M1, and obstruction vertices");
+  require(std::abs(post_reflection_camera.points_m[2].z -
+                   (structured.focal_length_m - structured.camera_half_depth_m)) < 1e-12,
+          "reflected ray must stop at the rear camera cap");
+
+  // T-OBS-005: a closed cylinder catches axial hits on its end caps, which a
+  // side-wall-only intersection would miss.
+  const Ray axial_cylinder{{0.0, 0.0, 2.0}, {0.0, 0.0, -1.0}};
+  const auto cap_hit = intersect_closed_finite_cylinder(axial_cylinder, {0.0, 0.0, 0.0},
+                                                         {0.0, 0.0, 1.0}, 0.5);
+  require(cap_hit && std::abs(*cap_hit - 1.0) < 1e-12, "closed cylinder must intersect its end cap");
+
   // T-OBS-002: an off-axis ray remains traceable through the MST structure.
   const auto outer = trace_toy_mst({{2.0, 1.0, 20.0}, {0.0, 0.0, -1.0}}, 3, structured);
-  require(outer.status == PhotonStatus::detected || outer.status == PhotonStatus::blocked_mast,
-          "off-axis ray must either reach the screen or hit a physical mast");
+  require(outer.status == PhotonStatus::detected || outer.status == PhotonStatus::blocked_mast ||
+              outer.status == PhotonStatus::blocked_camera,
+          "off-axis ray must either reach the screen or hit a physical obstruction");
 
   // T-SRC-001: artificial blue source emits unit, pupil-bounded directions.
   const auto rays = parallel_blue_cherenkov_rays(256, structured);

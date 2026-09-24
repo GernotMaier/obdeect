@@ -6,6 +6,10 @@
 namespace obdeect {
 
 constexpr double kEpsilon = 1e-9;
+// Exact speed of light expressed in the time unit used by the public photon
+// interfaces. Keep flight-time conversion in one place so all trace kernels
+// use the same physical constant.
+constexpr double kSpeedOfLightMPerNs = 0.299792458;
 
 struct Vec3 {
   double x{};

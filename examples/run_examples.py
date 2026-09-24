@@ -10,25 +10,56 @@ import sys
 from pathlib import Path
 
 
+def validate_rows(
+    name: str, rows: list[dict[str, str]], photons: int, require_detected: bool
+) -> dict[str, int]:
+    if len(rows) != photons or any(
+        None in row or any(value is None for value in row.values()) for row in rows
+    ):
+        raise ValueError(f"{name}: malformed CSV or missing photons")
+    counts: dict[str, int] = {}
+    for row in rows:
+        counts[row["status"]] = counts.get(row["status"], 0) + 1
+        count = int(row["point_count"])
+        if not 1 <= count <= 4:
+            raise ValueError(f"{name}: invalid path length")
+    if require_detected and not counts.get("detected"):
+        raise ValueError(f"{name}: no focal-plane hits")
+    return counts
+
+
 def run_examples(build: Path, output: Path, photons: int) -> None:
     root = Path(__file__).resolve().parents[1]
     output.mkdir(parents=True, exist_ok=True)
     suffix = ".exe" if os.name == "nt" else ""
     cases = [
-        ("toy_star", "obdeect_toy", ["--source", "star"], "toy-mst"),
+        ("toy_star", "obdeect_toy", ["--source", "star"], "toy-mst", True),
         (
             "toy_flasher",
             "obdeect_toy",
             ["--source", "illuminator", "--distance-m", "50"],
             "toy-mst",
+            False,
         ),
-        ("toy_laser", "obdeect_toy", ["--source", "laser", "--divergence-deg", "0.1"], "toy-mst"),
-        ("lst_on_axis", "obdeect_ctao", ["--telescope", "LST"], "LST"),
-        ("lst_off_axis", "obdeect_ctao", ["--telescope", "LST", "--field-x-deg", "0.5"], "LST"),
-        ("mst_sphere", "obdeect_ctao", ["--telescope", "MST"], "MST"),
+        (
+            "toy_laser",
+            "obdeect_toy",
+            ["--source", "laser", "--divergence-deg", "0.1"],
+            "toy-mst",
+            True,
+        ),
+        ("lst_on_axis", "obdeect_ctao", ["--telescope", "LST"], "LST", True),
+        (
+            "lst_off_axis",
+            "obdeect_ctao",
+            ["--telescope", "LST", "--field-x-deg", "0.5"],
+            "LST",
+            True,
+        ),
+        ("mst_sphere", "obdeect_ctao", ["--telescope", "MST"], "MST", True),
     ]
     summary = {}
-    for name, executable, flags, telescope in cases:
+    for name, executable, flags, telescope, require_detected in cases:
         csv_path = output / f"{name}.csv"
         command = [
             str((build / (executable + suffix)).resolve()),
@@ -41,18 +72,7 @@ def run_examples(build: Path, output: Path, photons: int) -> None:
         subprocess.run(command, check=True)
         with csv_path.open(newline="") as handle:
             rows = list(csv.DictReader(handle))
-        if len(rows) != photons or any(
-            None in row or any(value is None for value in row.values()) for row in rows
-        ):
-            raise ValueError(f"{name}: malformed CSV or missing photons")
-        counts = {}
-        for row in rows:
-            counts[row["status"]] = counts.get(row["status"], 0) + 1
-            count = int(row["point_count"])
-            if not 1 <= count <= 4:
-                raise ValueError(f"{name}: invalid path length")
-        if not counts.get("detected"):
-            raise ValueError(f"{name}: no focal-plane hits")
+        counts = validate_rows(name, rows, photons, require_detected)
         subprocess.run(
             [
                 sys.executable,
