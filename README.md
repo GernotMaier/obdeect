@@ -75,8 +75,10 @@ coating/material scene will replace it with wavelength-dependent transport.
 ## CTAO reference models
 
 `obdeect_ctao --telescope LST|MST|SST|SCT` writes ragged photon paths for the
-same Python plotter. The catalogue is pinned to public `simulation-models`
-6.3.0 identifiers and its import API requires explicit provenance. It contains
+same Python plotter. The analytic catalogue uses public `simulation-models`
+6.3.0 identifiers as a tested baseline; the production importer accepts an
+explicitly selected version from the supplied checkout and records provenance.
+It contains
 optical prescriptions only: it does not load model JSON, facet positions,
 camera pixels, alignment, structures, throughput, or the SCT coordinate
 transform. LST ideal-paraboloid and MST central-sphere baselines are executable
@@ -86,10 +88,10 @@ model-specific geometry validation.
 The core now also has a finite-facet and tabulated-coating kernel for use by a
 future model importer. A facet list is not currently embedded in any reference
 model, so this must not be interpreted as segmented CTAO telescope support.
-The explicit evidence required before claiming sim_telarray/ROBAST-level
-coverage is in [docs/SIMTELARRAY_REPLACEMENT.md](docs/SIMTELARRAY_REPLACEMENT.md).
+The explicit status, remaining work, and evidence required before claiming
+sim_telarray/ROBAST-level coverage are in [docs/STATUS.md](docs/STATUS.md).
 
-### Import a pinned simulation-models production
+### Import a selected simulation-models production
 
 The standard-library importer records every selected parameter record and all
 declared model-file assets with SHA-256 hashes. It neither downloads nor copies
@@ -213,7 +215,7 @@ they are not validation of a production telescope model.
 
 ## Model provenance and scene compilation
 
-The Python adapters can select a pinned `simulation-models` record, hash its
+The Python adapters can select a `simulation-models` record, hash its
 declared assets, and compile a deliberately incomplete, provenance-checked
 scene hand-off. Compilation retains mirror-list centres, shapes, diameters,
 and focal lengths, then reports normals, alignment, camera, structures, and

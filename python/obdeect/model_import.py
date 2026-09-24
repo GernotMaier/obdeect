@@ -122,11 +122,11 @@ def resolve_model(root: Path, model: str, version: str) -> dict[str, Any]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Import a pinned simulation-models production manifest."
+        description="Import a selected simulation-models production manifest."
     )
     parser.add_argument("root", type=Path, help="path to the simulation-models repository root")
     parser.add_argument("model", help="production table, e.g. LSTN-design")
-    parser.add_argument("--version", default="6.3.0", help="production model version")
+    parser.add_argument("--version", required=True, help="production model version")
     parser.add_argument("--output", type=Path, required=True, help="destination scene-IR JSON")
     args = parser.parse_args()
     try:
