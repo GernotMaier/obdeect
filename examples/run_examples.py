@@ -10,7 +10,9 @@ import sys
 from pathlib import Path
 
 
-def validate_rows(name: str, rows: list[dict[str, str]], photons: int, require_detected: bool) -> dict[str, int]:
+def validate_rows(
+    name: str, rows: list[dict[str, str]], photons: int, require_detected: bool
+) -> dict[str, int]:
     if len(rows) != photons or any(
         None in row or any(value is None for value in row.values()) for row in rows
     ):
@@ -39,9 +41,21 @@ def run_examples(build: Path, output: Path, photons: int) -> None:
             "toy-mst",
             False,
         ),
-        ("toy_laser", "obdeect_toy", ["--source", "laser", "--divergence-deg", "0.1"], "toy-mst", True),
+        (
+            "toy_laser",
+            "obdeect_toy",
+            ["--source", "laser", "--divergence-deg", "0.1"],
+            "toy-mst",
+            True,
+        ),
         ("lst_on_axis", "obdeect_ctao", ["--telescope", "LST"], "LST", True),
-        ("lst_off_axis", "obdeect_ctao", ["--telescope", "LST", "--field-x-deg", "0.5"], "LST", True),
+        (
+            "lst_off_axis",
+            "obdeect_ctao",
+            ["--telescope", "LST", "--field-x-deg", "0.5"],
+            "LST",
+            True,
+        ),
         ("mst_sphere", "obdeect_ctao", ["--telescope", "MST"], "MST", True),
     ]
     summary = {}
