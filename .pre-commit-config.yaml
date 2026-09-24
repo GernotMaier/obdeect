@@ -55,9 +55,8 @@ repos:
 - repo: https://github.com/twisted/towncrier
   rev: 25.8.0
   hooks:
-  - id: towncrier-update
+  - id: towncrier-check
     files: ^docs/changes/
-    args: ['--keep']
 # shellcheck
 - repo: https://github.com/shellcheck-py/shellcheck-py
   rev: v0.11.0.1-1

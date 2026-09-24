@@ -42,6 +42,7 @@ lint.select = [ "E", "F", "I", "UP" ]
 
 [tool.towncrier]
 package = "obdeect"
+package_dir = "python"
 directory = "docs/changes"
 filename = "CHANGELOG.md"
 title_format = "## [{version}] - {project_date}"
