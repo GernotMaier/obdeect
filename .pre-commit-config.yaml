@@ -56,7 +56,7 @@ repos:
   rev: 25.8.0
   hooks:
   - id: towncrier-update
-    files: $docs/changes/
+    files: ^docs/changes/
     args: ['--keep']
 # shellcheck
 - repo: https://github.com/shellcheck-py/shellcheck-py
