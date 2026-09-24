@@ -249,3 +249,7 @@ coating kernels exist but are not yet integrated into these analytic scenes.
 
 The project is BSD-3-Clause licensed; citation metadata is in
 [CITATION.cff](CITATION.cff).
+
+## Generative AI disclosure
+
+Generative AI tools (mostly ChatGPT 5.6) were used to write the entire code of this project. All AI-assisted outputs were reviewed, validated, and, where necessary, modified by the authors to ensure accuracy and reliability.
