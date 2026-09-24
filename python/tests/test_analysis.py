@@ -10,7 +10,7 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).parents[1]))
 
-from obdeect.analysis import analyse_trace_csv, main, write_scan_csv
+from obdeect.analysis import PsfResult, _scan, analyse_trace_csv, main, write_scan_csv
 
 
 class TestPsfAnalysis(unittest.TestCase):
@@ -115,6 +115,44 @@ class TestPsfAnalysis(unittest.TestCase):
             output = root / "scan.csv"
             write_scan_csv([(0.0, result), (1.0, result)], output)
             self.assertEqual(len(output.read_text().splitlines()), 3)
+
+    def test_scan_trace_names_are_unique_for_close_angles(self):
+        result = PsfResult(1.0, 1.0, 1.0, 1, 0.0, 0.0, 0.0, 0.0, {}, {})
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            args = type(
+                "ScanArgs",
+                (),
+                {
+                    "output_dir": root,
+                    "field_x_deg": [0.0000001, 0.0000002],
+                    "field_y_deg": 0.0,
+                    "photons": 4,
+                    "executable": root / "obdeect_toy",
+                    "extra_argument": [],
+                    "plot": None,
+                },
+            )()
+            with (
+                mock.patch("obdeect.analysis.subprocess.run") as run,
+                mock.patch("obdeect.analysis.analyse_trace_csv", return_value=result),
+            ):
+                _scan(args)
+            output_paths = [
+                call.args[0][call.args[0].index("--output") + 1] for call in run.call_args_list
+            ]
+        self.assertEqual(len(output_paths), 2)
+        self.assertNotEqual(output_paths[0], output_paths[1])
+
+    def test_missing_final_vertex_is_reported_as_value_error(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "missing_vertex.csv"
+            path.write_text(
+                "status,point_count,source_weight,throughput,x0_m,y0_m,x1_m,y1_m\n"
+                "detected,2,1,1,0,0\n"
+            )
+            with self.assertRaisesRegex(ValueError, "missing final focal-plane vertex"):
+                analyse_trace_csv(path)
 
 
 if __name__ == "__main__":

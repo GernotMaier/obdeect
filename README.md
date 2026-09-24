@@ -8,7 +8,7 @@ package supplies import, plotting, and analysis commands.
 
 ## Build and test
 
-Requirements: a C++20 compiler, CMake 3.20+, Ninja, and Python 3.14+.
+Requirements: a C++20 compiler, CMake 3.20+, Ninja, and Python 3.10+.
 
 ```bash
 python -m venv .venv
@@ -140,7 +140,7 @@ The C++20 core is split by responsibility so a photon kernel never needs Python,
 
 ## Linting
 
-Install CMake, Ninja, a C++20 compiler, Python 3.14+, and the development
+Install CMake, Ninja, a C++20 compiler, Python 3.10+, and the development
 tools:
 
 ```bash

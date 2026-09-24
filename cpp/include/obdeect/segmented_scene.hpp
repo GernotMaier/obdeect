@@ -204,9 +204,9 @@ struct SegmentedFacetHit {
   return false;
 }
 
-[[nodiscard]] inline std::optional<SegmentedFacetHit> intersect_segmented_facet(
+[[nodiscard]] inline std::optional<SegmentedFacetHit> intersect_segmented_facet_unchecked(
     const Ray& ray, const ImportedFacet& facet, double minimum_t_m = kEpsilon) {
-  if (!is_valid(facet) || !std::isfinite(minimum_t_m) || minimum_t_m < 0.0) return std::nullopt;
+  if (!std::isfinite(minimum_t_m) || minimum_t_m < 0.0) return std::nullopt;
   const auto direction = normalised_checked(ray.direction);
   const auto normal = normalised_checked(facet.unit_normal);
   if (!direction || !normal) return std::nullopt;
@@ -219,15 +219,26 @@ struct SegmentedFacetHit {
   return SegmentedFacetHit{facet.id, distance_m, point_m, *normal};
 }
 
-[[nodiscard]] inline std::optional<SegmentedFacetHit> intersect_segmented_primary(
+[[nodiscard]] inline std::optional<SegmentedFacetHit> intersect_segmented_facet(
+    const Ray& ray, const ImportedFacet& facet, double minimum_t_m = kEpsilon) {
+  if (!is_valid(facet)) return std::nullopt;
+  return intersect_segmented_facet_unchecked(ray, facet, minimum_t_m);
+}
+
+[[nodiscard]] inline std::optional<SegmentedFacetHit> intersect_segmented_primary_unchecked(
     const Ray& ray, const CompiledSegmentedScene& scene) {
-  if (!is_valid(scene)) return std::nullopt;
   std::optional<SegmentedFacetHit> nearest;
   for (const auto& facet : scene.primary_facets) {
-    const auto candidate = intersect_segmented_facet(ray, facet);
+    const auto candidate = intersect_segmented_facet_unchecked(ray, facet);
     if (candidate && (!nearest || candidate->distance_m < nearest->distance_m)) nearest = candidate;
   }
   return nearest;
+}
+
+[[nodiscard]] inline std::optional<SegmentedFacetHit> intersect_segmented_primary(
+    const Ray& ray, const CompiledSegmentedScene& scene) {
+  if (!is_valid(scene)) return std::nullopt;
+  return intersect_segmented_primary_unchecked(ray, scene);
 }
 
 struct DetectorSurfaceHit {
@@ -237,9 +248,9 @@ struct DetectorSurfaceHit {
   Vec3 unit_normal{};
 };
 
-[[nodiscard]] inline std::optional<DetectorSurfaceHit> intersect_detector_surface(
+[[nodiscard]] inline std::optional<DetectorSurfaceHit> intersect_detector_surface_unchecked(
     const Ray& ray, const ImportedDetectorSurface& surface, double minimum_t_m = kEpsilon) {
-  if (!is_valid(surface) || !std::isfinite(minimum_t_m) || minimum_t_m < 0.0) return std::nullopt;
+  if (!std::isfinite(minimum_t_m) || minimum_t_m < 0.0) return std::nullopt;
   const auto direction = normalised_checked(ray.direction);
   const auto normal = normalised_checked(surface.unit_normal);
   if (!direction || !normal) return std::nullopt;
@@ -252,15 +263,26 @@ struct DetectorSurfaceHit {
   return DetectorSurfaceHit{surface.id, distance_m, point_m, *normal};
 }
 
-[[nodiscard]] inline std::optional<DetectorSurfaceHit> intersect_detector_surfaces(
+[[nodiscard]] inline std::optional<DetectorSurfaceHit> intersect_detector_surface(
+    const Ray& ray, const ImportedDetectorSurface& surface, double minimum_t_m = kEpsilon) {
+  if (!is_valid(surface)) return std::nullopt;
+  return intersect_detector_surface_unchecked(ray, surface, minimum_t_m);
+}
+
+[[nodiscard]] inline std::optional<DetectorSurfaceHit> intersect_detector_surfaces_unchecked(
     const Ray& ray, const CompiledSegmentedScene& scene) {
-  if (!is_valid(scene)) return std::nullopt;
   std::optional<DetectorSurfaceHit> nearest;
   for (const auto& surface : scene.detector_surfaces) {
-    const auto candidate = intersect_detector_surface(ray, surface);
+    const auto candidate = intersect_detector_surface_unchecked(ray, surface);
     if (candidate && (!nearest || candidate->distance_m < nearest->distance_m)) nearest = candidate;
   }
   return nearest;
+}
+
+[[nodiscard]] inline std::optional<DetectorSurfaceHit> intersect_detector_surfaces(
+    const Ray& ray, const CompiledSegmentedScene& scene) {
+  if (!is_valid(scene)) return std::nullopt;
+  return intersect_detector_surfaces_unchecked(ray, scene);
 }
 
 }  // namespace obdeect

@@ -195,12 +195,14 @@ class CsvPhotonReader final : public PhotonReader {
 
   static std::vector<std::string> split(const std::string& line) {
     std::vector<std::string> fields;
+    const std::size_t record_end = !line.empty() && line.back() == '\r' ? line.size() - 1 : line.size();
     std::size_t start{};
-    for (std::size_t comma = line.find(','); comma != std::string::npos; comma = line.find(',', start)) {
+    for (std::size_t comma = line.find(',', start);
+         comma != std::string::npos && comma < record_end; comma = line.find(',', start)) {
       fields.push_back(line.substr(start, comma - start));
       start = comma + 1;
     }
-    fields.push_back(line.substr(start));
+    fields.push_back(line.substr(start, record_end - start));
     return fields;
   }
 

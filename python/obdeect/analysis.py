@@ -58,14 +58,14 @@ def _finite_nonnegative(value: str | None, field: str, path: Path, row_number: i
 def _final_hit(row: dict[str, str], path: Path, row_number: int) -> tuple[float, float]:
     try:
         point_count = int(row["point_count"])
-    except (KeyError, ValueError) as error:
+    except (KeyError, TypeError, ValueError) as error:
         raise ValueError(f"{path}:{row_number}: invalid point_count") from error
     if point_count < 1:
         raise ValueError(f"{path}:{row_number}: detected photon has no path vertices")
     point = point_count - 1
     try:
         x, y = float(row[f"x{point}_m"]), float(row[f"y{point}_m"])
-    except (KeyError, ValueError) as error:
+    except (KeyError, TypeError, ValueError) as error:
         raise ValueError(f"{path}:{row_number}: missing final focal-plane vertex") from error
     if not math.isfinite(x) or not math.isfinite(y):
         raise ValueError(f"{path}:{row_number}: focal-plane coordinates must be finite")
@@ -211,9 +211,9 @@ def _derive(args: argparse.Namespace) -> int:
 def _scan(args: argparse.Namespace) -> int:
     args.output_dir.mkdir(parents=True, exist_ok=True)
     results: list[tuple[float, PsfResult]] = []
-    for field_x_deg in args.field_x_deg:
+    for index, field_x_deg in enumerate(args.field_x_deg):
         safe_angle = f"{field_x_deg:+.6f}".replace("+", "p").replace("-", "m")
-        trace_path = args.output_dir / f"field_x_{safe_angle}_deg.csv"
+        trace_path = args.output_dir / f"field_x_{index:04d}_{safe_angle}_deg.csv"
         command = [
             str(args.executable),
             "--photons",

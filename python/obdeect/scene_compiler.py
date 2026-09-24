@@ -23,7 +23,7 @@ class SceneCompileError(ValueError):
 
 _SHAPES = {0: "circle", 1: "hexagon_flat_y", 2: "square", 3: "hexagon_flat_x"}
 _UNIT_TO_M = {"m": 1.0, "cm": 0.01, "mm": 0.001}
-_CONSUMED = {"mirror_list", "focal_length", "mirror_focal_length"}
+_CONSUMED = {"mirror_list", "mirror_focal_length"}
 
 
 def _number(value: object, context: str) -> float:
@@ -57,6 +57,10 @@ def parse_simtel_mirror_list(
     Focal length zero is legal only when an explicit catalogue fallback is
     supplied.  It is not a prescription for a facet normal.
     """
+    if fallback_focal_length_m is not None and (
+        not math.isfinite(fallback_focal_length_m) or fallback_focal_length_m <= 0.0
+    ):
+        raise SceneCompileError("fallback focal length must be finite and positive")
     facets: list[dict[str, Any]] = []
     for line_number, source_line in enumerate(contents.splitlines(), start=1):
         line = source_line.strip()

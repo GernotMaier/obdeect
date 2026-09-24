@@ -62,7 +62,7 @@ struct TraceResult {
       continue;
     }
     const Ray ray{input.position_m[index], *direction};
-    const auto hit = intersect_segmented_primary(ray, scene);
+    const auto hit = intersect_segmented_primary_unchecked(ray, scene);
     if (!hit) {
       result.photons.status[index] = PhotonStatus::missed_primary;
       result.summary.add(PhotonStatus::missed_primary, input.weight[index]);
@@ -79,7 +79,7 @@ struct TraceResult {
     result.photons.optical_path_m[index] = hit->distance_m;
     result.photons.time_ns[index] += hit->distance_m / kSpeedOfLightMPerNs;
     const Ray reflected_ray{hit->point_m, *reflected};
-    const auto detector_hit = intersect_detector_surfaces(reflected_ray, scene);
+    const auto detector_hit = intersect_detector_surfaces_unchecked(reflected_ray, scene);
     if (!detector_hit) {
       result.photons.status[index] = PhotonStatus::no_detector;
       result.summary.add(PhotonStatus::no_detector, input.weight[index]);

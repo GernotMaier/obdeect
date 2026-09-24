@@ -67,6 +67,21 @@ int main() {
           "event boundary begins a new batch and final row is retained");
   require(reader.read(batch).count == 0 && reader.read(batch).eof, "repeated EOF is stable");
 
+  // T-INP-003: CRLF records are accepted without retaining the carriage
+  // return in the final header or numeric field.
+  std::string crlf_header{kHeader};
+  for (std::size_t position = 0; (position = crlf_header.find('\n', position)) != std::string::npos;
+       position += 2) {
+    crlf_header.insert(position, "\r");
+  }
+  TemporaryFile crlf_input{crlf_header +
+                           "7,8,9,10,101,1,2,3,0,0,-1,0,4.5,0.25,500,12000,3000,4,5,6,1.5\r\n"};
+  CsvPhotonReader crlf_reader(crlf_input.path());
+  const auto crlf_result = crlf_reader.read(batch);
+  require(crlf_result.count == 1 && crlf_result.eof && batch[0].photon_id == 101 &&
+              batch[0].weight == 0.25,
+          "CRLF CSV records are parsed without carriage-return suffixes");
+
   // T-INP-002: required schema and invalid values fail explicitly rather than
   // becoming empty events or silently repaired photons.
   TemporaryFile missing{"run_id,event_id\n1,2\n"};

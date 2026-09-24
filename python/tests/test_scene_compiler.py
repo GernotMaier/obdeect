@@ -97,6 +97,10 @@ class TestSceneCompiler(unittest.TestCase):
         with self.assertRaisesRegex(SceneCompileError, "unsupported shape"):
             parse_simtel_mirror_list("0 0 120 1600 9\n", fallback_focal_length_m=16.0)
 
+    def test_rejects_nonfinite_fallback_focal_length(self):
+        with self.assertRaisesRegex(SceneCompileError, "finite and positive"):
+            parse_simtel_mirror_list("0 0 120 0 1\n", fallback_focal_length_m=float("nan"))
+
 
 if __name__ == "__main__":
     unittest.main()
