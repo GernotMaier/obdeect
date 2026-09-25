@@ -225,7 +225,9 @@ def derive_nominal_single_reflector(
         facet["nominal_normal"] = [nx, ny, math.cos(inclination)]
 
 
-def compile_scene(ir: dict[str, Any], source_root: Path) -> dict[str, Any]:
+def compile_scene(
+    ir: dict[str, Any], source_root: Path, *, simtel_root: Path | None = None
+) -> dict[str, Any]:
     """Compile ``obdeect.simulation-models-ir.v1`` into generic scene data."""
     if ir.get("format") != "obdeect.simulation-models-ir.v1":
         raise SceneCompileError("expected obdeect.simulation-models-ir.v1")
@@ -348,7 +350,25 @@ def compile_scene(ir: dict[str, Any], source_root: Path) -> dict[str, Any]:
                 if path.is_file():
                     nested_assets[filename] = record(path, root)
                 else:
-                    unresolved_references.append(filename)
+                    # sim_telarray fileopen() also searches its compiled-in
+                    # cfg/CTA path. Require that root explicitly so the
+                    # fallback cannot vary unnoticed between installations.
+                    fallback = (
+                        simtel_root.resolve() / "cfg" / "CTA" / filename
+                        if simtel_root is not None
+                        else None
+                    )
+                    if (
+                        fallback is not None
+                        and fallback.is_file()
+                        and fallback.resolve().is_relative_to(simtel_root.resolve())
+                    ):
+                        nested_assets[filename] = {
+                            **record(fallback, simtel_root.resolve()),
+                            "source_root": "sim_telarray",
+                        }
+                    else:
+                        unresolved_references.append(filename)
     deferred = sorted(set(parameters) - consumed)
     for name in deferred:
         if parameters[name].get("required_for_trace") is True:
@@ -414,13 +434,18 @@ def main() -> None:
     parser.add_argument(
         "--source-root", type=Path, required=True, help="root used to resolve IR asset paths"
     )
+    parser.add_argument(
+        "--simtel-root",
+        type=Path,
+        help="explicit sim_telarray installation for cfg/CTA camera tables",
+    )
     parser.add_argument("--output", type=Path, required=True, help="compiled generic-scene JSON")
     args = parser.parse_args()
     try:
         ir = json.loads(args.ir.read_text(encoding="utf-8"))
         if not isinstance(ir, dict):
             raise SceneCompileError("IR root must be an object")
-        scene = compile_scene(ir, args.source_root)
+        scene = compile_scene(ir, args.source_root, simtel_root=args.simtel_root)
     except (OSError, json.JSONDecodeError, SceneCompileError) as error:
         raise SystemExit(f"scene compilation failed: {error}") from error
     args.output.write_text(json.dumps(scene, indent=2, sort_keys=True) + "\n", encoding="utf-8")

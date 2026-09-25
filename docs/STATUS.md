@@ -53,12 +53,14 @@ event writing, and array reconstruction are outside scope.
   nominal geometry only; run-specific random distance and alignment remain
   unresolved.
   Nested camera response files are hashed when present and missing references
-  are reported. Normals, physical detector surfaces, structures, and materials
+  are reported. An explicit sim_telarray root resolves and hashes camera tables
+  from its `cfg/CTA` search path. Normals, physical detector surfaces, structures, and materials
   remain unresolved, so these scenes are not trace-ready. The selected 6.3.0
   and 7.0.0 design records yield LST 198, MST 86, SST 18, and SCT 48/24
   primary/secondary mirror footprints; camera files yield 1855, 1764/1855,
   2048, and 11328 pixels respectively. The SCT camera references
-  `Angular_response_MPPC_Prod3.dat`, absent from the local checkout. Patch
+  `Angular_response_MPPC_Prod3.dat`; it is present under the local
+  `../sim_telarray/cfg/CTA` and resolves when that root is supplied. Patch
   productions 6.0.1, 6.0.2, 6.1.1, and 6.2.1 declare no primary geometry asset
   and cannot compile standalone scenes.
 - Step 4: in progress. An immutable generic planar scene now traces the
@@ -73,16 +75,28 @@ event writing, and array reconstruction are outside scope.
 
 ## Exact missing inputs and contracts
 
-- Reference matrix: a sim_telarray **source checkout** is present locally, but
-  a verified executable, hessio decoder revision, selected site/configuration,
-  random seeds, and checksummed shared photon blocks/commands are absent; no
-  real comparison manifest can be frozen yet.
-- Model data: the local 7.0.0 SCT camera config references
-  `Angular_response_MPPC_Prod3.dat`, which is absent from its `Files`
-  directory. Single-reflector nominal normals can be derived, but aligned
+- Reference matrix: the selected scope is simulation-models 7.0.0, North and
+  South. A sim_telarray **source checkout** is present locally, but a verified
+  executable, hessio decoder revision, generated simtools config, resolved
+  random seed, and checksummed shared photon blocks/commands are absent; no
+  real comparison manifest can be frozen yet. This Python environment also
+  lacks the dependencies needed to run simtools.
+- Model data: the local 7.0.0 SCT camera response resolves from the explicit
+  sim_telarray `cfg/CTA` root and is SHA-256 checked. Single-reflector nominal
+  normals can be derived, but aligned
   panel normals require the selected run settings and random draws. The
   extracted camera pixels do not supply a compiled physical detector surface.
   Structure geometry and optical material semantics are also not yet compiled.
+
+The audited 7.0.0 design matrix is LST North/South (198 panels, 1855 pixels),
+MST FlashCam/NectarCam for both sites (86 panels, 1764/1855 pixels), SST South
+(18 M1 segments, 2048 pixels), and SCT South (48 M1 plus 24 M2 segments,
+11328 pixels). The checkout has no North SST/SCT design records. simtools'
+`SimulatorRayTracing` writes a star file, generates a telescope/site config,
+and runs sim_telarray with `IMAGING_LIST`, `random_state=none`, one telescope,
+disabled camera filter and night-sky background, and 100000 photons per run
+(5000 in test mode). It does not export the launched photon block; a matched
+input comparison still needs a reproducible source block and recorded seed.
 - Kernel: the new generic scene currently represents finite planar surfaces.
   It still needs closed rods/caps and baffles, curved/aspheric reflectors and
   detectors, pixel masks, material bindings, and bounded interaction records

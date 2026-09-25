@@ -230,17 +230,21 @@ they are not validation of a production telescope model.
 
 The Python adapters can select a `simulation-models` record, hash its
 declared assets, and compile a deliberately incomplete, provenance-checked
-scene hand-off. Compilation retains mirror-list centres, shapes, diameters,
-and focal lengths, then reports normals, alignment, camera, structures, and
-materials as trace blockers rather than guessing them. It does not connect a
+scene hand-off. Compilation retains mirror-list geometry, derives nominal
+single-reflector panel normals, and reports run-specific alignment, detector
+surfaces, structures, and materials as trace blockers. It does not connect a
 production scene to a native trace executable yet.
 
 ```bash
 obdeect-import-simulation-models /path/to/simulation-models LSTN-design \
-  --version 6.3.0 --output lstn.ir.json
+  --version 7.0.0 --output lstn.ir.json
 obdeect-compile-scene lstn.ir.json --source-root /path/to/simulation-models \
-  --output lstn.scene.json
+  --simtel-root /path/to/sim_telarray --output lstn.scene.json
 ```
+
+`--simtel-root` is needed when a camera response table is found in
+sim_telarray's `cfg/CTA` search path rather than simulation-models `Files`.
+The selected file path and SHA-256 hash are recorded in the scene provenance.
 
 CSV trace output includes source weight, wavelength, emission time, terminal
 status, path length, and path vertices. The current executable-level

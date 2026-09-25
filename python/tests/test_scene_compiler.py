@@ -245,6 +245,25 @@ class TestSceneCompiler(unittest.TestCase):
             scene = compile_scene(ir, root)
             self.assertEqual(scene["report"]["camera_layout_evidence"]["pixel_count"], 2)
             self.assertIn("response.dat", scene["provenance"]["nested_assets"])
+            (files / "response.dat").unlink()
+            simtel_root = root / "sim_telarray"
+            fallback = simtel_root / "cfg" / "CTA" / "response.dat"
+            fallback.parent.mkdir(parents=True)
+            fallback.write_text("300 0.7\n")
+            scene = compile_scene(ir, root, simtel_root=simtel_root)
+            self.assertEqual(
+                scene["provenance"]["nested_assets"]["response.dat"]["source_root"],
+                "sim_telarray",
+            )
+            self.assertEqual(
+                scene["report"]["camera_layout_evidence"]["unresolved_response_files"], []
+            )
+            self.assertEqual(
+                compile_scene(ir, root)["report"]["camera_layout_evidence"][
+                    "unresolved_response_files"
+                ],
+                ["response.dat"],
+            )
             count_record = root / "model_parameters/GENERIC/camera_pixels/camera_pixels-1.0.0.json"
             data = json.loads(count_record.read_text())
             data["value"] = 3
