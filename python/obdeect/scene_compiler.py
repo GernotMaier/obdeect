@@ -1,10 +1,9 @@
 """Compile a provenance-checked simulation-models IR into generic scene data.
 
-This adapter deliberately does not invent dish sag, panel normals, camera
-geometry, or material behaviour from incomplete catalogue records. It turns
-the mirror-list asset into unit-normalised facet records and reports every
-other imported parameter as deferred. The result is a stable handoff to the
-native scene compiler, not a claim of a trace-ready production scene.
+This adapter verifies the selected production and extracts documented mirror
+footprints and camera pixel layouts. It does not invent dish sag, panel
+normals, detector surfaces, or material behaviour. The output is an audited
+handoff, not a trace-ready production scene.
 """
 
 from __future__ import annotations
@@ -16,6 +15,10 @@ import math
 from pathlib import Path
 from typing import Any
 
+from obdeect.camera_config import CameraConfigError, parse_camera_layout
+from obdeect.model_import import ImportError as ModelImportError
+from obdeect.model_import import component, record, resolve_model
+
 
 class SceneCompileError(ValueError):
     """The provenance IR cannot be compiled without guessing optical data."""
@@ -23,7 +26,63 @@ class SceneCompileError(ValueError):
 
 _SHAPES = {0: "circle", 1: "hexagon_flat_y", 2: "square", 3: "hexagon_flat_x"}
 _UNIT_TO_M = {"m": 1.0, "cm": 0.01, "mm": 0.001}
-_CONSUMED = {"mirror_list", "mirror_focal_length"}
+
+
+def parse_simtel_segmentation(contents: str) -> list[dict[str, Any]]:
+    """Parse explicit sim_telarray hex and ring footprint records, in cm/deg.
+
+    Ring groups are expanded to stable per-segment IDs. The recorded gap is
+    retained but no physical mask or surface normal is inferred from it.
+    """
+    segments: list[dict[str, Any]] = []
+    for line_number, source_line in enumerate(contents.splitlines(), start=1):
+        fields = source_line.split("#", 1)[0].split()
+        if not fields:
+            continue
+        kind = fields[0].lower()
+        if kind not in {"hex", "yhex", "ring"}:
+            raise SceneCompileError(
+                f"segmentation line {line_number}: unsupported type {fields[0]}"
+            )
+        if len(fields) != (6 if kind in {"hex", "yhex"} else 7):
+            raise SceneCompileError(f"segmentation line {line_number}: wrong field count")
+        try:
+            count = int(fields[1])
+            values = [float(value) for value in fields[2:]]
+        except ValueError as error:
+            raise SceneCompileError(f"segmentation line {line_number}: invalid number") from error
+        if count < 1 or not all(math.isfinite(value) for value in values):
+            raise SceneCompileError(f"segmentation line {line_number}: invalid count or value")
+        if kind in {"hex", "yhex"}:
+            x_cm, y_cm, diameter_cm, rotation_deg = values
+            if count != 1 or diameter_cm <= 0.0:
+                raise SceneCompileError(f"segmentation line {line_number}: invalid hex footprint")
+            segments.append({
+                "id": len(segments),
+                "shape": "hexagon",
+                "centre_xy_m": [x_cm * 0.01, y_cm * 0.01],
+                "diameter_m": diameter_cm * 0.01,
+                "rotation_deg": rotation_deg,
+            })
+        else:
+            inner_cm, outer_cm, span_deg, start_deg, gap_cm = values
+            if inner_cm < 0.0 or outer_cm <= inner_cm or span_deg <= 0.0 or gap_cm < 0.0:
+                raise SceneCompileError(f"segmentation line {line_number}: invalid ring footprint")
+            if count * span_deg > 360.0 + 1e-9:
+                raise SceneCompileError(f"segmentation line {line_number}: ring exceeds full turn")
+            for index in range(count):
+                segments.append({
+                    "id": len(segments),
+                    "shape": "annular_sector",
+                    "inner_radius_m": inner_cm * 0.01,
+                    "outer_radius_m": outer_cm * 0.01,
+                    "start_deg": start_deg + index * 360.0 / count,
+                    "span_deg": span_deg,
+                    "gap_m": gap_cm * 0.01,
+                })
+    if not segments:
+        raise SceneCompileError("segmentation contains no segments")
+    return segments
 
 
 def _number(value: object, context: str) -> float:
@@ -129,30 +188,24 @@ def compile_scene(ir: dict[str, Any], source_root: Path) -> dict[str, Any]:
         raise SceneCompileError("IR model identity is invalid")
     if not isinstance(parameters, dict) or not isinstance(assets, dict):
         raise SceneCompileError("IR parameters and assets must be objects")
-    mirror = parameters.get("mirror_list")
-    asset = assets.get("mirror_list")
-    if (
-        not isinstance(mirror, dict)
-        or mirror.get("file") is not True
-        or not isinstance(asset, dict)
-    ):
-        raise SceneCompileError("IR does not provide a tracked mirror_list asset")
-    relative_asset = asset.get("path")
-    expected_hash = asset.get("sha256")
-    if not isinstance(relative_asset, str) or not isinstance(expected_hash, str):
-        raise SceneCompileError("mirror-list asset record is invalid")
     root = source_root.resolve()
     # Keep the compiler's source-root contract aligned with the importer: a
     # released checkout may contain its data package in simulation-models/.
     nested_root = root / "simulation-models"
     if not (root / "model_parameters").is_dir() and (nested_root / "model_parameters").is_dir():
         root = nested_root
-    path = (root / relative_asset).resolve()
-    if not path.is_relative_to(root) or not path.is_file():
-        raise SceneCompileError("mirror-list asset is missing or escapes source root")
-    actual_hash = hashlib.sha256(path.read_bytes()).hexdigest()
-    if actual_hash != expected_hash:
-        raise SceneCompileError("mirror-list asset hash does not match IR provenance")
+    records = ir.get("input_records", {})
+    if not isinstance(records, dict):
+        raise SceneCompileError("IR input_records must be an object")
+    try:
+        source_ir = resolve_model(source_root, model, version)
+    except ModelImportError as error:
+        raise SceneCompileError(f"cannot verify source production: {error}") from error
+    for key in ("input_records", "assets", "parameters"):
+        if ir.get(key) != source_ir[key]:
+            raise SceneCompileError(f"IR {key} differs from the verified source production")
+    verified_assets = {name: root / entry["path"] for name, entry in assets.items()}
+
     fallback = None
     if isinstance(parameters.get("mirror_focal_length"), dict):
         fallback = _length_m(
@@ -162,42 +215,129 @@ def compile_scene(ir: dict[str, Any], source_root: Path) -> dict[str, Any]:
         # own focal length.  It is not an optical value to manufacture.
         if fallback == 0.0:
             fallback = None
-    facets = parse_simtel_mirror_list(
-        path.read_text(encoding="utf-8"), fallback_focal_length_m=fallback
-    )
-    explicit_z_count = sum(facet["centre_m"][2] != 0.0 for facet in facets)
-    report = {
-        "consumed": sorted(name for name in parameters if name in _CONSUMED),
-        "deferred": sorted(name for name in parameters if name not in _CONSUMED),
-        "unsupported": [],
-        "trace_blockers": [
-            "facet normals and tip/tilt alignment are unavailable: sim_telarray mirror-list "
-            "columns encode centres, footprint, focal length, shape, and optional z only",
-            "camera, obstructions, and material response remain deferred",
-        ],
-        "facet_geometry_evidence": {
+    consumed = set()
+    if "mirror_list" in verified_assets:
+        facets = parse_simtel_mirror_list(
+            verified_assets["mirror_list"].read_text(encoding="utf-8"),
+            fallback_focal_length_m=fallback,
+        )
+        primary = {"kind": "segmented_mirror", "facets": facets}
+        consumed.add("mirror_list")
+        if "mirror_focal_length" in parameters:
+            consumed.add("mirror_focal_length")
+        evidence = {
             "source_format": "sim_telarray mirror-list (x, y, diameter, focal_length, shape[, z])",
             "facet_count": len(facets),
-            "explicit_nonzero_z_count": explicit_z_count,
+            "explicit_nonzero_z_count": sum(facet["centre_m"][2] != 0.0 for facet in facets),
             "normal_status": "unavailable",
             "in_plane_orientation_status": "unavailable",
             "alignment_status": "unavailable",
             "interpretation": "No normals, rotations, or alignment "
             "are inferred from facet centres, "
             "focal lengths, shape codes, or z positions.",
+        }
+    elif "primary_mirror_segmentation" in verified_assets:
+        segments = parse_simtel_segmentation(
+            verified_assets["primary_mirror_segmentation"].read_text(encoding="utf-8")
+        )
+        primary = {"kind": "segmented_footprints", "segments": segments}
+        consumed.add("primary_mirror_segmentation")
+        evidence = {
+            "source_format": "sim_telarray segmentation (hex/ring)",
+            "facet_count": len(segments),
+            "normal_status": "unavailable",
+            "alignment_status": "unavailable",
+            "interpretation": "Footprints parsed; surface sag and normals unresolved.",
+        }
+    else:
+        raise SceneCompileError("IR has no tracked primary mirror geometry asset")
+    secondary = None
+    if "secondary_mirror_segmentation" in verified_assets:
+        secondary = {
+            "kind": "segmented_footprints",
+            "segments": parse_simtel_segmentation(
+                verified_assets["secondary_mirror_segmentation"].read_text(encoding="utf-8")
+            ),
+        }
+        consumed.add("secondary_mirror_segmentation")
+    camera = None
+    nested_assets = {}
+    unresolved_references = []
+    if "camera_config_file" in verified_assets:
+        try:
+            camera = parse_camera_layout(
+                verified_assets["camera_config_file"].read_text(encoding="utf-8")
+            )
+        except CameraConfigError as error:
+            raise SceneCompileError(str(error)) from error
+        consumed.add("camera_config_file")
+        declared_pixels = parameters.get("camera_pixels", {}).get("value")
+        if isinstance(declared_pixels, bool) or not isinstance(declared_pixels, int):
+            raise SceneCompileError("camera_pixels must be an integer count")
+        if len(camera["pixels"]) != declared_pixels:
+            raise SceneCompileError("camera pixel count differs from production record")
+        consumed.add("camera_pixels")
+        for pixel_type in camera["pixel_types"]:
+            for filename in pixel_type["response_files"]:
+                if not component(filename):
+                    raise SceneCompileError(f"unsafe camera response filename: {filename}")
+                path = root / "model_parameters" / "Files" / filename
+                if not path.resolve().is_relative_to(root):
+                    raise SceneCompileError(f"camera response path escapes source root: {filename}")
+                if path.is_file():
+                    nested_assets[filename] = record(path, root)
+                else:
+                    unresolved_references.append(filename)
+    deferred = sorted(set(parameters) - consumed)
+    for name in deferred:
+        if parameters[name].get("required_for_trace") is True:
+            raise SceneCompileError(f"required field {name} is not supported by the compiler")
+    report = {
+        "consumed": sorted(consumed),
+        "deferred": deferred,
+        "unsupported": [],
+        "field_coverage": {
+            name: {
+                "disposition": "consumed" if name in consumed else "deferred",
+                "reason": "parsed into geometry"
+                if name in consumed
+                else "not compiled into an optical scene",
+            }
+            for name in sorted(parameters)
         },
+        "trace_blockers": [
+            "facet surface normals and alignment are not compiled",
+            "physical detector surfaces, obstructions, and materials remain deferred",
+            *[f"camera response asset is missing: {name}" for name in unresolved_references],
+        ],
+        "facet_geometry_evidence": evidence,
     }
+    if camera is not None:
+        xs = [pixel["centre_xy_m"][0] for pixel in camera["pixels"]]
+        ys = [pixel["centre_xy_m"][1] for pixel in camera["pixels"]]
+        report["camera_layout_evidence"] = {
+            "pixel_count": len(camera["pixels"]),
+            "pixel_type_count": len(camera["pixel_types"]),
+            "centre_bounds_xy_m": [[min(xs), min(ys)], [max(xs), max(ys)]],
+            "unresolved_response_files": sorted(set(unresolved_references)),
+            "surface_status": "unavailable",
+        }
     compiled = {
         "format": "obdeect.compiled-scene.v1",
         "provenance": {
             "model": model,
             "model_version": version,
-            "input_records": ir.get("input_records", {}),
+            "input_records": records,
             "assets": assets,
+            "nested_assets": nested_assets,
         },
-        "primary": {"kind": "segmented_mirror", "facets": facets},
+        "primary": primary,
         "report": report,
     }
+    if secondary is not None:
+        compiled["secondary"] = secondary
+    if camera is not None:
+        compiled["camera"] = camera
     canonical = json.dumps(compiled, sort_keys=True, separators=(",", ":")).encode()
     compiled["scene_sha256"] = hashlib.sha256(canonical).hexdigest()
     return compiled

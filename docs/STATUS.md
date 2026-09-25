@@ -39,15 +39,33 @@ event writing, and array reconstruction are outside scope.
   photon batches have an equivalence test; right-handed rigid frame transforms
   have a ray round-trip test. The full comparison result contract is pending.
 
+## Plan progress
+
+- Step 1: manifest creation and hash verification are implemented. Real
+  reference commands and photon blocks are still needed to meet the exit gate.
+- Step 2: input equivalence and frame round trips pass. The complete SI result
+  and interaction schema remains open.
+- Step 3: in progress. The compiler verifies imported records and assets and
+  extracts mirror-list/segmentation footprints and camera pixel layouts.
+  Nested camera response files are hashed when present and missing references
+  are reported. Normals, physical detector surfaces, structures, and materials
+  remain unresolved, so these scenes are not trace-ready. The selected 6.3.0
+  and 7.0.0 design records yield LST 198, MST 86, SST 18, and SCT 48/24
+  primary/secondary mirror footprints; camera files yield 1855, 1764/1855,
+  2048, and 11328 pixels respectively. The SCT camera references
+  `Angular_response_MPPC_Prod3.dat`, absent from the local checkout. Patch
+  productions 6.0.1, 6.0.2, 6.1.1, and 6.2.1 declare no primary geometry asset
+  and cannot compile standalone scenes.
+
 ## External compatibility requirements
 
 The local `../simulation-models` checkout contains the detailed, versioned
 model data and is the primary import source.  A remote checkout is an allowed
 acquisition route, but every production scene must record the resolved release,
-parameter-record versions, asset paths, and SHA-256 hashes.  The importer now
-parses only mirror-list centres, footprints, focal lengths, and optional z;
-it deliberately stops because those files do not encode panel normals,
-orientation, alignment, camera geometry, structures, or material semantics.
+parameter-record versions, asset paths, and SHA-256 hashes.  The compiler now
+extracts mirror-list or segmentation footprints and camera pixel layouts; it
+stops before assigning panel normals, physical detector surfaces, structure
+geometry, or material semantics that these records do not establish alone.
 
 `../simtools` currently delegates these workflows to sim_telarray and its
 `LightEmission` programs.  Their optical contracts define required obdeect
