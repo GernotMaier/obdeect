@@ -226,10 +226,11 @@ A scan writes one trace CSV per offset and `psf_scan.csv`/`psf_scan.json`.
 These metrics describe the selected deterministic reference configuration;
 they are not validation of a production telescope model.
 
-The [production 7.0.0 sim_telarray reference figures](docs/reference/7.0.0/README.md)
-show focal-plane PSFs and D80/area measurements for LST, both MST cameras,
-and SST across their selected North/South sites. They are reference data for
-future obdeect production-scene comparisons.
+The [production 7.0.0 sim_telarray reference](docs/reference/7.0.0/README.md)
+includes focal-plane PSFs, integration radii, cumulative distributions, and
+archived photon lists for LST, both MST cameras, and SST across their selected
+North/South sites. These are inputs for future obdeect production-scene
+comparisons.
 
 ## Model provenance and scene compilation
 

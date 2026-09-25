@@ -49,7 +49,9 @@ event writing, and array reconstruction are outside scope.
 - Step 1: manifest creation and hash verification are implemented. A compact
   fixed-seed simtools/sim_telarray reference matrix now exists for the selected
   three families; the [reference summary](reference/7.0.0/summary.json) records
-  source revisions, image digest, settings, output hashes, D80, and area.
+  source revisions, image digest, settings, output hashes, D80, area, and exact
+  integration radii. Five distinct 50000-photon imaging lists and their
+  cumulative PSF profiles are archived with hash-verified regeneration.
   Shared launched photon blocks and replayable commands still need freezing.
 - Step 2: input equivalence and frame round trips pass. The complete SI result
   and interaction schema remains open.
@@ -97,7 +99,8 @@ event writing, and array reconstruction are outside scope.
   geometry/PSF rather than complete camera throughput.
   Generated configurations, imaging lists, and logs are in
   `/private/tmp/obdeect-ref-50k-7.0.0`; the checked-in summary has their
-  hashes and focal-plane figures. A matched launched photon block, exact
+  hashes, focal-plane figures, integration radii, and cumulative profiles.
+  A matched launched photon block, exact
   interaction records, production obdeect scene output, and predeclared
   comparison tolerances are still absent.
 - Model data: the local 7.0.0 SCT camera response resolves from the explicit

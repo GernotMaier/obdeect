@@ -20,15 +20,22 @@ background and set camera transmission to one. The reported area is therefore
 an optical ray-tracing area for this PSF fixture, not a full camera-throughput
 prediction.
 The [summary](summary.json) records revisions, hashes, focal-plane crossings,
-D80, and effective area. Each image shows the focal-plane x/y distribution
-and the centroid-centred 80% containment circle in centimetres.
+effective area, and exact centroid-centred integration radii at 50%, 68%, 80%,
+90%, 95%, and 99% containment. Each linked CSV gives the empirical cumulative
+distribution every 0.1% in centimetres, including the enclosed photon count.
+The five distinct compressed [imaging lists](imaging/) are archived here; the
+North and South MST rows share identical photon lists. Recalculate and verify
+all profiles and hashes with
+`PYTHONPATH=python python -m obdeect.simtel_reference_psf docs/reference/7.0.0 --check`.
+The summary keeps simtools' iterative D80 and also reports the exact empirical
+`exact_d80_m`. The figures draw simtools' D80 circle.
 
-| Telescope | North | South |
+| Telescope | North PSF / cumulative profile | South PSF / cumulative profile |
 | --- | --- | --- |
-| LST | [PSF](North_LSTN-design.png) | [PSF](South_LSTS-design.png) |
-| MST FlashCam | [PSF](North_MSTx-FlashCam.png) | [PSF](South_MSTx-FlashCam.png) |
-| MST NectarCam | [PSF](North_MSTx-NectarCam.png) | [PSF](South_MSTx-NectarCam.png) |
-| SST | — | [PSF](South_SSTS-design.png) |
+| LST | [PSF](North_LSTN-design.png) / [CSV](profiles/North_LSTN-design.csv) | [PSF](South_LSTS-design.png) / [CSV](profiles/South_LSTS-design.csv) |
+| MST FlashCam | [PSF](North_MSTx-FlashCam.png) / [CSV](profiles/North_MSTx-FlashCam.csv) | [PSF](South_MSTx-FlashCam.png) / [CSV](profiles/North_MSTx-FlashCam.csv) |
+| MST NectarCam | [PSF](North_MSTx-NectarCam.png) / [CSV](profiles/North_MSTx-NectarCam.csv) | [PSF](South_MSTx-NectarCam.png) / [CSV](profiles/North_MSTx-NectarCam.csv) |
+| SST | — | [PSF](South_SSTS-design.png) / [CSV](profiles/South_SSTS-design.csv) |
 
 The imaging lists include focal-plane crossings that miss active pixels;
 simtools computes the geometric PSF from all crossing positions. These
