@@ -1,12 +1,24 @@
 # Production 7.0.0 optical reference
 
 These figures are **simtools/sim_telarray reference output**, not obdeect
-production traces. They use `validate-optics` in test mode: 5000 star photons,
-10 km source distance, 20° zenith, zero field offset, and seed 19780503.
+production traces. simtools `validate-optics` generated the production 7.0.0
+configs and star lists in test mode. The reference runs replay those configs
+through sim_telarray with **50,000 photons** per telescope (10× the initial
+test run), a 10 km source, 20° zenith, zero field offset, and seed 19780503.
 The Podman launcher adds `-C random_seed=19780503` because simtools otherwise
-leaves that seed on `auto`. The generated configuration, stars file, compressed
-imaging list, and sim_telarray log for each row remain in
-`/private/tmp/obdeect-ref-fixed-7.0.0/<site>_<model>/` on this workspace.
+leaves that seed on `auto`. The generated configs, star lists, imaging lists,
+and sim_telarray logs remain in
+`/private/tmp/obdeect-ref-50k-7.0.0/<site>_<model>/` on this workspace.
+Direct replay was necessary because the updated local simtools checkout cannot
+resolve this model checkout's legacy file paths; all seven configs retained
+their original SHA-256 hashes. The sim_telarray logs confirm that it consumed
+the 7.0.0 LST/MST/SST configs, selected site altitude, 50,000 photons, and
+the seed. The configs use mirror classes 0/0/2 and focal lengths 28/16/2.15 m
+for LST/MST/SST respectively.
+The `validate-optics` settings disable the camera filter and night-sky
+background and set camera transmission to one. The reported area is therefore
+an optical ray-tracing area for this PSF fixture, not a full camera-throughput
+prediction.
 The [summary](summary.json) records revisions, hashes, focal-plane crossings,
 D80, and effective area. Each image shows the focal-plane x/y distribution
 and the centroid-centred 80% containment circle in centimetres.

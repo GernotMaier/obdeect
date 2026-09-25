@@ -87,10 +87,16 @@ event writing, and array reconstruction are outside scope.
 
 - Reference matrix: the local `simtools-dev` environment and Podman image run
   sim_telarray release 2025.246.0. The seven selected 7.0.0 on-axis design
-  fixtures ran through simtools `validate-optics` in test mode with 5000 star
-  photons, a 10 km source, 20° zenith, and an explicit seed of 19780503.
+  configs were generated through simtools `validate-optics` in test mode, then
+  replayed directly with 50000 star photons (10×), a 10 km source, 20° zenith,
+  and an explicit seed of 19780503. The current simtools checkout no longer
+  resolves some legacy model asset paths; the replay uses the original
+  hash-verified configs and star lists.
+  The reference uses `validate-optics` overrides (`camera_filter=none`,
+  `camera_transmission=1`, and zero night-sky background), so it tests optical
+  geometry/PSF rather than complete camera throughput.
   Generated configurations, imaging lists, and logs are in
-  `/private/tmp/obdeect-ref-fixed-7.0.0`; the checked-in summary has their
+  `/private/tmp/obdeect-ref-50k-7.0.0`; the checked-in summary has their
   hashes and focal-plane figures. A matched launched photon block, exact
   interaction records, production obdeect scene output, and predeclared
   comparison tolerances are still absent.
