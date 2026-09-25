@@ -34,6 +34,10 @@ event writing, and array reconstruction are outside scope.
   EventIO reader is not implemented.
 - Tests cover analytic primitives, material and source kernels, model
   prescriptions, importer validation, and toy-scene obstruction behavior.
+- A reference-manifest tool freezes selected model revisions, input and
+  executable hashes, commands, and comparison conventions. CSV and in-memory
+  photon batches have an equivalence test; right-handed rigid frame transforms
+  have a ray round-trip test. The full comparison result contract is pending.
 
 ## External compatibility requirements
 

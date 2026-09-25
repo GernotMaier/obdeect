@@ -29,6 +29,7 @@ scripts.obdeect-compile-scene = "obdeect.scene_compiler:main"
 scripts.obdeect-import-simulation-models = "obdeect.model_import:main"
 scripts.obdeect-plot-toy = "obdeect.plotting:main"
 scripts.obdeect-psf = "obdeect.analysis:main"
+scripts.obdeect-reference-manifest = "obdeect.reference_manifest:main"
 
 [tool.setuptools]
 packages.find.where = [ "python" ]

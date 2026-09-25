@@ -1,4 +1,5 @@
 #include "obdeect/abi.hpp"
+#include "obdeect/frames.hpp"
 #include "obdeect/tables.hpp"
 
 #include <cmath>
@@ -41,6 +42,27 @@ int main() {
   require(validate_photon_block(valid), "valid SoA block accepted");
   const PhotonBlockView inconsistent{position, direction, photon_wavelength, time, weight, {}};
   require(!validate_photon_block(inconsistent), "inconsistent SoA block rejected");
+  const std::vector<Vec3> nonunit_direction{{0.0, 0.0, -2.0}};
+  const PhotonBlockView nonunit{position, nonunit_direction, photon_wavelength, time, weight, id};
+  require(!validate_photon_block(nonunit), "non-unit direction rejected");
+
+  // T-FRAME-001: rotation and translation preserve a physical ray through a
+  // parent/local round trip. Reflections and scaled axes are rejected.
+  const RigidFrame frame{{2.0, -3.0, 5.0}, {0.0, 1.0, 0.0}, {-1.0, 0.0, 0.0},
+                         {0.0, 0.0, 1.0}};
+  require(frame.is_valid(), "right-handed rigid frame accepted");
+  const Ray local{{1.0, 2.0, 3.0}, {0.0, 0.0, -1.0}};
+  const Ray parent = frame.ray_to_parent(local);
+  const Ray round_trip = frame.ray_from_parent(parent);
+  require(parent.position_m.x == 0.0 && parent.position_m.y == -2.0 &&
+              parent.position_m.z == 8.0 && round_trip.position_m.x == local.position_m.x &&
+              round_trip.position_m.y == local.position_m.y &&
+              round_trip.position_m.z == local.position_m.z &&
+              round_trip.direction.z == local.direction.z,
+          "ray round trip preserves position and direction");
+  RigidFrame reflected = frame;
+  reflected.z_axis = {0.0, 0.0, -1.0};
+  require(!reflected.is_valid(), "left-handed frame rejected");
 
   std::cout << "contract tests passed\n";
 }

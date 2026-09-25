@@ -90,6 +90,9 @@ future model importer. A facet list is not currently embedded in any reference
 model, so this must not be interpreted as segmented CTAO telescope support.
 The explicit status, remaining work, and evidence required before claiming
 sim_telarray/ROBAST-level coverage are in [docs/STATUS.md](docs/STATUS.md).
+Reference manifest and comparison schemas are described in
+[docs/REFERENCE_MANIFEST.md](docs/REFERENCE_MANIFEST.md) and
+[docs/COMPARISON_CONTRACT.md](docs/COMPARISON_CONTRACT.md).
 
 ### Import a selected simulation-models production
 

@@ -37,6 +37,22 @@ struct PhotonReadResult {
   bool eof{};
 };
 
+[[nodiscard]] inline bool valid_photon(const OpticalPhoton& photon) {
+  const double direction_length = norm(photon.ray.direction);
+  return std::isfinite(photon.ray.position_m.x) && std::isfinite(photon.ray.position_m.y) &&
+         std::isfinite(photon.ray.position_m.z) && std::isfinite(direction_length) &&
+         std::abs(direction_length - 1.0) <= 1e-12 && std::isfinite(photon.wavelength_nm) &&
+         photon.wavelength_nm >= 0.0 && std::isfinite(photon.time_ns) &&
+         std::isfinite(photon.weight) && photon.weight >= 0.0;
+}
+
+[[nodiscard]] inline bool valid_context(const PhotonBatchContext& context) {
+  return std::isfinite(context.telescope_position_m.x) &&
+         std::isfinite(context.telescope_position_m.y) &&
+         std::isfinite(context.telescope_position_m.z) &&
+         std::isfinite(context.array_reuse_weight) && context.array_reuse_weight >= 0.0;
+}
+
 // Virtual dispatch occurs once per batch, never per ray. Caller owns/reuses the
 // destination storage; errors throw (never masquerade as EOF). A non-EOF read
 // must return count > 0. Event boundaries must not be mixed within a batch.
@@ -51,7 +67,11 @@ class PhotonReader {
 class MemoryPhotonReader final : public PhotonReader {
  public:
   MemoryPhotonReader(std::span<const OpticalPhoton> source, PhotonBatchContext context)
-      : source_(source), context_(context) {}
+      : source_(source), context_(context) {
+    if (!valid_context(context_) ||
+        !std::all_of(source_.begin(), source_.end(), valid_photon))
+      throw std::invalid_argument("invalid in-memory photon or batch metadata");
+  }
 
   PhotonReadResult read(std::span<OpticalPhoton> destination) override {
     if (destination.empty()) throw std::invalid_argument("photon batch capacity must be positive");
@@ -183,8 +203,7 @@ class CsvPhotonReader final : public PhotonReader {
                          header_index_.contains("bunch_id") ? integer("bunch_id") : 0,
                          number("emission_height_m", std::numeric_limits<double>::quiet_NaN()),
                          number("emission_distance_m", std::numeric_limits<double>::quiet_NaN())};
-    if (!normalised_checked(photon.ray.direction) || photon.wavelength_nm < 0.0 || photon.weight < 0.0 ||
-        context.array_reuse_weight < 0.0)
+    if (!valid_photon(photon) || !valid_context(context))
       throw invalid("invalid photon or batch metadata");
     return {context, photon};
   }
