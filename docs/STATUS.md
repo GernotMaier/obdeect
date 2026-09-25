@@ -67,7 +67,9 @@ event writing, and array reconstruction are outside scope.
   globally nearest finite mirror, detector, or opaque surface on each segment
   with a bounded interaction count. Analytic tests cover ordering before and
   after reflection, gaps, path/time, terminal IDs, and the interaction cap.
-  Curved/aspheric surfaces, closed solids, active-area masks, and optical
+  Circular and annular even-polynomial aspheres can now participate in the
+  same nearest-hit search, with tests for sag, normal, and a central hole.
+  Segmented asphere masks, closed solids, active-area masks, and optical
   material behavior are not yet part of this scene.
 - Step 10: analytic-reference CSVs can now produce a dependency-free weighted
   SVG focal-plane map annotated with centroid, D80, and throughput, plus a
@@ -97,10 +99,11 @@ and runs sim_telarray with `IMAGING_LIST`, `random_state=none`, one telescope,
 disabled camera filter and night-sky background, and 100000 photons per run
 (5000 in test mode). It does not export the launched photon block; a matched
 input comparison still needs a reproducible source block and recorded seed.
-- Kernel: the new generic scene currently represents finite planar surfaces.
-  It still needs closed rods/caps and baffles, curved/aspheric reflectors and
-  detectors, pixel masks, material bindings, and bounded interaction records
-  before it can replace the toy/segmented paths or trace a production model.
+- Kernel: the generic scene represents finite planes and circular/annular
+  polynomial aspheres. It still needs closed rods/caps and baffles, segmented
+  asphere masks, pixel masks, material bindings, and bounded interaction
+  records before it can replace the toy/segmented paths or trace a production
+  model.
 
 ## External compatibility requirements
 
