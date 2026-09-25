@@ -1,0 +1,130 @@
+{
+  "format": "obdeect.simtel-reference-summary.v1",
+  "scope": "sim_telarray reference only; obdeect production scenes are pending",
+  "model_version": "7.0.0",
+  "simtools_source_commit": "7547f17c540cda4acf3869897da9fbb602fc17b8",
+  "simulation_models_commit": "9ddb4768ce5079202f503e37773a88c3344a7bdb",
+  "sim_telarray_release": "2025.246.0",
+  "container_image_digest": "sha256:43ae79e39b0c1148f61ce7d2910911aaffaee9afd974d57e857ab32d0188691a",
+  "random_seed": 19780503,
+  "source_distance_km": 10.0,
+  "zenith_angle_deg": 20.0,
+  "off_axis_x_deg": 0.0,
+  "off_axis_y_deg": 0.0,
+  "star_photons": 5000,
+  "test_mode": true,
+  "rows": [
+    {
+      "site": "North",
+      "model": "LSTN-design",
+      "figure": "North_LSTN-design.png",
+      "focal_plane_crossings": 2758,
+      "d80_m": 0.03020437828051819,
+      "effective_area_m2": 365.10118822799996,
+      "centroid_x_m": -0.00027938014638468587,
+      "centroid_y_m": 7.009645785579591e-05,
+      "sha256": {
+        "config": "5fe0b017970f961c551f4679ec8329daea5c6b0e37e59611737f918b1885c0e1",
+        "stars": "03d8db094ee5c9246497ce375ee371def8421548e1e3db7196620aa114a63dac",
+        "imaging_list_gz": "ac225006dd4031d892992f8a4b321f8026c41694114cc30306de7c73f88e0e81",
+        "result_ecsv": "cb75b2b60d62947b7e6a93358d8c20370b50c6e7c0f895aa3b4f4b626ec341bc"
+      }
+    },
+    {
+      "site": "South",
+      "model": "LSTS-design",
+      "figure": "South_LSTS-design.png",
+      "focal_plane_crossings": 2758,
+      "d80_m": 0.030653809944575786,
+      "effective_area_m2": 365.10118822799996,
+      "centroid_x_m": -0.00022748762173066984,
+      "centroid_y_m": 7.598135117044517e-05,
+      "sha256": {
+        "config": "5820382d6a8a359dfb91398665e9bf48f923ff6c6024dab90e12486297ea8976",
+        "stars": "03d8db094ee5c9246497ce375ee371def8421548e1e3db7196620aa114a63dac",
+        "imaging_list_gz": "d54a2300c8b0fe8158348bd000f4d5dbf585dd728cffa1bba5c349c86788a0d7",
+        "result_ecsv": "f0bce820e2e8f8c8c3c516b35f934fca471eb82903d7dbffdbdc5e359c22eca5"
+      }
+    },
+    {
+      "site": "North",
+      "model": "MSTx-FlashCam",
+      "figure": "North_MSTx-FlashCam.png",
+      "focal_plane_crossings": 2426,
+      "d80_m": 0.018680488486033875,
+      "effective_area_m2": 91.359588928,
+      "centroid_x_m": 0.00013139530090684255,
+      "centroid_y_m": 5.216034624896946e-05,
+      "sha256": {
+        "config": "3323ab43ecf4597b8501753014fb47f21b4c5217d5995f47de900b89f4e6afa2",
+        "stars": "03d8db094ee5c9246497ce375ee371def8421548e1e3db7196620aa114a63dac",
+        "imaging_list_gz": "1492289dc26895ff7bb5e0ce769759765a8975ecbc0431881c38440150c9a48f",
+        "result_ecsv": "7e967294aefc5d4b9e37eeda0cea6045a974e09a22d943b97876b2b89a7189a5"
+      }
+    },
+    {
+      "site": "South",
+      "model": "MSTx-FlashCam",
+      "figure": "South_MSTx-FlashCam.png",
+      "focal_plane_crossings": 2426,
+      "d80_m": 0.018680488486033875,
+      "effective_area_m2": 91.359588928,
+      "centroid_x_m": 0.00013139530090684255,
+      "centroid_y_m": 5.216034624896946e-05,
+      "sha256": {
+        "config": "28874b62c97d8797a39693032d41384323fbd95747c17196423bf4345700b3a3",
+        "stars": "03d8db094ee5c9246497ce375ee371def8421548e1e3db7196620aa114a63dac",
+        "imaging_list_gz": "237cd00fb88040ea10c434ce8b01c7e4fe72ec5dc59daaa6e92912e368504fd9",
+        "result_ecsv": "7e967294aefc5d4b9e37eeda0cea6045a974e09a22d943b97876b2b89a7189a5"
+      }
+    },
+    {
+      "site": "North",
+      "model": "MSTx-NectarCam",
+      "figure": "North_MSTx-NectarCam.png",
+      "focal_plane_crossings": 2416,
+      "d80_m": 0.018723921434076772,
+      "effective_area_m2": 90.983003648,
+      "centroid_x_m": 0.00013831064520998033,
+      "centroid_y_m": 5.380926591789203e-05,
+      "sha256": {
+        "config": "bdba9c577994df2907fcc4889111d21c1f5def6767c98ee9f79a621b5a7262ef",
+        "stars": "03d8db094ee5c9246497ce375ee371def8421548e1e3db7196620aa114a63dac",
+        "imaging_list_gz": "10045a11fe94838d8cbc138e6a8a74d0520fb243e2329769f2f40700014927b4",
+        "result_ecsv": "79dbe677e6fc154441ca92f721cf67527dc541a7c6a9ceb89ce239c422e46e36"
+      }
+    },
+    {
+      "site": "South",
+      "model": "MSTx-NectarCam",
+      "figure": "South_MSTx-NectarCam.png",
+      "focal_plane_crossings": 2416,
+      "d80_m": 0.018723921434076772,
+      "effective_area_m2": 90.983003648,
+      "centroid_x_m": 0.00013831064520998033,
+      "centroid_y_m": 5.380926591789203e-05,
+      "sha256": {
+        "config": "305b883d159f3b29f40209d85c33d654abbc10827409596eac262bc88ead1dd9",
+        "stars": "03d8db094ee5c9246497ce375ee371def8421548e1e3db7196620aa114a63dac",
+        "imaging_list_gz": "e4f18e1e5b2f0aec874646a3894ed6a1a621d215a7ee3938e61f3acd13e1cc4e",
+        "result_ecsv": "79dbe677e6fc154441ca92f721cf67527dc541a7c6a9ceb89ce239c422e46e36"
+      }
+    },
+    {
+      "site": "South",
+      "model": "SSTS-design",
+      "figure": "South_SSTS-design.png",
+      "focal_plane_crossings": 1876,
+      "d80_m": 0.007038178959760729,
+      "effective_area_m2": 7.32630528,
+      "centroid_x_m": 1.460234541577825e-05,
+      "centroid_y_m": 2.4683901918976536e-05,
+      "sha256": {
+        "config": "aacf0401891d95755888c19070ea2debb03788948e5bf531dc5db9ce6b982feb",
+        "stars": "03d8db094ee5c9246497ce375ee371def8421548e1e3db7196620aa114a63dac",
+        "imaging_list_gz": "f936a1a393d4617eeec35d1c08b4fbbe623844f317e1ed3069b43a9c17851217",
+        "result_ecsv": "063f799a3d3ae927d9711fcf874a4b806d381c2cd0b0ce077fc7d25f1a4829e8"
+      }
+    }
+  ]
+}
