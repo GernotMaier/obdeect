@@ -102,6 +102,13 @@ def _length_m(parameter: dict[str, Any], name: str, *, allow_zero: bool = False)
     return value
 
 
+def _signed_length_m(parameter: dict[str, Any], name: str) -> float:
+    unit = parameter.get("unit")
+    if unit not in _UNIT_TO_M:
+        raise SceneCompileError(f"{name} has unsupported length unit {unit!r}")
+    return _number(parameter.get("value"), name) * _UNIT_TO_M[unit]
+
+
 def parse_simtel_mirror_list(
     contents: str, *, fallback_focal_length_m: float | None
 ) -> list[dict[str, Any]]:
@@ -176,6 +183,48 @@ def parse_simtel_mirror_list(
     return facets
 
 
+def derive_nominal_single_reflector(
+    facets: list[dict[str, Any]], parameters: dict[str, Any]
+) -> None:
+    """Attach the unperturbed sim_telarray panel centres and normals.
+
+    This follows ``tel_setup_primary`` in sim_imaging.c. Random distance,
+    focal-length and alignment draws remain separate unresolved run inputs.
+    """
+    focal_length = _length_m(parameters["focal_length"], "focal_length")
+    dish_length = _length_m(parameters["dish_shape_length"], "dish_shape_length", allow_zero=True)
+    if dish_length == 0:
+        dish_length = focal_length
+    offset = _signed_length_m(parameters["mirror_offset"], "mirror_offset")
+    parabolic = parameters["parabolic_dish"].get("value")
+    if not isinstance(parabolic, bool):
+        raise SceneCompileError("parabolic_dish must be boolean")
+    for facet in facets:
+        x, y, file_z = facet["centre_m"]
+        radius = math.hypot(x, y)
+        if file_z:
+            height = abs(file_z)
+        elif parabolic:
+            height = radius * radius / (4 * dish_length)
+        else:
+            if radius > dish_length:
+                raise SceneCompileError("panel centre lies outside Davies-Cotton dish radius")
+            height = dish_length - math.sqrt(dish_length * dish_length - radius * radius)
+        distance = math.hypot(focal_length - height, radius)
+        if file_z > 0:
+            z = file_z - offset
+        else:
+            z = focal_length - math.sqrt(distance * distance - radius * radius) - offset
+        inclination = 0.5 * math.asin(radius / distance)
+        if radius:
+            nx = -math.sin(inclination) * x / radius
+            ny = -math.sin(inclination) * y / radius
+        else:
+            nx = ny = 0.0
+        facet["nominal_centre_m"] = [x, y, z]
+        facet["nominal_normal"] = [nx, ny, math.cos(inclination)]
+
+
 def compile_scene(ir: dict[str, Any], source_root: Path) -> dict[str, Any]:
     """Compile ``obdeect.simulation-models-ir.v1`` into generic scene data."""
     if ir.get("format") != "obdeect.simulation-models-ir.v1":
@@ -216,6 +265,7 @@ def compile_scene(ir: dict[str, Any], source_root: Path) -> dict[str, Any]:
         if fallback == 0.0:
             fallback = None
     consumed = set()
+    nominal_geometry = False
     if "mirror_list" in verified_assets:
         facets = parse_simtel_mirror_list(
             verified_assets["mirror_list"].read_text(encoding="utf-8"),
@@ -225,16 +275,27 @@ def compile_scene(ir: dict[str, Any], source_root: Path) -> dict[str, Any]:
         consumed.add("mirror_list")
         if "mirror_focal_length" in parameters:
             consumed.add("mirror_focal_length")
+        nominal_fields = {"focal_length", "dish_shape_length", "mirror_offset", "parabolic_dish"}
+        nominal_geometry = parameters.get("mirror_class", {}).get(
+            "value"
+        ) == 0 and nominal_fields.issubset(parameters)
+        if nominal_geometry:
+            derive_nominal_single_reflector(facets, parameters)
+            consumed.update(nominal_fields)
+            consumed.add("mirror_class")
         evidence = {
             "source_format": "sim_telarray mirror-list (x, y, diameter, focal_length, shape[, z])",
             "facet_count": len(facets),
             "explicit_nonzero_z_count": sum(facet["centre_m"][2] != 0.0 for facet in facets),
-            "normal_status": "unavailable",
+            "normal_status": "nominal_unperturbed" if nominal_geometry else "unavailable",
             "in_plane_orientation_status": "unavailable",
             "alignment_status": "unavailable",
-            "interpretation": "No normals, rotations, or alignment "
-            "are inferred from facet centres, "
-            "focal lengths, shape codes, or z positions.",
+            "interpretation": (
+                "Nominal panel centres and normals follow sim_telarray tel_setup_primary; "
+                "run-specific random alignment and distance remain unresolved."
+                if nominal_geometry
+                else "No normals, rotations, or alignment are inferred from facet centres."
+            ),
         }
     elif "primary_mirror_segmentation" in verified_assets:
         segments = parse_simtel_segmentation(
@@ -306,7 +367,9 @@ def compile_scene(ir: dict[str, Any], source_root: Path) -> dict[str, Any]:
             for name in sorted(parameters)
         },
         "trace_blockers": [
-            "facet surface normals and alignment are not compiled",
+            "run-specific panel alignment and distance are not compiled"
+            if nominal_geometry
+            else "facet surface normals and alignment are not compiled",
             "physical detector surfaces, obstructions, and materials remain deferred",
             *[f"camera response asset is missing: {name}" for name in unresolved_references],
         ],

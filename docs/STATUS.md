@@ -19,7 +19,8 @@ event writing, and array reconstruction are outside scope.
   The production importer resolves an explicitly selected simulation-models
   production from the supplied checkout, records parameter records and asset
   SHA-256 hashes, retains metadata, constrains asset paths, and reports
-  unresolved fields.  It does not yet parse assets into a trace-ready scene.
+  unresolved fields. It derives nominal single-reflector panel geometry but
+  does not yet produce a trace-ready production scene.
 - LST and MST have analytic reference prescriptions.  SST/SCT have tested
   two-mirror polynomial prescriptions, including corrected Schwarzschild--
   Couder reference-radius scaling and focal-plane vertices.  None is a
@@ -47,6 +48,10 @@ event writing, and array reconstruction are outside scope.
   and interaction schema remains open.
 - Step 3: in progress. The compiler verifies imported records and assets and
   extracts mirror-list/segmentation footprints and camera pixel layouts.
+  For single-reflector records it now derives unperturbed panel centres and
+  normals using sim_telarray's `tel_setup_primary` prescription. These are
+  nominal geometry only; run-specific random distance and alignment remain
+  unresolved.
   Nested camera response files are hashed when present and missing references
   are reported. Normals, physical detector surfaces, structures, and materials
   remain unresolved, so these scenes are not trace-ready. The selected 6.3.0
@@ -62,19 +67,22 @@ event writing, and array reconstruction are outside scope.
   after reflection, gaps, path/time, terminal IDs, and the interaction cap.
   Curved/aspheric surfaces, closed solids, active-area masks, and optical
   material behavior are not yet part of this scene.
+- Step 10: analytic-reference CSVs can now produce a dependency-free weighted
+  SVG focal-plane map annotated with centroid, D80, and throughput, plus a
+  machine-readable PSF report. This does not validate production optics.
 
 ## Exact missing inputs and contracts
 
-- Reference matrix: installed sim_telarray and hessio decoder revisions,
-  executable paths, selected site/configuration/seeds, and checksummed photon
-  blocks and commands have not been supplied; no real comparison manifest can
-  be frozen yet.
+- Reference matrix: a sim_telarray **source checkout** is present locally, but
+  a verified executable, hessio decoder revision, selected site/configuration,
+  random seeds, and checksummed shared photon blocks/commands are absent; no
+  real comparison manifest can be frozen yet.
 - Model data: the local 7.0.0 SCT camera config references
   `Angular_response_MPPC_Prod3.dat`, which is absent from its `Files`
-  directory. The mirror lists and segmentation files do not supply aligned
-  panel normals; the extracted camera pixels do not supply a compiled physical
-  detector surface. Structure geometry and optical material semantics are
-  also not yet compiled.
+  directory. Single-reflector nominal normals can be derived, but aligned
+  panel normals require the selected run settings and random draws. The
+  extracted camera pixels do not supply a compiled physical detector surface.
+  Structure geometry and optical material semantics are also not yet compiled.
 - Kernel: the new generic scene currently represents finite planar surfaces.
   It still needs closed rods/caps and baffles, curved/aspheric reflectors and
   detectors, pixel masks, material bindings, and bounded interaction records
@@ -86,9 +94,10 @@ The local `../simulation-models` checkout contains the detailed, versioned
 model data and is the primary import source.  A remote checkout is an allowed
 acquisition route, but every production scene must record the resolved release,
 parameter-record versions, asset paths, and SHA-256 hashes.  The compiler now
-extracts mirror-list or segmentation footprints and camera pixel layouts; it
-stops before assigning panel normals, physical detector surfaces, structure
-geometry, or material semantics that these records do not establish alone.
+extracts mirror-list or segmentation footprints and camera pixel layouts and
+derives nominal single-reflector panel normals. It stops before run-specific
+alignment, physical detector surfaces, structure geometry, or material
+semantics are established.
 
 `../simtools` currently delegates these workflows to sim_telarray and its
 `LightEmission` programs.  Their optical contracts define required obdeect

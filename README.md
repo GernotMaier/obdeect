@@ -51,6 +51,16 @@ obdeect-plot-toy lst_paths.csv --telescope LST --focal-plane --bins 96 \
   --output lst_focal_plane.png
 ```
 
+For a dependency-free weighted PSF map with centroid, D80, and throughput,
+write SVG instead. These commands analyse the **analytic reference** trace,
+not a compiled production telescope scene:
+
+```bash
+obdeect-plot-toy lst_paths.csv --telescope LST --focal-plane --bins 96 \
+  --output lst_focal_plane.svg
+obdeect-psf derive lst_paths.csv --output lst_psf.json
+```
+
 ## Artificial calibration sources
 
 The baseline executable uses 400-nm photons and supports three deterministic
