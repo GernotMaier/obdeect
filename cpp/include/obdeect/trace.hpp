@@ -2,6 +2,7 @@
 
 #include "obdeect/abi.hpp"
 #include "obdeect/diagnostics.hpp"
+#include "obdeect/optical_scene.hpp"
 #include "obdeect/scene.hpp"
 #include "obdeect/segmented_scene.hpp"
 
@@ -92,6 +93,59 @@ struct TraceResult {
     result.photons.surface_id[index] = detector_hit->surface_id;
     result.photons.status[index] = PhotonStatus::detected;
     result.summary.add(PhotonStatus::detected, input.weight[index]);
+  }
+  return result;
+}
+
+// Geometry-only non-sequential reference. Every segment considers every
+// surface; material_id is retained for later response binding.
+[[nodiscard]] inline TraceResult trace(const CompiledOpticalScene& scene, const PhotonBlockView& input) {
+  TraceResult result{PhotonResultBlock{input.position_m.size()}, {}};
+  if (!validate_photon_block(input)) {
+    for (std::size_t index = 0; index < input.position_m.size(); ++index) {
+      result.photons.status[index] = PhotonStatus::invalid_input;
+      ++result.summary.status_count[static_cast<std::size_t>(PhotonStatus::invalid_input)];
+    }
+    return result;
+  }
+  for (std::size_t index = 0; index < input.position_m.size(); ++index) {
+    Ray ray{input.position_m[index], input.direction[index]};
+    result.photons.position_m[index] = ray.position_m;
+    result.photons.direction[index] = ray.direction;
+    result.photons.time_ns[index] = input.time_ns[index];
+    PhotonStatus status = PhotonStatus::interaction_limit;
+    for (std::uint32_t interaction = 0; interaction < scene.max_interactions(); ++interaction) {
+      const auto hit = intersect_nearest_surface(ray, scene);
+      if (!hit) {
+        status = PhotonStatus::escaped_scene;
+        break;
+      }
+      result.photons.optical_path_m[index] += hit->distance_m;
+      result.photons.time_ns[index] += hit->distance_m / kSpeedOfLightMPerNs;
+      result.photons.position_m[index] = hit->point_m;
+      if (hit->role == SurfaceRole::detector) {
+        status = PhotonStatus::detected;
+        result.photons.surface_id[index] = hit->surface_id;
+        break;
+      }
+      if (hit->role == SurfaceRole::obscurer) {
+        status = PhotonStatus::blocked_obscurer;
+        result.photons.surface_id[index] = hit->surface_id;
+        break;
+      }
+      const auto reflected = reflect_specular(ray.direction, hit->normal);
+      if (!reflected) {
+        status = PhotonStatus::invalid_input;
+        break;
+      }
+      result.photons.direction[index] = *reflected;
+      ray = {hit->point_m, *reflected};
+      if (interaction + 1 == scene.max_interactions())
+        result.photons.surface_id[index] = hit->surface_id;
+    }
+    result.photons.status[index] = status;
+    result.photons.weight[index] = status == PhotonStatus::detected ? input.weight[index] : 0.0;
+    result.summary.add(status, input.weight[index]);
   }
   return result;
 }

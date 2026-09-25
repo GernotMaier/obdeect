@@ -56,6 +56,29 @@ event writing, and array reconstruction are outside scope.
   `Angular_response_MPPC_Prod3.dat`, absent from the local checkout. Patch
   productions 6.0.1, 6.0.2, 6.1.1, and 6.2.1 declare no primary geometry asset
   and cannot compile standalone scenes.
+- Step 4: in progress. An immutable generic planar scene now traces the
+  globally nearest finite mirror, detector, or opaque surface on each segment
+  with a bounded interaction count. Analytic tests cover ordering before and
+  after reflection, gaps, path/time, terminal IDs, and the interaction cap.
+  Curved/aspheric surfaces, closed solids, active-area masks, and optical
+  material behavior are not yet part of this scene.
+
+## Exact missing inputs and contracts
+
+- Reference matrix: installed sim_telarray and hessio decoder revisions,
+  executable paths, selected site/configuration/seeds, and checksummed photon
+  blocks and commands have not been supplied; no real comparison manifest can
+  be frozen yet.
+- Model data: the local 7.0.0 SCT camera config references
+  `Angular_response_MPPC_Prod3.dat`, which is absent from its `Files`
+  directory. The mirror lists and segmentation files do not supply aligned
+  panel normals; the extracted camera pixels do not supply a compiled physical
+  detector surface. Structure geometry and optical material semantics are
+  also not yet compiled.
+- Kernel: the new generic scene currently represents finite planar surfaces.
+  It still needs closed rods/caps and baffles, curved/aspheric reflectors and
+  detectors, pixel masks, material bindings, and bounded interaction records
+  before it can replace the toy/segmented paths or trace a production model.
 
 ## External compatibility requirements
 
