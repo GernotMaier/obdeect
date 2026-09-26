@@ -59,19 +59,24 @@ inline std::optional<CompiledSegmentedScene> read_native_scene(const std::string
   std::ifstream input(path);
   if (!input) return std::nullopt;
   std::string line;
-  if (!std::getline(input, line) || line != "obdeect-scene-v1") return std::nullopt;
-  if (!std::getline(input, line)) return std::nullopt;
+  const auto read_line = [&]() {
+    if (!std::getline(input, line)) return false;
+    if (!line.empty() && line.back() == '\r') line.pop_back();
+    return true;
+  };
+  if (!read_line() || line != "obdeect-scene-v1") return std::nullopt;
+  if (!read_line()) return std::nullopt;
   const auto provenance_fields = split_scene_fields(line);
   if (provenance_fields.size() != 4 || provenance_fields[0] != "provenance") return std::nullopt;
   ModelProvenance provenance{provenance_fields[1], provenance_fields[2], provenance_fields[3]};
   if (!has_valid_provenance(provenance)) return std::nullopt;
-  if (!std::getline(input, line) ||
+  if (!read_line() ||
       line != "surface_id,role,shape,cx_m,cy_m,cz_m,nx,ny,nz,tx,ty,tz,diameter_m")
     return std::nullopt;
 
   std::vector<ImportedFacet> facets;
   std::vector<ImportedDetectorSurface> detectors;
-  while (std::getline(input, line)) {
+  while (read_line()) {
     if (line.empty()) continue;
     const auto fields = split_scene_fields(line);
     if (fields.size() != 13) return std::nullopt;
