@@ -44,7 +44,8 @@ def parse_simtel_segmentation(contents: str) -> list[dict[str, Any]]:
             raise SceneCompileError(
                 f"segmentation line {line_number}: unsupported type {fields[0]}"
             )
-        if len(fields) != (6 if kind in {"hex", "yhex"} else 7):
+        expected_fields = {5, 6} if kind in {"hex", "yhex"} else {5, 6, 7}
+        if len(fields) not in expected_fields:
             raise SceneCompileError(f"segmentation line {line_number}: wrong field count")
         try:
             count = int(fields[1])
@@ -54,7 +55,7 @@ def parse_simtel_segmentation(contents: str) -> list[dict[str, Any]]:
         if count < 1 or not all(math.isfinite(value) for value in values):
             raise SceneCompileError(f"segmentation line {line_number}: invalid count or value")
         if kind in {"hex", "yhex"}:
-            x_cm, y_cm, diameter_cm, rotation_deg = values
+            x_cm, y_cm, diameter_cm, rotation_deg = (*values, 0.0)[0:4]
             if count != 1 or diameter_cm <= 0.0:
                 raise SceneCompileError(f"segmentation line {line_number}: invalid hex footprint")
             segments.append({
@@ -65,7 +66,7 @@ def parse_simtel_segmentation(contents: str) -> list[dict[str, Any]]:
                 "rotation_deg": rotation_deg,
             })
         else:
-            inner_cm, outer_cm, span_deg, start_deg, gap_cm = values
+            inner_cm, outer_cm, span_deg, start_deg, gap_cm = (*values, 0.0, 0.0)[0:5]
             if inner_cm < 0.0 or outer_cm <= inner_cm or span_deg <= 0.0 or gap_cm < 0.0:
                 raise SceneCompileError(f"segmentation line {line_number}: invalid ring footprint")
             if count * span_deg > 360.0 + 1e-9:

@@ -157,6 +157,13 @@ class TestSceneCompiler(unittest.TestCase):
         with self.assertRaisesRegex(SceneCompileError, "unsupported type"):
             parse_simtel_segmentation("polygon 1 0 0 1 0\n")
 
+    def test_defaults_omitted_segmentation_rotation_start_and_gap_to_zero(self):
+        segments = parse_simtel_segmentation("hex 1 -85.6 0 84.6\nring 2 100 200 180\n")
+        self.assertEqual(segments[0]["rotation_deg"], 0.0)
+        self.assertEqual(segments[1]["start_deg"], 0.0)
+        self.assertEqual(segments[2]["start_deg"], 180.0)
+        self.assertEqual(segments[1]["gap_m"], 0.0)
+
     def test_compiles_dual_mirror_segmentation_without_invented_normals(self):
         # T-IR-011: nullable mirror_list uses explicit segmentation assets.
         with TemporaryDirectory() as directory:
