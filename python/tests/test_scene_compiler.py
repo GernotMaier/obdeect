@@ -95,6 +95,10 @@ class TestSceneCompiler(unittest.TestCase):
         self.assertNotIn("unit_normal", facets[0])
         self.assertNotIn("rotation_deg", facets[0])
 
+    def test_rejects_invalid_optional_mirror_height(self):
+        with self.assertRaisesRegex(SceneCompileError, "invalid numeric field"):
+            parse_simtel_mirror_list("0 0 120 1600 1 missing\n", fallback_focal_length_m=16.0)
+
     def test_zero_catalogue_fallback_allows_real_lst_rows_with_panel_focal_lengths(self):
         # T-IR-007: the LST catalogue sets mirror_focal_length to zero while
         # its mirror-list provides each panel's focal length.

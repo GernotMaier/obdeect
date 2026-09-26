@@ -135,11 +135,8 @@ def parse_simtel_mirror_list(
             # A comment immediately after the required fields means no z was
             # supplied, rather than an invalid optical datum.
             z_cm = 0.0
-            if len(fields) >= 6:
-                try:
-                    z_cm = float(fields[5])
-                except ValueError:
-                    pass
+            if len(fields) >= 6 and not fields[5].startswith("#"):
+                z_cm = float(fields[5])
         except ValueError as error:
             raise SceneCompileError(
                 f"mirror list line {line_number}: invalid numeric field"
