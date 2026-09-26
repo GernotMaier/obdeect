@@ -1,7 +1,6 @@
 # obdeect status and implementation plan
 
-`TODO.md` is the step-by-step execution checklist. This file records evidence
-and current blockers; keep both synchronized when an item changes state.
+This file records the step-by-step execution checklist, implementation evidence, and current blockers.
 
 ## Scope and success metric
 
