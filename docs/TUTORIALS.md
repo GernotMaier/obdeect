@@ -2,13 +2,13 @@
 
 Run these commands from the repository root after [building the project](../README.md).
 
-## 1. Explore the toy telescope
+## 1. Explore the reference telescope
 
 ```sh
-obdeect-plot-toy --view structure --telescope toy-mst --output toy_structure.png
-./build/debug/obdeect_toy --photons 10000 --output toy.csv
-obdeect-plot-toy toy.csv --view rays --max-paths 150 --output toy_rays.png
-obdeect-plot-toy toy.csv --view focal-plane --bins 80 --output toy_focal.png
+obdeect-plot-reference --view structure --telescope reference-mst --output  reference_structure.png
+./build/debug/obdeect_reference --photons 10000 --output  reference.csv
+obdeect-plot-reference  reference.csv --view rays --max-paths 150 --output  reference_rays.png
+obdeect-plot-reference  reference.csv --view focal-plane --bins 80 --output  reference_focal.png
 ```
 
 The structure view has x-z and y-z projections. Rays are coloured by terminal
@@ -18,10 +18,10 @@ status; blue rays reach the focal screen. The focal image contains only
 ## 2. Change the source
 
 ```sh
-./build/debug/obdeect_toy --source star --field-x-deg 0.5 --output off_axis.csv
-./build/debug/obdeect_toy --source illuminator --distance-m 50 --output flasher.csv
-./build/debug/obdeect_toy --source laser --distance-m 50 --divergence-deg 0.1 --output laser.csv
-obdeect-plot-toy off_axis.csv --view rays --output off_axis.png
+./build/debug/obdeect_reference --source star --field-x-deg 0.5 --output off_axis.csv
+./build/debug/obdeect_reference --source illuminator --distance-m 50 --output flasher.csv
+./build/debug/obdeect_reference --source laser --distance-m 50 --divergence-deg 0.1 --output laser.csv
+obdeect-plot-reference off_axis.csv --view rays --output off_axis.png
 ```
 
 The star is a plane wave. The illuminator is a finite distance point source
@@ -32,9 +32,9 @@ angular divergence. All three are artificial calibration sources.
 
 ```sh
 ./build/debug/obdeect_ctao --telescope LST --photons 10000 --output lst.csv
-obdeect-plot-toy --telescope LST --view structure --output lst_outline.png
-obdeect-plot-toy lst.csv --telescope LST --view rays --output lst_rays.png
-obdeect-plot-toy lst.csv --telescope LST --view focal-plane --output lst_focal.png
+obdeect-plot-reference --telescope LST --view structure --output lst_outline.png
+obdeect-plot-reference lst.csv --telescope LST --view rays --output lst_rays.png
+obdeect-plot-reference lst.csv --telescope LST --view focal-plane --output lst_focal.png
 ```
 
 `MST` is another tested continuous-mirror baseline. LST/MST structure views
@@ -45,7 +45,7 @@ until their two mirror geometry is validated.
 
 ```sh
 obdeect-psf derive lst.csv --field-x-deg 0 --output lst_psf.json
-obdeect-psf scan --executable ./build/debug/obdeect_toy --photons 10000 \
+obdeect-psf scan --executable ./build/debug/obdeect_reference --photons 10000 \
   --field-x-deg 0 0.5 1.0 --output-dir out/scan --plot out/scan.png
 ```
 

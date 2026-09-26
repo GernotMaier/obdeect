@@ -9,7 +9,7 @@ import unittest
 from pathlib import Path
 
 SCRIPT = Path(__file__).parents[1] / "obdeect" / "plotting.py"
-SPEC = importlib.util.spec_from_file_location("plot_toy_mst", SCRIPT)
+SPEC = importlib.util.spec_from_file_location("plot_artificial_mst", SCRIPT)
 PLOT = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader is not None
 SPEC.loader.exec_module(PLOT)
@@ -34,7 +34,7 @@ class TestTracePathReader(unittest.TestCase):
 
     def test_all_reference_telescope_outlines_are_declared(self):
         # T-VIS-010: every C++ catalogue name is selectable by the plot CLI.
-        self.assertEqual(PLOT.TELESCOPE_NAMES, ("toy-mst", "LST", "MST", "SST", "SCT"))
+        self.assertEqual(PLOT.TELESCOPE_NAMES, ("reference-mst", "LST", "MST", "SST", "SCT"))
 
     def test_extracts_weighted_detected_focal_plane_hits(self):
         csv_text = (

@@ -38,9 +38,9 @@ if(OBDEECT_BUILD_EVENTIO_INPUT)
   obdeect_enable_warnings(obdeect_eventio_summary)
 endif()
 
-add_executable(obdeect_toy cpp/src/toy_main.cpp)
-target_link_libraries(obdeect_toy PRIVATE obdeect_core)
-obdeect_enable_warnings(obdeect_toy)
+add_executable(obdeect_reference cpp/src/reference_main.cpp)
+target_link_libraries(obdeect_reference PRIVATE obdeect_core)
+obdeect_enable_warnings(obdeect_reference)
 
 add_executable(obdeect_ctao cpp/src/ctao_main.cpp)
 target_link_libraries(obdeect_ctao PRIVATE obdeect_core)
@@ -54,11 +54,11 @@ if(DEFINED SKBUILD_PLATLIB_DIR)
   # Wheels keep the native programs next to the Python launcher.  The launcher
   # resolves this directory through importlib, so users do not need a source
   # checkout or a separately installed runtime image.
-  install(TARGETS obdeect_toy obdeect_ctao obdeect-simtools-raytrace
+  install(TARGETS obdeect_reference obdeect_ctao obdeect-simtools-raytrace
           RUNTIME DESTINATION obdeect/_native)
   install(DIRECTORY cpp/include/ DESTINATION obdeect/_include)
 else()
-  install(TARGETS obdeect_toy obdeect_ctao obdeect-simtools-raytrace RUNTIME DESTINATION bin)
+  install(TARGETS obdeect_reference obdeect_ctao obdeect-simtools-raytrace RUNTIME DESTINATION bin)
   install(DIRECTORY cpp/include/ DESTINATION include)
 endif()
 
@@ -149,8 +149,14 @@ if(OBDEECT_BUILD_TESTING)
   obdeect_enable_warnings(obdeect_segmented_scene_tests)
   add_test(NAME obdeect_segmented_scene_tests COMMAND obdeect_segmented_scene_tests)
 
+  add_executable(obdeect_scene_file_tests cpp/tests/test_scene_file.cpp)
+  target_link_libraries(obdeect_scene_file_tests PRIVATE obdeect_core)
+  obdeect_enable_warnings(obdeect_scene_file_tests)
+  add_test(NAME obdeect_scene_file_tests COMMAND obdeect_scene_file_tests)
+
   add_executable(obdeect_optical_scene_tests cpp/tests/test_optical_scene.cpp)
   target_link_libraries(obdeect_optical_scene_tests PRIVATE obdeect_core)
   obdeect_enable_warnings(obdeect_optical_scene_tests)
   add_test(NAME obdeect_optical_scene_tests COMMAND obdeect_optical_scene_tests)
+
 endif()

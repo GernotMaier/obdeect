@@ -9,7 +9,7 @@ python -m pip install .
 python examples/run_examples.py --build build --output out/examples --photons 1000
 ```
 
-The script runs a toy telescope with a star, point flasher and divergent laser;
+The script runs a reference telescope with a star, point flasher and divergent laser;
 an ideal parabolic LST on/off axis; and the continuous MST sphere reference.
 Each case writes CSV, structure and ray PNGs, a focal-plane PNG when photons
 reach the detector, and status counts in

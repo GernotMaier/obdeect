@@ -33,19 +33,19 @@ def run_examples(build: Path, output: Path, photons: int) -> None:
     output.mkdir(parents=True, exist_ok=True)
     suffix = ".exe" if os.name == "nt" else ""
     cases = [
-        ("toy_star", "obdeect_toy", ["--source", "star"], "toy-mst", True),
+        ("reference_star", "obdeect_reference", ["--source", "star"], "reference-mst", True),
         (
-            "toy_flasher",
-            "obdeect_toy",
+            "reference_flasher",
+            "obdeect_reference",
             ["--source", "illuminator", "--distance-m", "50"],
-            "toy-mst",
+            "reference-mst",
             False,
         ),
         (
-            "toy_laser",
-            "obdeect_toy",
+            "reference_laser",
+            "obdeect_reference",
             ["--source", "laser", "--divergence-deg", "0.1"],
-            "toy-mst",
+            "reference-mst",
             True,
         ),
         ("lst_on_axis", "obdeect_ctao", ["--telescope", "LST"], "LST", True),

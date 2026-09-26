@@ -1,5 +1,8 @@
 # obdeect status and implementation plan
 
+`TODO.md` is the step-by-step execution checklist. This file records evidence
+and current blockers; keep both synchronized when an item changes state.
+
 ## Scope and success metric
 
 `obdeect` is a C++20 optical photon tracer. It must become a selectable
@@ -42,26 +45,31 @@ phase.
   path-safety checks, current parameter-local and legacy shared asset layouts,
   nominal mirror footprints/normals, focal-plane layout geometry and
   unresolved-field reporting. ECSV mirror lists and focal-plane layouts from
-  simulation-models compile for the LST and both MST reference variants.
-  Imported scenes are not trace-ready production telescopes.
+  simulation-models compile for the LST and both MST variants.
+- Native scene export now carries provenance, explicit panel centres, normals,
+  polygon orientation and detector extent. The C++ simtools CLI loads this
+  table and traces imported LST and MST panel geometry directly, preserving
+  panel boundaries, detector misses, path lengths and incidence angles.
 - Reference-manifest tooling and a 7.0.0 simtools/sim_telarray matrix with
   archived imaging lists, PSF containment radii and cumulative profiles.
-- Reference structure, ray and focal-plane plotting plus machine-readable PSF
-  summaries. Ray plots now distinguish stars, finite illuminators and lasers
-  by source colour and annotate the mean focal incidence angle. Focal plots
-  retain weighted x/y projections and containment summaries. These still use
-  analytic structure outlines where compiled geometry is not available.
+- Reference and compiled-geometry structure, ray and focal-plane plotting plus
+  machine-readable PSF summaries. Ray plots distinguish stars, finite
+  illuminators and lasers by source colour and annotate the mean focal
+  incidence angle. Compiled plots show every imported panel centre and the
+  focal boundary without inventing unavailable structure; focal plots retain
+  weighted x/y projections and containment summaries.
 - The versioned `obdeect-arrival-v1` contract validates CSV records before
   analysis: finite SI scalars, non-negative weights, bounded throughput,
   terminal status, path length and interaction points. It exposes detected
   focal coordinates and optical weights.
-- A native `obdeect-simtools-raytrace` reference CLI now emits that contract
-  for star, finite-distance illuminator and laser inputs, with telescope,
-  field, distance, wavelength, source-position and divergence options. It is a
-  reference vertical slice; its records include focal, primary and secondary
-  incidence angles, interaction points and an explicit `source_kind` field so
-  downstream plots and analysis cannot confuse source classes. It does not yet
-  compile simulation-model assets.
+- A native `obdeect-simtools-raytrace` CLI now emits that contract for star,
+  finite-distance illuminator and laser inputs, with telescope, field,
+  distance, wavelength, source-position and divergence options. Its records
+  include focal, primary and secondary incidence angles, interaction points
+  and an explicit `source_kind` field so downstream plots and analysis cannot
+  confuse source classes. `--scene-file` executes the model-derived native
+  scene surface table; the built-in analytic prescription remains available
+  for comparison.
 - A `SimulatorObdeect` runner and explicit `RayTracing` backend branch are now
   present in the sibling simtools checkout. They invoke the reference CLI and
   preserve sim_telarray as the default. The runner forwards telescope,
@@ -72,7 +80,10 @@ phase.
   points. Both reject unsupported weighted PSF inputs instead of silently
   producing biased results.
 - An optional simtools backend configuration keeps `sim_telarray` as the
-  default and labels the present native path as a reference implementation.
+  default; native scene execution is selected explicitly for validation.
+- PyPI CI builds wheels and an sdist for every pull request and uploads them as
+  artifacts. Tag pushes matching `v*` are the only automatic PyPI publishes;
+  ordinary branch pushes do not run this workflow.
 
 ## Remaining implementation, in order
 
@@ -98,7 +109,6 @@ phase.
    shadows and curved focal surface. Add SCT only with its own model and gate.
 3. Bind optical coatings, filters, windows, light guides and active detector
    surfaces. Keep optical arrival, transmission and component losses separate.
-   Do not model electronic response.
 4. Keep the scene IR observatory-neutral. Add a ROBAST adapter only through
    the same surface/material/provenance contract.
 
@@ -155,11 +165,12 @@ cache time. Do not enable a telescope/source workflow until its fixture passes.
 
 ## Current blockers and completion gate
 
-The simtools backend selector, container integration, reference CLI, incident
-angle path and CSV PSF reader exist. The production model compiler still stops
-before aligned geometry, structures, physical detector surfaces and material
-bindings; those compiled scenes and their acceptance fixtures remain the next
-blockers.
+The simtools backend selector, container integration, native scene loader,
+incident-angle path and CSV PSF reader exist. The imported LST/MST scene path
+currently traces nominal panel planes and a physical focal boundary. Full
+production equivalence still requires run-specific alignment and roughness,
+secondary and support geometry, obscurers, wavelength-dependent materials,
+and acceptance fixtures for every telescope family.
 
 Claim production compatibility only after LST, MST and SST pass the complete
 ray-tracing, PSF, effective-area/focal-length, source and incidence-angle

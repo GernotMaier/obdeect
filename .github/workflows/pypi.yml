@@ -3,19 +3,16 @@ name: Build and publish obdeect-dev
 
 on:
   pull_request:
-    paths:
-      - CMakeLists.txt
-      - cmake/**
-      - cpp/**
-      - python/**
-      - pyproject.toml
-      - .github/workflows/pypi.yml
   push:
     tags:
       - "v*"
-  release:
-    types: [published]
   workflow_dispatch:
+    inputs:
+      publish_testpypi:
+        description: Publish the built distributions to TestPyPI
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -30,7 +27,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ github.event_name == 'release' && github.event.release.tag_name || github.ref }}
+          ref: ${{ github.ref }}
       - uses: actions/setup-python@v7
         with:
           python-version: "3.14"
@@ -39,7 +36,9 @@ jobs:
       - name: Build and smoke-test wheels
         env:
           CIBW_BUILD: "cp310-* cp311-* cp312-* cp313-* cp314-*"
-          CIBW_TEST_COMMAND: "obdeect-simtools-raytrace --telescope MST --photons 8 --output {project}/wheel-smoke.csv"
+          CIBW_TEST_COMMAND: >-
+            obdeect-simtools-raytrace --telescope MST --photons 8
+            --output {project}/wheel-smoke.csv
         run: python -m cibuildwheel --output-dir wheelhouse
       - uses: actions/upload-artifact@v7
         with:
@@ -51,7 +50,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ github.event_name == 'release' && github.event.release.tag_name || github.ref }}
+          ref: ${{ github.ref }}
       - uses: actions/setup-python@v7
         with:
           python-version: "3.14"
@@ -65,7 +64,7 @@ jobs:
           path: dist/*.tar.gz
 
   publish:
-    if: github.event_name == 'release'
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     needs: [wheels, sdist]
     runs-on: ubuntu-24.04
     environment: pypi
@@ -78,3 +77,23 @@ jobs:
           merge-multiple: true
       - name: Publish distributions to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
+
+  publish-testpypi:
+    if: >-
+      ${{
+        github.event_name == 'workflow_dispatch' && inputs.publish_testpypi
+      }}
+    needs: [wheels, sdist]
+    runs-on: ubuntu-24.04
+    environment: testpypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Publish distributions to TestPyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/

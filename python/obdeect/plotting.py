@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Optional visualization for CSV paths from the toy and CTAO reference tracers."""
+"""Optional visualization for CSV paths from the reference and CTAO reference tracers."""
 
 import argparse
 import csv
+import json
 import math
 from pathlib import Path
 from xml.sax.saxutils import escape
@@ -74,14 +75,14 @@ def focal_plane_hits(path: Path):
             )
 
 
-TELESCOPE_NAMES = ("toy-mst", "LST", "MST", "SST", "SCT")
+TELESCOPE_NAMES = ("reference-mst", "LST", "MST", "SST", "SCT")
 
 
 def draw_reference_telescope(axis, telescope: str):
     """Draw a side projection; reference models show optical surfaces only."""
     from matplotlib.patches import Rectangle
 
-    if telescope == "toy-mst":
+    if telescope == "reference-mst":
         mirror_x = [(-6.0 + 12.0 * index / 200.0) for index in range(201)]
         mirror_z = [9.75 - math.sqrt(9.75**2 - x**2) for x in mirror_x]
         axis.plot(mirror_x, mirror_z, color="0.15", linewidth=2.0, label="spherical primary")
@@ -133,12 +134,61 @@ def draw_structure(plt, telescope: str, output: Path):
         draw_reference_telescope(axis, telescope)
         axis.set(xlabel=f"telescope {horizontal} [m]", ylabel="telescope z [m]")
         axis.set_aspect("equal", adjustable="box")
-        axis.set_ylim(-0.5, {"toy-mst": 6.0, "LST": 30.0, "MST": 18.0}.get(telescope, 8.0))
+        axis.set_ylim(-0.5, {"reference-mst": 6.0, "LST": 30.0, "MST": 18.0}.get(telescope, 8.0))
     axes[0].legend(loc="best")
     description = (
-        "toy mirror, camera and supports" if telescope == "toy-mst" else "reference optical outline"
+        "reference mirror, camera and supports"
+        if telescope == "reference-mst"
+        else "reference optical outline"
     )
     figure.suptitle(f"{telescope} {description}")
+    figure.tight_layout()
+    figure.savefig(output, dpi=160, bbox_inches="tight")
+    plt.close(figure)
+
+
+def draw_compiled_structure(plt, scene_path: Path, output: Path):
+    """Plot the explicit compiled primary facets and focal boundary.
+
+    The plot consumes only geometry present in the compiled scene JSON. Any
+    unavailable secondary, support, or obscuration geometry is listed in the
+    figure annotation instead of being replaced by an illustrative outline.
+    """
+    scene = json.loads(scene_path.read_text(encoding="utf-8"))
+    facets = scene.get("primary", {}).get("facets", [])
+    if not facets:
+        raise SystemExit("compiled scene contains no primary facets")
+    figure, axes = plt.subplots(1, 2, figsize=(12, 5), sharey=True)
+    for axis, coordinate in zip(axes, (0, 1), strict=True):
+        for facet in facets:
+            centre = facet.get("nominal_centre_m")
+            if not isinstance(centre, list) or len(centre) != 3:
+                continue
+            axis.scatter(centre[coordinate], centre[2], s=8, c="tab:blue", alpha=0.65)
+        camera = scene.get("camera", {})
+        elements = camera.get("pixels", [])
+        if elements:
+            extent = max(
+                math.hypot(float(item["centre_xy_m"][0]), float(item["centre_xy_m"][1]))
+                for item in elements
+            )
+            focal = float(scene.get("focal_length_m", facets[0].get("focal_length_m", 0.0)))
+            axis.plot(
+                [-extent, extent],
+                [focal, focal],
+                color="tab:orange",
+                linewidth=2,
+                label="focal boundary",
+            )
+        axis.set(xlabel=f"compiled telescope {'xy'[coordinate]} [m]", ylabel="compiled z [m]")
+        axis.set_aspect("equal", adjustable="box")
+    axes[0].scatter([], [], s=8, c="tab:blue", label="mirror facet centres")
+    axes[0].legend(loc="best")
+    blockers = scene.get("report", {}).get("trace_blockers", [])
+    subtitle = "compiled model geometry"
+    if blockers:
+        subtitle += "; unresolved: " + ", ".join(str(item) for item in blockers[:2])
+    figure.suptitle(subtitle)
     figure.tight_layout()
     figure.savefig(output, dpi=160, bbox_inches="tight")
     plt.close(figure)
@@ -177,7 +227,7 @@ def draw_rays(plt, path: Path, telescope: str, output: Path, max_paths: int):
         draw_reference_telescope(axis, telescope)
         axis.set(xlabel=f"telescope {horizontal} [m]", ylabel="telescope z [m]")
         axis.set_aspect("equal", adjustable="box")
-        axis.set_ylim(-0.5, {"toy-mst": 8.0, "LST": 32.0, "MST": 20.0}.get(telescope, 8.0))
+        axis.set_ylim(-0.5, {"reference-mst": 8.0, "LST": 32.0, "MST": 20.0}.get(telescope, 8.0))
     axes[0].legend(loc="best")
     labels = ", ".join(sorted(source_seen)) or "unknown source"
     angle = f"; focal incidence mean {sum(incidence) / len(incidence):.3g}°" if incidence else ""
@@ -294,11 +344,11 @@ def main():
     parser.add_argument(
         "paths", type=Path, nargs="?", help="trace CSV (required for rays and focal plane)"
     )
-    parser.add_argument("--output", type=Path, default=Path("toy_mst_paths.png"))
+    parser.add_argument("--output", type=Path, default=Path("artificial_mst_paths.png"))
     parser.add_argument("--max-paths", type=int, default=300)
     parser.add_argument(
         "--view",
-        choices=("structure", "rays", "focal-plane"),
+        choices=("structure", "compiled-structure", "rays", "focal-plane"),
         default="rays",
         help="structure outline, recorded ray paths, or weighted focal-plane image",
     )
@@ -312,18 +362,25 @@ def main():
     )
     parser.add_argument("--bins", type=int, default=64, help="focal-plane histogram bins per axis")
     parser.add_argument(
+        "--scene-json",
+        type=Path,
+        help="compiled scene JSON for --view compiled-structure",
+    )
+    parser.add_argument(
         "--telescope",
         choices=TELESCOPE_NAMES,
-        default="toy-mst",
+        default="reference-mst",
         help="outline only; does not modify trace coordinates",
     )
     args = parser.parse_args()
     if args.max_paths < 1 or args.bins < 1:
         parser.error("--max-paths and --bins must be positive")
-    if args.paths is None and args.view != "structure":
+    if args.paths is None and args.view not in {"structure", "compiled-structure"}:
         parser.error("paths CSV is required for rays and focal plane")
     if args.focal_plane and args.view != "rays":
         parser.error("--focal-plane cannot be combined with --view")
+    if args.view == "compiled-structure" and args.scene_json is None:
+        parser.error("--scene-json is required for --view compiled-structure")
 
     if args.focal_plane and args.output.suffix.lower() == ".svg":
         draw_focal_plane_svg(args.paths, args.output, args.bins, args.telescope)
@@ -341,6 +398,9 @@ def main():
 
     if args.view == "structure":
         draw_structure(plt, args.telescope, args.output)
+        return
+    if args.view == "compiled-structure":
+        draw_compiled_structure(plt, args.scene_json, args.output)
         return
     if args.focal_plane or args.view == "focal-plane":
         draw_focal_plane(plt, args.paths, args.output, args.bins, args.telescope)

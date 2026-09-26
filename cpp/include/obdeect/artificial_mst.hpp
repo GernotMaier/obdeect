@@ -15,7 +15,7 @@ namespace obdeect {
 // production model: it has one continuous spherical mirror, a camera disk and
 // four finite cylindrical mast legs.  Its purpose is a clear executable first
 // vertical slice, including real pre-M1 structural shadowing.
-struct ToyMstConfig {
+struct ArtificialMstConfig {
   double mirror_radius_m{9.75};       // MST-like 12 m dish curvature scale.
   double mirror_aperture_radius_m{6.0};
   double focal_length_m{4.875};       // Spherical paraxial focus = R / 2.
@@ -26,7 +26,7 @@ struct ToyMstConfig {
   bool include_structure{true};
 };
 
-inline bool is_valid(const ToyMstConfig& config) {
+inline bool is_valid(const ArtificialMstConfig& config) {
   return std::isfinite(config.mirror_radius_m) && std::isfinite(config.mirror_aperture_radius_m) &&
          std::isfinite(config.focal_length_m) && std::isfinite(config.screen_radius_m) &&
          std::isfinite(config.camera_radius_m) && std::isfinite(config.camera_half_depth_m) &&
@@ -39,7 +39,7 @@ inline bool is_valid(const ToyMstConfig& config) {
 }
 
 
-inline std::array<std::pair<Vec3, Vec3>, 4> mast_legs(const ToyMstConfig& config) {
+inline std::array<std::pair<Vec3, Vec3>, 4> mast_legs(const ArtificialMstConfig& config) {
   std::array<std::pair<Vec3, Vec3>, 4> legs{};
   constexpr double base_radius_m = 4.2;
   constexpr double camera_support_radius_m = 0.7;
@@ -52,18 +52,18 @@ inline std::array<std::pair<Vec3, Vec3>, 4> mast_legs(const ToyMstConfig& config
   return legs;
 }
 
-struct ToyObstructionHit {
+struct ReferenceObstructionHit {
   double distance_m{};
   PhotonStatus status{PhotonStatus::blocked_camera};
 };
 
-[[nodiscard]] inline std::optional<ToyObstructionHit> nearest_toy_obstruction(const Ray& ray,
-                                                                                 const ToyMstConfig& config) {
+[[nodiscard]] inline std::optional<ReferenceObstructionHit> nearest_reference_obstruction(const Ray& ray,
+                                                                                 const ArtificialMstConfig& config) {
   if (!config.include_structure) return std::nullopt;
-  std::optional<ToyObstructionHit> nearest;
+  std::optional<ReferenceObstructionHit> nearest;
   const auto consider = [&nearest](std::optional<double> candidate, PhotonStatus status) {
     if (candidate && (!nearest || *candidate < nearest->distance_m)) {
-      nearest = ToyObstructionHit{*candidate, status};
+      nearest = ReferenceObstructionHit{*candidate, status};
     }
   };
 
@@ -82,11 +82,11 @@ struct ToyObstructionHit {
   return nearest;
 }
 
-[[nodiscard]] inline bool occurs_before(const ToyObstructionHit& obstruction, double boundary_m) {
+[[nodiscard]] inline bool occurs_before(const ReferenceObstructionHit& obstruction, double boundary_m) {
   return obstruction.distance_m < boundary_m;
 }
 
-inline PathRecord trace_toy_mst(const Ray& input, std::uint64_t photon_id, const ToyMstConfig& config) {
+inline PathRecord trace_artificial_mst(const Ray& input, std::uint64_t photon_id, const ArtificialMstConfig& config) {
   PathRecord record{};
   record.photon_id = photon_id;
   record.points_m[0] = input.position_m;
@@ -102,7 +102,7 @@ inline PathRecord trace_toy_mst(const Ray& input, std::uint64_t photon_id, const
   record.final_direction = ray.direction;
   const Vec3 mirror_center{0.0, 0.0, config.mirror_radius_m};
   const auto mirror_t = intersect_lower_spherical_cap(ray, mirror_center, config.mirror_radius_m);
-  const auto incoming_obstruction = nearest_toy_obstruction(ray, config);
+  const auto incoming_obstruction = nearest_reference_obstruction(ray, config);
   if (incoming_obstruction && (!mirror_t || occurs_before(*incoming_obstruction, *mirror_t))) {
     record.status = incoming_obstruction->status;
     record.points_m[1] = ray.position_m + ray.direction * incoming_obstruction->distance_m;
@@ -147,7 +147,7 @@ inline PathRecord trace_toy_mst(const Ray& input, std::uint64_t photon_id, const
     record.final_direction = ray.direction;
     return record;
   }
-  const auto outgoing_obstruction = nearest_toy_obstruction(ray, config);
+  const auto outgoing_obstruction = nearest_reference_obstruction(ray, config);
   if (outgoing_obstruction && occurs_before(*outgoing_obstruction, *screen_t)) {
     record.status = outgoing_obstruction->status;
     record.points_m[2] = ray.position_m + ray.direction * outgoing_obstruction->distance_m;
@@ -168,7 +168,7 @@ inline PathRecord trace_toy_mst(const Ray& input, std::uint64_t photon_id, const
 }
 
 // Low-discrepancy, uniform-area samples across the optical entrance pupil.
-inline std::vector<Ray> parallel_blue_cherenkov_rays(std::size_t count, const ToyMstConfig& config,
+inline std::vector<Ray> parallel_blue_cherenkov_rays(std::size_t count, const ArtificialMstConfig& config,
                                                       double source_z_m = 20.0) {
   std::vector<Ray> rays;
   if (!is_valid(config) || !std::isfinite(source_z_m) || count == 0) return rays;

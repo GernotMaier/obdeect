@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Cross-check the obdeect toy spherical primary against iactrace.
+"""Cross-check the obdeect  reference spherical primary against iactrace.
 
 This deliberately compares only the shared analytic problem: parallel rays,
 one continuous spherical primary and a plane at the paraxial focal distance.

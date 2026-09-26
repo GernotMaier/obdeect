@@ -128,7 +128,7 @@ class TestPsfAnalysis(unittest.TestCase):
                     "field_x_deg": [0.0000001, 0.0000002],
                     "field_y_deg": 0.0,
                     "photons": 4,
-                    "executable": root / "obdeect_toy",
+                    "executable": root / "obdeect_reference",
                     "extra_argument": [],
                     "plot": None,
                 },

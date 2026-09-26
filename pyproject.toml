@@ -28,11 +28,11 @@ optional-dependencies.dev = [ "pre-commit", "pytest", "ruff", "towncrier" ]
 scripts.obdeect-compile-scene = "obdeect.scene_compiler:main"
 scripts.obdeect-ctao = "obdeect.cli:ctao_main"
 scripts.obdeect-import-simulation-models = "obdeect.model_import:main"
-scripts.obdeect-plot-toy = "obdeect.plotting:main"
+scripts.obdeect-plot-reference = "obdeect.plotting:main"
 scripts.obdeect-psf = "obdeect.analysis:main"
+scripts.obdeect-reference = "obdeect.cli:reference_main"
 scripts.obdeect-reference-manifest = "obdeect.reference_manifest:main"
 scripts.obdeect-simtools-raytrace = "obdeect.cli:simtools_raytrace_main"
-scripts.obdeect-toy = "obdeect.cli:toy_main"
 
 [tool.setuptools_scm]
 fallback_version = "0.1.0"

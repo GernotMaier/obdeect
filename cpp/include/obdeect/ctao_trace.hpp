@@ -25,7 +25,7 @@ namespace obdeect {
 }
 
 // Reference optical-chain tracer. It is intentionally geometric only: no
-// wavelength response, facet boundaries, obscurations or camera readout are
+// wavelength response, facet boundaries, obscurations or detector conversion are
 // silently invented. Such features are applied only after model import.
 [[nodiscard]] inline PathRecord trace_ctao_reference(const Ray& input, std::uint64_t photon_id,
                                                       const CtaoReferenceModel& model) {

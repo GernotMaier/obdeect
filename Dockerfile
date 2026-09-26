@@ -34,7 +34,7 @@ RUN printf '%s\n' \
       'obdeect_build_type: "Release"' \
       'obdeect_build_testing: false' \
       'reference_executables:' \
-      '  - obdeect_toy' \
+      '  - obdeect_reference' \
       '  - obdeect_ctao' \
       '  - obdeect-simtools-raytrace' > /opt/obdeect/build_opts.yml
 

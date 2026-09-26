@@ -1,6 +1,6 @@
 #include "obdeect/cli_parse.hpp"
 #include "obdeect/sources.hpp"
-#include "obdeect/toy_mst.hpp"
+#include "obdeect/artificial_mst.hpp"
 
 #include <fstream>
 #include <iomanip>
@@ -27,7 +27,7 @@ bool parse_source(const std::string& value, obdeect::ArtificialSourceKind& outpu
 }
 
 void usage() {
-  std::cout << "Usage: obdeect_toy [--photons N] [--output paths.csv] [--no-structure]\n"
+  std::cout << "Usage: obdeect_reference [--photons N] [--output paths.csv] [--no-structure]\n"
             << "                    [--source star|illuminator|laser] [--field-x-deg D]\n"
             << "                    [--field-y-deg D] [--distance-m D] [--divergence-deg D]\n"
             << "                    [--wavelength-nm D]\n"
@@ -41,8 +41,8 @@ int main(int argc, char** argv) {
   using obdeect::parse_finite_double;
   using obdeect::parse_positive_size;
   std::size_t photon_count = 10000;
-  std::string output_path{"toy_mst_paths.csv"};
-  obdeect::ToyMstConfig config{};
+  std::string output_path{"artificial_mst_paths.csv"};
+  obdeect::ArtificialMstConfig config{};
   obdeect::ArtificialSourceKind source_kind = obdeect::ArtificialSourceKind::star;
   double field_x_deg = 0.0;
   double field_y_deg = 0.0;
@@ -110,7 +110,7 @@ int main(int argc, char** argv) {
     return 1;
   }
   for (const auto& photon : photons) {
-    auto record = obdeect::trace_toy_mst(photon.ray, photon.photon_id, config);
+    auto record = obdeect::trace_artificial_mst(photon.ray, photon.photon_id, config);
     record.wavelength_nm = photon.wavelength_nm;
     detected += record.status == obdeect::PhotonStatus::detected;
     camera_blocked += record.status == obdeect::PhotonStatus::blocked_camera;

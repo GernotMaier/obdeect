@@ -14,10 +14,40 @@ from obdeect.scene_compiler import (
     parse_simtel_mirror_list,
     parse_simtel_segmentation,
     require_trace_ready,
+    write_native_scene,
 )
 
 
 class TestSceneCompiler(unittest.TestCase):
+    def test_native_scene_export_contains_provenance_and_detector_surface(self):
+        scene = {
+            "provenance": {"model": "GENERIC", "model_version": "1.0.0", "input_records": {}},
+            "scene_sha256": "a" * 64,
+            "report": {"facet_geometry_evidence": {"normal_status": "nominal_unperturbed"}},
+            "primary": {
+                "facets": [
+                    {
+                        "id": 0,
+                        "shape": "hexagon_flat_y",
+                        "diameter_m": 1.2,
+                        "focal_length_m": 16.0,
+                        "nominal_centre_m": [0.0, 0.0, 0.0],
+                        "nominal_normal": [0.0, 0.0, 1.0],
+                    }
+                ]
+            },
+            "camera": {"pixels": [{"centre_xy_m": [0.0, 0.1]}]},
+            "focal_length_m": 16.0,
+        }
+        with TemporaryDirectory() as directory:
+            output = Path(directory) / "scene.csv"
+            write_native_scene(scene, output)
+            lines = output.read_text().splitlines()
+        self.assertEqual(lines[0], "obdeect-scene-v1")
+        self.assertEqual(lines[1], "provenance,GENERIC,1.0.0," + "a" * 64)
+        self.assertIn("0,mirror,hexagon_flat_y", lines[3])
+        self.assertIn("1,detector,circle", lines[4])
+
     def test_trace_readiness_requires_resolved_scene(self):
         require_trace_ready({"report": {"trace_blockers": [], "native_trace_ready": True}})
         with self.assertRaisesRegex(SceneCompileError, "detector surfaces"):
@@ -107,6 +137,26 @@ class TestSceneCompiler(unittest.TestCase):
         self.assertEqual(scene["report"]["facet_geometry_evidence"]["normal_status"], "unavailable")
         self.assertIn("No normals", scene["report"]["facet_geometry_evidence"]["interpretation"])
         self.assertEqual(len(scene["scene_sha256"]), 64)
+
+    def test_native_export_contains_provenance_and_detector_surface(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            # Keep this focused on the strict writer contract; the production
+            # compiler's camera parser is tested separately.
+            scene = compile_scene(self.make_ir(root), root)
+            scene["camera"] = {"pixels": [{"centre_xy_m": [0.1, 0.0]}]}
+            scene["focal_length_m"] = 16.0
+            scene["report"]["facet_geometry_evidence"]["normal_status"] = "nominal_unperturbed"
+            for facet in scene["primary"]["facets"]:
+                facet["nominal_centre_m"] = [*facet["centre_m"][:2], 0.0]
+                facet["nominal_normal"] = [0.0, 0.0, 1.0]
+            output = root / "scene.csv"
+            write_native_scene(scene, output)
+            lines = output.read_text().splitlines()
+        assert lines[0] == "obdeect-scene-v1"
+        assert lines[1].startswith("provenance,GENERIC,1.0.0,")
+        assert lines[2].startswith("surface_id,role,shape,")
+        assert any(",detector,circle," in line for line in lines[3:])
 
     def test_parses_real_simtel_comment_suffix_without_turning_it_into_alignment(self):
         # T-IR-006: LST mirror-list rows carry an optional z followed by a
@@ -300,7 +350,7 @@ class TestSceneCompiler(unittest.TestCase):
             data = json.loads(count_record.read_text())
             data["value"] = 3
             count_record.write_text(json.dumps(data))
-            with self.assertRaisesRegex(SceneCompileError, "pixel count differs"):
+            with self.assertRaisesRegex(SceneCompileError, "focal-plane element count differs"):
                 compile_scene(resolve_model(root, "GENERIC", "1.0.0"), root)
 
     def test_rejects_nonfinite_fallback_focal_length(self):

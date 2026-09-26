@@ -47,10 +47,10 @@ def _run(name: str) -> int:
     return 1
 
 
-def toy_main() -> int:
-    """Run the packaged toy ray tracer."""
+def reference_main() -> int:
+    """Run the packaged  reference ray tracer."""
 
-    return _run("obdeect_toy")
+    return _run("obdeect_reference")
 
 
 def ctao_main() -> int:
