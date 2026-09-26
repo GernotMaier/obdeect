@@ -81,6 +81,7 @@ struct Fixture {
     require(end_write_tel_array(buffer, &array) == 0, "array end");
     flush(buffer);
 
+#ifdef IO_TYPE_MC_PHOTONS3D
     // A second array reuse uses the separate top-level telescope blocks.
     require(write_tel_array_head(buffer, &array, 0) == 0, "split array begin");
     flush(buffer);
@@ -92,6 +93,7 @@ struct Fixture {
     flush(buffer);
     require(write_tel_array_end(buffer, &array, 0) == 0, "split array end");
     flush(buffer);
+#endif
     std::array<real, 273> event_end{};
     std::memcpy(event_end.data(), "EVTE", 4);
     event_end[1] = 8;
@@ -135,6 +137,7 @@ int main() {
                 reader.run_info().observation_altitude_m == 2000,
             "run options and wavelength band");
     auto second = reader.read(batch);
+#ifdef IO_TYPE_MC_PHOTONS3D
     require(second.count == 1 && !second.eof && batch[0].weight == 1.25 &&
                 std::abs(batch[0].ray.direction.z + std::sqrt(0.75)) < 1e-6,
             "second full bunch and downward direction");
@@ -143,6 +146,11 @@ int main() {
                 batch[0].ray.position_m.z == 0.5 && batch[0].emission_distance_m == 1000.0 &&
                 batch[0].wavelength_nm == 350.0,
             "split 3D bunch and EOF");
+#else
+    require(second.count == 1 && second.eof && batch[0].weight == 1.25 &&
+                std::abs(batch[0].ray.direction.z + std::sqrt(0.75)) < 1e-6,
+            "second full bunch and EOF");
+#endif
     require(reader.read(batch).count == 0, "stable EOF");
 
     Fixture compact_input(false, true);

@@ -23,6 +23,15 @@ namespace {
 constexpr int kMaxTelescopes = 4096;
 constexpr int kMaxArrays = 4096;
 
+[[nodiscard]] bool is_3d_photon_block(int type) {
+#ifdef IO_TYPE_MC_PHOTONS3D
+  return type == IO_TYPE_MC_PHOTONS3D;
+#else
+  (void)type;
+  return false;
+#endif
+}
+
 [[nodiscard]] std::uint64_t integer_id(double value, const char* name) {
   if (!std::isfinite(value) || value < 0 || value > 9007199254740991.0 ||
       std::floor(value) != value)
@@ -99,6 +108,7 @@ struct EventioPhotonReader::Impl {
       have_event = true;
       array_count = 0;
       info.reuse_weight_known = false;
+      const double options_value = values[76];
       if (!std::isfinite(options_value) || options_value < 0 || options_value > 65535 ||
           std::floor(options_value) != options_value)
         fail("invalid IACT options in event header");
@@ -161,9 +171,16 @@ struct EventioPhotonReader::Impl {
       fail("photon block lacks event, telescope or array metadata");
     int count = 0, array = -1, telescope = -1;
     double total = 0;
-    const int probe = type == IO_TYPE_MC_PHOTONS
-                          ? read_tel_photons(buffer, 0, &array, &telescope, &total, nullptr, &count)
-                          : read_tel_photons3d(buffer, 0, &array, &telescope, &total, nullptr, &count);
+    int probe = 0;
+    if (type == IO_TYPE_MC_PHOTONS) {
+      probe = read_tel_photons(buffer, 0, &array, &telescope, &total, nullptr, &count);
+    } else if (is_3d_photon_block(type)) {
+#ifdef IO_TYPE_MC_PHOTONS3D
+      probe = read_tel_photons3d(buffer, 0, &array, &telescope, &total, nullptr, &count);
+#endif
+    } else {
+      fail("unsupported photon block type");
+    }
     if (probe != -10) fail("cannot inspect photon bunch count");
     if (count < 0 || static_cast<std::size_t>(count) > limits.max_bunches_per_telescope)
       fail("photon bunch count exceeds limit");
@@ -172,16 +189,22 @@ struct EventioPhotonReader::Impl {
       fail("invalid photon array/telescope ID");
     if (!std::isfinite(total) || total < 0) fail("invalid telescope photon total");
     bunches.clear();
+#ifdef IO_TYPE_MC_PHOTONS3D
     bunches3d.clear();
+#endif
     const auto allocation = static_cast<std::size_t>(std::max(1, count));
     if (type == IO_TYPE_MC_PHOTONS) {
       bunches.resize(allocation);
       if (read_tel_photons(buffer, count, &array, &telescope, &total, bunches.data(), &count) != 0)
         fail("cannot decode 2D photon bunches");
     } else {
+#ifdef IO_TYPE_MC_PHOTONS3D
       bunches3d.resize(allocation);
       if (read_tel_photons3d(buffer, count, &array, &telescope, &total, bunches3d.data(), &count) != 0)
         fail("cannot decode 3D photon bunches");
+#else
+      fail("unsupported 3D photon bunches in this EventIO build");
+#endif
     }
     context = {run_id, event_id, static_cast<std::uint64_t>(array),
                static_cast<std::uint64_t>(telescope),
@@ -197,13 +220,17 @@ struct EventioPhotonReader::Impl {
 
   [[nodiscard]] OpticalPhoton convert(std::size_t index) {
     double x, y, z, cx, cy, cz, time, emission, photons, wavelength;
-    const bool is_3d = current_type == IO_TYPE_MC_PHOTONS3D;
+    const bool is_3d = is_3d_photon_block(current_type);
     if (is_3d) {
+#ifdef IO_TYPE_MC_PHOTONS3D
       const auto& bunch = bunches3d[index];
       x = bunch.x; y = bunch.y; z = bunch.z;
       cx = bunch.cx; cy = bunch.cy; cz = bunch.cz;
       time = bunch.ctime; emission = bunch.dist;
       photons = bunch.photons; wavelength = bunch.lambda;
+#else
+      fail("unsupported 3D photon bunches in this EventIO build");
+#endif
     } else {
       const auto& bunch = bunches[index];
       x = bunch.x; y = bunch.y; z = 0.0;
@@ -248,7 +275,7 @@ struct EventioPhotonReader::Impl {
           in_array = false;
           continue;
         }
-        if (type == IO_TYPE_MC_PHOTONS || type == IO_TYPE_MC_PHOTONS3D) {
+        if (type == IO_TYPE_MC_PHOTONS || is_3d_photon_block(type)) {
           load_photons(type, active_array);
           if (prepared) return;
         } else if (skip_subitem(buffer) != 0) {
@@ -271,7 +298,7 @@ struct EventioPhotonReader::Impl {
                             type == IO_TYPE_MC_TELPOS || type == IO_TYPE_MC_TELOFF ||
                             type == IO_TYPE_MC_TELARRAY || type == IO_TYPE_MC_TELARRAY_HEAD ||
                             type == IO_TYPE_MC_TELARRAY_END || type == IO_TYPE_MC_PHOTONS ||
-                            type == IO_TYPE_MC_PHOTONS3D || type == IO_TYPE_MC_EVTE ||
+                            is_3d_photon_block(type) || type == IO_TYPE_MC_EVTE ||
                             type == IO_TYPE_MC_RUNE;
       if (!relevant) {
         if (skip_io_block(buffer, &header) != 0) fail("cannot skip EventIO block");
@@ -301,7 +328,9 @@ struct EventioPhotonReader::Impl {
           split_array = false;
           break;
         case IO_TYPE_MC_PHOTONS:
+#ifdef IO_TYPE_MC_PHOTONS3D
         case IO_TYPE_MC_PHOTONS3D:
+#endif
           // A top-level 999/999 item contains ground particles, not photons.
           if (split_array) {
             load_photons(type, active_array);
@@ -329,7 +358,9 @@ struct EventioPhotonReader::Impl {
   std::vector<double> telescope_x, telescope_y, telescope_z, telescope_r;
   std::vector<double> array_x, array_y, array_weight;
   std::vector<struct bunch> bunches;
+#ifdef IO_TYPE_MC_PHOTONS3D
   std::vector<struct bunch3d> bunches3d;
+#endif
   std::size_t bunch_count{}, bunch_index{};
 };
 
@@ -349,8 +380,14 @@ PhotonReadResult EventioPhotonReader::read(std::span<OpticalPhoton> destination)
     std::size_t written = 0;
     while (written < destination.size() && impl_->bunch_index < impl_->bunch_count) {
       const auto index = impl_->bunch_index++;
-      const auto wavelength = impl_->current_type == IO_TYPE_MC_PHOTONS
-                                  ? impl_->bunches[index].lambda : impl_->bunches3d[index].lambda;
+      const auto wavelength =
+          is_3d_photon_block(impl_->current_type)
+#ifdef IO_TYPE_MC_PHOTONS3D
+              ? impl_->bunches3d[index].lambda
+#else
+              ? std::numeric_limits<double>::quiet_NaN()
+#endif
+              : impl_->bunches[index].lambda;
       if (wavelength >= 9000.0) continue;  // IACTEXT emitter marker, not light.
       destination[written++] = impl_->convert(index);
     }
