@@ -44,7 +44,8 @@ def parse_simtel_segmentation(contents: str) -> list[dict[str, Any]]:
             raise SceneCompileError(
                 f"segmentation line {line_number}: unsupported type {fields[0]}"
             )
-        if len(fields) != (6 if kind in {"hex", "yhex"} else 7):
+        expected_fields = {5, 6} if kind in {"hex", "yhex"} else {5, 6, 7}
+        if len(fields) not in expected_fields:
             raise SceneCompileError(f"segmentation line {line_number}: wrong field count")
         try:
             count = int(fields[1])
@@ -54,7 +55,7 @@ def parse_simtel_segmentation(contents: str) -> list[dict[str, Any]]:
         if count < 1 or not all(math.isfinite(value) for value in values):
             raise SceneCompileError(f"segmentation line {line_number}: invalid count or value")
         if kind in {"hex", "yhex"}:
-            x_cm, y_cm, diameter_cm, rotation_deg = values
+            x_cm, y_cm, diameter_cm, rotation_deg = (*values, 0.0)[0:4]
             if count != 1 or diameter_cm <= 0.0:
                 raise SceneCompileError(f"segmentation line {line_number}: invalid hex footprint")
             segments.append({
@@ -65,7 +66,7 @@ def parse_simtel_segmentation(contents: str) -> list[dict[str, Any]]:
                 "rotation_deg": rotation_deg,
             })
         else:
-            inner_cm, outer_cm, span_deg, start_deg, gap_cm = values
+            inner_cm, outer_cm, span_deg, start_deg, gap_cm = (*values, 0.0, 0.0)[0:5]
             if inner_cm < 0.0 or outer_cm <= inner_cm or span_deg <= 0.0 or gap_cm < 0.0:
                 raise SceneCompileError(f"segmentation line {line_number}: invalid ring footprint")
             if count * span_deg > 360.0 + 1e-9:
@@ -142,11 +143,8 @@ def parse_simtel_mirror_list(
             # A comment immediately after the required fields means no z was
             # supplied, rather than an invalid optical datum.
             z_cm = 0.0
-            if len(fields) >= 6:
-                try:
-                    z_cm = float(fields[5])
-                except ValueError:
-                    pass
+            if len(fields) >= 6 and not fields[5].startswith("#"):
+                z_cm = float(fields[5])
         except ValueError as error:
             raise SceneCompileError(
                 f"mirror list line {line_number}: invalid numeric field"
@@ -252,7 +250,7 @@ def compile_scene(
         source_ir = resolve_model(source_root, model, version)
     except ModelImportError as error:
         raise SceneCompileError(f"cannot verify source production: {error}") from error
-    for key in ("input_records", "assets", "parameters"):
+    for key in ("source_root", "input_records", "assets", "parameters"):
         if ir.get(key) != source_ir[key]:
             raise SceneCompileError(f"IR {key} differs from the verified source production")
     verified_assets = {name: root / entry["path"] for name, entry in assets.items()}

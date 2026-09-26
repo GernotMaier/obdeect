@@ -12,12 +12,17 @@ def read_paths(path: Path):
     with path.open(newline="") as handle:
         for row in csv.DictReader(handle):
             points = []
-            for index in range(int(row["point_count"])):
-                points.append((
-                    float(row[f"x{index}_m"]),
-                    float(row[f"y{index}_m"]),
-                    float(row[f"z{index}_m"]),
-                ))
+            try:
+                count = int(row["point_count"])
+                if not 1 <= count <= 4:
+                    raise ValueError("point_count must be between 1 and 4")
+                for index in range(count):
+                    point = tuple(float(row[f"{axis}{index}_m"]) for axis in "xyz")
+                    if not all(math.isfinite(value) for value in point):
+                        raise ValueError("non-finite path vertex")
+                    points.append(point)
+            except (KeyError, TypeError, ValueError) as error:
+                raise ValueError(f"{path}: invalid path vertices: {error}") from error
             yield row["status"], points
 
 
@@ -39,8 +44,8 @@ def focal_plane_hits(path: Path):
             if point_index < 0:
                 raise ValueError(f"{path}: detected row has no path vertices")
             try:
-                source_weight = float(row.get("source_weight") or 1.0)
-                throughput = float(row.get("throughput") or 1.0)
+                source_weight = float(row.get("source_weight", "1") or "1")
+                throughput = float(row.get("throughput", "1") or "1")
                 x = float(row[f"x{point_index}_m"])
                 y = float(row[f"y{point_index}_m"])
             except (KeyError, TypeError, ValueError) as error:
@@ -60,7 +65,7 @@ TELESCOPE_NAMES = ("toy-mst", "LST", "MST", "SST", "SCT")
 
 
 def draw_reference_telescope(axis, telescope: str):
-    """Draw only a labelled diagnostic outline; photon paths originate in CSV."""
+    """Draw a side projection; reference models show optical surfaces only."""
     from matplotlib.patches import Rectangle
 
     if telescope == "toy-mst":
@@ -74,7 +79,7 @@ def draw_reference_telescope(axis, telescope: str):
         )
         for base_x, top_x in ((-4.2, -0.7), (0.0, 0.0), (4.2, 0.7)):
             axis.plot([base_x, top_x], [0.30, 4.625], color="0.3", linewidth=1)
-        axis.axhline(4.875, color="black", linewidth=0.7, label="focal screen")
+        axis.plot([-2.0, 2.0], [4.875, 4.875], color="black", linewidth=0.7, label="focal screen")
         return
     # Only validated analytic reference outlines are drawn here.
     # SC geometry must come from a compiled-scene export.
@@ -87,13 +92,10 @@ def draw_reference_telescope(axis, telescope: str):
             va="top",
         )
         return
-    specification = {
-        "LST": (11.5, 28.0, None),
-        "MST": (6.0, 16.0, None),
-        "SST": (2.1205, 2.15, 3.1084),
-        "SCT": (4.8319, 5.5863, 1.5),
+    radius, camera_z, focal_radius = {
+        "LST": (11.5, 28.0, 1.5),
+        "MST": (6.0, 16.0, 1.0),
     }[telescope]
-    radius, camera_z, secondary_z = specification
     primary_x = [(-radius + 2.0 * radius * index / 200.0) for index in range(201)]
     # An outline deliberately avoids reimplementing C++ prescription math.
     primary_z = (
@@ -102,16 +104,64 @@ def draw_reference_telescope(axis, telescope: str):
         else [2 * camera_z - math.sqrt((2 * camera_z) ** 2 - x * x) for x in primary_x]
     )
     axis.plot(primary_x, primary_z, color="0.15", linewidth=2.0, label="M1 reference aperture")
-    if secondary_z is not None:
-        secondary_radius = 0.90 if telescope == "SST" else 2.71
-        axis.plot(
-            [-secondary_radius, secondary_radius],
-            [secondary_z, secondary_z],
-            color="0.3",
-            linewidth=2.0,
-            label="M2 reference aperture",
-        )
-    axis.axhline(camera_z, color="black", linewidth=0.9, label="focal plane")
+    axis.plot(
+        [-focal_radius, focal_radius],
+        [camera_z, camera_z],
+        color="black",
+        linewidth=0.9,
+        label="focal plane",
+    )
+
+
+def draw_structure(plt, telescope: str, output: Path):
+    """Render both side projections of the available telescope geometry."""
+    figure, axes = plt.subplots(1, 2, figsize=(12, 5), sharey=True)
+    for axis, horizontal in zip(axes, "xy", strict=True):
+        draw_reference_telescope(axis, telescope)
+        axis.set(xlabel=f"telescope {horizontal} [m]", ylabel="telescope z [m]")
+        axis.set_aspect("equal", adjustable="box")
+        axis.set_ylim(-0.5, {"toy-mst": 6.0, "LST": 30.0, "MST": 18.0}.get(telescope, 8.0))
+    axes[0].legend(loc="best")
+    description = (
+        "toy mirror, camera and supports" if telescope == "toy-mst" else "reference optical outline"
+    )
+    figure.suptitle(f"{telescope} {description}")
+    figure.tight_layout()
+    figure.savefig(output, dpi=160, bbox_inches="tight")
+    plt.close(figure)
+
+
+def draw_rays(plt, path: Path, telescope: str, output: Path, max_paths: int):
+    """Render recorded paths in the two telescope side projections."""
+    figure, axes = plt.subplots(1, 2, figsize=(12, 7), sharey=True)
+    colours = {
+        "detected": "tab:blue",
+        "blocked_camera": "tab:red",
+        "blocked_mast": "tab:orange",
+        "missed_primary": "0.5",
+        "missed_screen": "tab:purple",
+    }
+    for count, (status, points) in enumerate(read_paths(path)):
+        if count >= max_paths:
+            break
+        for axis, coordinate in zip(axes, (0, 1), strict=True):
+            axis.plot(
+                [point[coordinate] for point in points],
+                [point[2] for point in points],
+                color=colours.get(status, "black"),
+                alpha=0.25,
+                linewidth=0.7,
+            )
+    for axis, horizontal in zip(axes, "xy", strict=True):
+        draw_reference_telescope(axis, telescope)
+        axis.set(xlabel=f"telescope {horizontal} [m]", ylabel="telescope z [m]")
+        axis.set_aspect("equal", adjustable="box")
+        axis.set_ylim(-0.5, {"toy-mst": 8.0, "LST": 32.0, "MST": 20.0}.get(telescope, 8.0))
+    axes[0].legend(loc="best")
+    figure.suptitle(f"{telescope} recorded ray paths")
+    figure.tight_layout()
+    figure.savefig(output, dpi=160, bbox_inches="tight")
+    plt.close(figure)
 
 
 def draw_focal_plane(plt, path: Path, output: Path, bins: int, telescope: str):
@@ -218,9 +268,17 @@ def main():
     parser = argparse.ArgumentParser(
         description="Plot an obdeect telescope reference outline and traced paths."
     )
-    parser.add_argument("paths", type=Path)
+    parser.add_argument(
+        "paths", type=Path, nargs="?", help="trace CSV (required for rays and focal plane)"
+    )
     parser.add_argument("--output", type=Path, default=Path("toy_mst_paths.png"))
     parser.add_argument("--max-paths", type=int, default=300)
+    parser.add_argument(
+        "--view",
+        choices=("structure", "rays", "focal-plane"),
+        default="rays",
+        help="structure outline, recorded ray paths, or weighted focal-plane image",
+    )
     parser.add_argument(
         "--focal-plane",
         action="store_true",
@@ -239,6 +297,10 @@ def main():
     args = parser.parse_args()
     if args.max_paths < 1 or args.bins < 1:
         parser.error("--max-paths and --bins must be positive")
+    if args.paths is None and args.view != "structure":
+        parser.error("paths CSV is required for rays and focal plane")
+    if args.focal_plane and args.view != "rays":
+        parser.error("--focal-plane cannot be combined with --view")
 
     if args.focal_plane and args.output.suffix.lower() == ".svg":
         draw_focal_plane_svg(args.paths, args.output, args.bins, args.telescope)
@@ -254,40 +316,13 @@ def main():
             "Install optional visualization dependency: python -m pip install matplotlib"
         ) from error
 
-    if args.focal_plane:
+    if args.view == "structure":
+        draw_structure(plt, args.telescope, args.output)
+        return
+    if args.focal_plane or args.view == "focal-plane":
         draw_focal_plane(plt, args.paths, args.output, args.bins, args.telescope)
         return
-
-    fig, axis = plt.subplots(figsize=(8, 8))
-    colours = {
-        "detected": "tab:blue",
-        "blocked_camera": "tab:red",
-        "blocked_mast": "tab:orange",
-        "missed_primary": "0.5",
-        "missed_screen": "tab:purple",
-    }
-    for count, (status, points) in enumerate(read_paths(args.paths)):
-        if count >= args.max_paths:
-            break
-        axis.plot(
-            [point[0] for point in points],
-            [point[2] for point in points],
-            color=colours.get(status, "black"),
-            alpha=0.20,
-            linewidth=0.6,
-        )
-
-    draw_reference_telescope(axis, args.telescope)
-    axis.set(
-        xlabel="telescope x [m]",
-        ylabel="telescope z [m]",
-        title=f"obdeect: {args.telescope} traced paths",
-    )
-    axis.set_aspect("equal", adjustable="box")
-    axis.legend(loc="upper right")
-    fig.tight_layout()
-    fig.savefig(args.output, dpi=160)
-    plt.close(fig)
+    draw_rays(plt, args.paths, args.telescope, args.output, args.max_paths)
 
 
 if __name__ == "__main__":

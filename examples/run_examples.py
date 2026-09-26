@@ -73,18 +73,23 @@ def run_examples(build: Path, output: Path, photons: int) -> None:
         with csv_path.open(newline="") as handle:
             rows = list(csv.DictReader(handle))
         counts = validate_rows(name, rows, photons, require_detected)
-        subprocess.run(
-            [
-                sys.executable,
-                str(root / "python/obdeect/plotting.py"),
-                str(csv_path),
-                "--telescope",
-                telescope,
-                "--output",
-                str(output / f"{name}.png"),
-            ],
-            check=True,
-        )
+        for view in ("structure", "rays", "focal-plane"):
+            if view == "focal-plane" and not counts.get("detected"):
+                continue
+            subprocess.run(
+                [
+                    sys.executable,
+                    str(root / "python/obdeect/plotting.py"),
+                    str(csv_path),
+                    "--telescope",
+                    telescope,
+                    "--view",
+                    view,
+                    "--output",
+                    str(output / f"{name}_{view}.png"),
+                ],
+                check=True,
+            )
         summary[name] = {"status_counts": counts, "photons": photons}
     (output / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")
 

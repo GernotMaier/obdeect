@@ -96,7 +96,7 @@ def parse_camera_layout(contents: str) -> dict[str, Any]:
             if len(fields) != 2:
                 raise CameraConfigError(f"camera line {line_number}: invalid Rotate")
             rotation_deg += _number(fields[1], line_number)
-        elif directive in {"AnalogSumTrigger", "DigitalSumTrigger", "MajorityTrigger"}:
+        elif directive in {"AnalogSumTrigger", "DigitalSumTrigger", "MajorityTrigger", "Trigger"}:
             deferred[directive] += 1
         else:
             raise CameraConfigError(f"camera line {line_number}: unsupported directive {directive}")

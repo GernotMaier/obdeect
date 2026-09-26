@@ -124,6 +124,10 @@ class TestSceneCompiler(unittest.TestCase):
         self.assertNotIn("unit_normal", facets[0])
         self.assertNotIn("rotation_deg", facets[0])
 
+    def test_rejects_invalid_optional_mirror_height(self):
+        with self.assertRaisesRegex(SceneCompileError, "invalid numeric field"):
+            parse_simtel_mirror_list("0 0 120 1600 1 missing\n", fallback_focal_length_m=16.0)
+
     def test_zero_catalogue_fallback_allows_real_lst_rows_with_panel_focal_lengths(self):
         # T-IR-007: the LST catalogue sets mirror_focal_length to zero while
         # its mirror-list provides each panel's focal length.
@@ -181,6 +185,13 @@ class TestSceneCompiler(unittest.TestCase):
         self.assertAlmostEqual(segments[1]["gap_m"], 0.014)
         with self.assertRaisesRegex(SceneCompileError, "unsupported type"):
             parse_simtel_segmentation("polygon 1 0 0 1 0\n")
+
+    def test_defaults_omitted_segmentation_rotation_start_and_gap_to_zero(self):
+        segments = parse_simtel_segmentation("hex 1 -85.6 0 84.6\nring 2 100 200 180\n")
+        self.assertEqual(segments[0]["rotation_deg"], 0.0)
+        self.assertEqual(segments[1]["start_deg"], 0.0)
+        self.assertEqual(segments[2]["start_deg"], 180.0)
+        self.assertEqual(segments[1]["gap_m"], 0.0)
 
     def test_compiles_dual_mirror_segmentation_without_invented_normals(self):
         # T-IR-011: nullable mirror_list uses explicit segmentation assets.

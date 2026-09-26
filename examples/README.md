@@ -11,7 +11,8 @@ python examples/run_examples.py --build build --output out/examples --photons 10
 
 The script runs a toy telescope with a star, point flasher and divergent laser;
 an ideal parabolic LST on/off axis; and the continuous MST sphere reference.
-Each case writes CSV, a PNG of the actual paths, and status counts in
+Each case writes CSV, structure and ray PNGs, a focal-plane PNG when photons
+reach the detector, and status counts in
 `summary.json`. The script fails on subprocess errors, malformed CSV,
 missing photons, or missing focal-plane hits for cases that are expected to detect light.
 

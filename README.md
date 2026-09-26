@@ -1,82 +1,37 @@
 # obdeect
 
-`obdeect` is a portable C++20 ray-tracing prototype for imaging atmospheric
-Cherenkov telescopes (IACTs). It provides deterministic artificial sources,
-analytic optical-reference traces, CSV diagnostics, and focal-plane PSF
-analysis. The C++ trace core depends only on the standard library; the Python
-package supplies import, plotting, and analysis commands.
+`obdeect` is a C++20 optical ray tracing prototype for imaging atmospheric
+Cherenkov telescopes. The C++ core uses only the standard library. Python
+provides plotting, PSF analysis, and model import tools.
 
-## Build and test
+## Start here
 
 Requirements: a C++20 compiler, CMake 3.20+, Ninja or Make, and Python 3.10+.
 
-```bash
+```sh
 python -m venv .venv
 source .venv/bin/activate
 python -m pip install -e '.[dev]'
-```
-
-Compile and run the C++ executables:
-
-```bash
-# Configure the build system
-cmake -S . -B build
-# Build the project
-cmake --build build
-# Run the tests and executables
-ctest --test-dir build --output-on-failure
-# Run the Python unit tests
+cmake --preset debug
+cmake --build --preset debug
+ctest --test-dir build/debug --output-on-failure
 python -m unittest discover -s python/tests
 ```
 
-The build workflow produces Linux amd64/arm64 container images and native
-macOS arm64/Intel archives. macOS executables are built and tested on their
-respective GitHub runners and uploaded as workflow artifacts. To create the
-same native layout locally, run:
+Trace the simple spherical telescope and make three plots:
 
-```bash
-cmake -S . -B build/release -DCMAKE_BUILD_TYPE=Release
-cmake --build build/release --parallel
-ctest --test-dir build/release --output-on-failure
-cmake --install build/release --prefix /path/to/obdeect
+```sh
+./build/debug/obdeect_toy --photons 10000 --output toy.csv
+obdeect-plot-toy --telescope toy-mst --view structure --output structure.png
+obdeect-plot-toy toy.csv --telescope toy-mst --view rays --output rays.png
+obdeect-plot-toy toy.csv --telescope toy-mst --view focal-plane --output focal.png
 ```
 
-The Docker image packages the same installed reference executables under
-`/opt/obdeect/bin`. These executables are analytic references; production
-model scene support is still in progress.
-
-## Plotting and testing
-
-MST (Medium-Sized Telescope) example run:
-
-```bash
-./build/obdeect_toy --photons 100000 --output toy_mst_paths.csv
-obdeect-plot-toy toy_mst_paths.csv --output toy_mst_paths.png
-```
-
-LST (Large-Sized Telescope) example run:
-
-```bash
-./build/obdeect_ctao --telescope LST --photons 100000 --output lst_paths.csv
-obdeect-plot-toy lst_paths.csv --telescope LST --output lst_paths.png
-```
-
-Create a focal-plane intensity image with weighted 1-D projections:
-
-```bash
-obdeect-plot-toy lst_paths.csv --telescope LST --focal-plane --bins 96 \
-  --output lst_focal_plane.png
-```
-
-For a dependency-free weighted PSF map with centroid, D80, and throughput,
-write SVG instead. These commands analyse the **analytic reference** trace,
-not a compiled production telescope scene:
-
-```bash
-obdeect-plot-toy lst_paths.csv --telescope LST --focal-plane --bins 96 \
-  --output lst_focal_plane.svg
-obdeect-psf derive lst_paths.csv --output lst_psf.json
-```
+The structure plot shows the toy mirror, camera, and four supports in two
+side projections. The ray plot uses actual CSV vertices. The focal plot shows
+detected weight per bin and x/y projections. `--max-paths` limits displayed
+rays; `--bins` controls the focal histogram. Coordinates are telescope frame
+metres. The older `--focal-plane` flag remains supported.
 
 ## Artificial calibration sources
 
@@ -105,8 +60,7 @@ coating/material scene will replace it with wavelength-dependent transport.
 same Python plotter. The analytic catalogue uses public `simulation-models`
 6.3.0 identifiers as a tested baseline; the production importer accepts an
 explicitly selected version from the supplied checkout and records provenance.
-It contains
-optical prescriptions only: it does not load model JSON, facet positions,
+It contains optical prescriptions only: it does not load model JSON, facet positions,
 camera pixels, alignment, structures, throughput, or the SCT coordinate
 transform. LST ideal-paraboloid and MST central-sphere baselines are executable
 and tested; SST/SCT are two-mirror prescription scaffolding awaiting their
@@ -203,65 +157,34 @@ tools:
 ```bash
 python -m pip install --upgrade pip ruff
 python -m pip install .
-cmake --preset debug
-cmake --build --preset debug
-ctest --test-dir build/debug --output-on-failure
-python -m pytest python/tests
-
-# Optional contributor checks (also run in CI where available)
-ruff format --check python tools examples
-ruff check python tools examples
-pre-commit run --all-files
 ```
 
-The C++ tests cover optical kernels, source generation, input parsing, tracing,
-materials, and scene contracts. The Python tests cover model import, scene
-compilation, plotting, and weighted PSF analysis. CI runs these tests, the
-examples, formatting/lint checks, and a native address/undefined-behaviour
-sanitizer build.
+## Examples and tutorials
 
-## Quick start
+[Tutorials](docs/TUTORIALS.md) cover sources, optical reference models,
+field-angle scans, and model provenance. Run the examples with:
 
-Trace the MST-inspired reference scene and render its paths:
-
-```bash
-./build/debug/obdeect_toy --photons 10000 --output toy_paths.csv
-obdeect-plot-toy toy_paths.csv --output toy_paths.png
-```
-
-Trace an analytic LST prescription:
-
-```bash
-./build/debug/obdeect_ctao --telescope LST --photons 10000 --output lst_paths.csv
-obdeect-plot-toy lst_paths.csv --telescope LST --focal-plane --output lst_focal_plane.png
-```
-
-`obdeect_toy` supports deterministic `star`, `illuminator`, and `laser`
-sources, field offsets, finite source distance/divergence, and a configurable
-monochromatic wavelength. It is a simple spherical MST-inspired scene with a
-camera shadow and four mast supports, not an MST model.
-
-```bash
-./build/debug/obdeect_toy --source star --field-x-deg 0.5 --wavelength-nm 400
-./build/debug/obdeect_toy --source illuminator --distance-m 50
-./build/debug/obdeect_toy --source laser --distance-m 50 --divergence-deg 0.1
-```
-
-For a tested set of runnable source and analytic-reference examples, run:
-
-```bash
+```sh
 python examples/run_examples.py --build build/debug --output out/examples --photons 1000
 ```
 
-## PSF and field-angle scans
+Each case writes a CSV, structure/ray/focal plots where applicable, and status
+counts. See [examples/README.md](examples/README.md) for the case list.
 
-`obdeect-psf` derives weighted centroid, R80/D80, optical throughput, and
-terminal-loss closure from trace CSV output. D80 is twice the radius of the
-centroid-centred circle containing 80% of detected optical weight.
+## Scope
+
+The toy scene is MST inspired; it is not a CTAO production telescope. The
+`obdeect_ctao` command traces analytic LST/MST optical baselines and contains
+experimental SST/SCT prescriptions. CTAO plots show optical outlines only:
+structures, segmented mirrors, camera pixels, and materials are not built into
+those traces. Importing a `simulation-models` record records provenance and
+partial geometry but does not make it trace ready. Current limitations and
+validation evidence are in [status](docs/STATUS.md). The current
+[code review](docs/CODE_REVIEW.md) records fixes and remaining duplication.
+
+## PSF scan
 
 ```bash
-obdeect-psf derive lst_paths.csv --field-x-deg 0 --output lst_psf.json
-
 obdeect-psf scan --executable ./build/debug/obdeect_toy --photons 10000 \
   --field-x-deg 0 0.5 1.0 --output-dir out/toy_psf --plot out/toy_psf.png
 ```
@@ -305,18 +228,17 @@ coating kernels exist but are not yet integrated into these analytic scenes.
 
 | Path | Purpose |
 | --- | --- |
-| `cpp/include/obdeect/` | Standard-library-only C++ geometry, optics, source, and trace kernels. |
-| `cpp/tests/` | Native unit and contract tests. |
-| `python/obdeect/` | Import, scene-compilation, plotting, and PSF commands. |
-| `python/tests/` | Python unit tests. |
-| `examples/` | End-to-end executable and rendering smoke tests. |
-| `docs/` | Production scope and replacement evidence. |
+| `cpp/include/obdeect/` | Geometry, optics, sources, and tracing |
+| `cpp/tests/` | Native tests |
+| `python/obdeect/` | Import, plotting, and PSF commands |
+| `python/tests/` | Python tests |
+| `examples/` | Runnable end to end examples |
+| `docs/` | Tutorials, status, and comparison contracts |
 
-## Citation and License
-
-The project is BSD-3-Clause licensed; citation metadata is in
-[CITATION.cff](CITATION.cff).
-
+BSD-3-Clause license. Citation metadata is in [CITATION.cff](CITATION.cff).
 ## Generative AI disclosure
+
+Generative AI tools were used to write much of this project; outputs were
+reviewed and validated by the authors.
 
 Generative AI tools (mostly ChatGPT 5.6) were used to write the entire code of this project. All AI-assisted outputs were reviewed, validated, and, where necessary, modified by the authors to ensure accuracy and reliability.

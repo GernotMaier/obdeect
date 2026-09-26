@@ -56,48 +56,63 @@ class TestTracePathReader(unittest.TestCase):
             hits = list(PLOT.focal_plane_hits(path))
         self.assertEqual(hits, [(0.3, 0.4, 1.0)])
 
-    def test_rejects_invalid_detected_focal_plane_data(self):
-        csv_text = "status,point_count,x0_m,y0_m\ndetected,1,nan,0\n"
-        with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "paths.csv"
-            path.write_text(csv_text)
-            with self.assertRaisesRegex(ValueError, "non-finite"):
-                list(PLOT.focal_plane_hits(path))
+def test_rejects_invalid_detected_focal_plane_data(self):
+    csv_text = "status,point_count,x0_m,y0_m\ndetected,1,nan,0\n"
+    with tempfile.TemporaryDirectory() as directory:
+        path = Path(directory) / "paths.csv"
+        path.write_text(csv_text)
+        with self.assertRaisesRegex(ValueError, "non-finite"):
+            list(PLOT.focal_plane_hits(path))
 
-    def test_svg_psf_uses_weighted_hits_and_analysis(self):
-        csv_text = (
-            "status,point_count,source_weight,throughput,x0_m,y0_m\n"
-            "detected,1,2,1,0,0\n"
-            "detected,1,1,1,1,0\n"
-            "missed_screen,1,1,0,5,5\n"
+def test_svg_psf_uses_weighted_hits_and_analysis(self):
+    csv_text = (
+        "status,point_count,source_weight,throughput,x0_m,y0_m\n"
+        "detected,1,2,1,0,0\n"
+        "detected,1,1,1,1,0\n"
+        "missed_screen,1,1,0,5,5\n"
+    )
+    with tempfile.TemporaryDirectory() as directory:
+        path = Path(directory) / "trace.csv"
+        output = Path(directory) / "psf.svg"
+        path.write_text(csv_text)
+        env = {**os.environ, "PYTHONPATH": str(SCRIPT.parents[1])}
+        subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "obdeect.plotting",
+                str(path),
+                "--focal-plane",
+                "--telescope",
+                "LST",
+                "--bins",
+                "8",
+                "--output",
+                str(output),
+            ],
+            check=True,
+            env=env,
         )
-        with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "trace.csv"
-            output = Path(directory) / "psf.svg"
-            path.write_text(csv_text)
-            env = {**os.environ, "PYTHONPATH": str(SCRIPT.parents[1])}
-            subprocess.run(
-                [
-                    sys.executable,
-                    "-m",
-                    "obdeect.plotting",
-                    str(path),
-                    "--focal-plane",
-                    "--telescope",
-                    "LST",
-                    "--bins",
-                    "8",
-                    "--output",
-                    str(output),
-                ],
-                check=True,
-                env=env,
-            )
-            svg = output.read_text()
-        self.assertIn("LST focal-plane PSF", svg)
-        self.assertIn("Centroid: (0.333333, 0) m", svg)
-        self.assertIn("D80: 1.33333 m", svg)
-        self.assertIn("throughput: 0.75", svg)
+        svg = output.read_text()
+    self.assertIn("LST focal-plane PSF", svg)
+    self.assertIn("Centroid: (0.333333, 0) m", svg)
+    self.assertIn("D80: 1.33333 m", svg)
+    self.assertIn("throughput: 0.75", svg)
+
+def test_preserves_zero_recorded_throughput(self):
+    csv_text = "status,point_count,source_weight,throughput,x0_m,y0_m\ndetected,1,3,0,0,0\n"
+    with tempfile.TemporaryDirectory() as directory:
+        path = Path(directory) / "paths.csv"
+        path.write_text(csv_text)
+        self.assertEqual(list(PLOT.focal_plane_hits(path)), [(0.0, 0.0, 0.0)])
+
+def test_rejects_nonfinite_path_vertex(self):
+    csv_text = "status,point_count,x0_m,y0_m,z0_m\ndetected,1,nan,0,0\n"
+    with tempfile.TemporaryDirectory() as directory:
+        path = Path(directory) / "paths.csv"
+        path.write_text(csv_text)
+        with self.assertRaisesRegex(ValueError, "non-finite"):
+            list(PLOT.read_paths(path))
 
 
 if __name__ == "__main__":
