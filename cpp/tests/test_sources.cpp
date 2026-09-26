@@ -78,7 +78,7 @@ int main() {
   require(std::abs(dot(laser.front().ray.position_m - laser.back().ray.position_m,
                        laser.front().ray.direction)) < 0.3,
           "laser launch samples use a plane normal to the beam");
-  require(std::abs(laser.front().ray.position_m.x - 1.5) < 6.0,
+  require(std::abs(laser.front().ray.position_m.x - 1.5) < 1e-12,
           "laser launch plane retains configured transverse origin");
 
   std::cout << "source tests passed\n";
