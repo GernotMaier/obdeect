@@ -99,8 +99,8 @@ struct EventioPhotonReader::Impl {
       have_event = true;
       array_count = 0;
       info.reuse_weight_known = false;
-      const double options_value = values[76];
-      if (!std::isfinite(options_value) || options_value < 0 || options_value > 65535)
+      if (!std::isfinite(options_value) || options_value < 0 || options_value > 65535 ||
+          std::floor(options_value) != options_value)
         fail("invalid IACT options in event header");
       const auto options = static_cast<unsigned>(options_value) & 0x3ffU;
       info.ceffic = (options & 0x04U) != 0;
