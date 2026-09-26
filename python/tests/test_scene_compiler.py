@@ -124,6 +124,17 @@ class TestSceneCompiler(unittest.TestCase):
         self.assertNotIn("unit_normal", facets[0])
         self.assertNotIn("rotation_deg", facets[0])
 
+    def test_parses_ecsv_mirror_list_with_float_shape_code(self):
+        facets = parse_simtel_mirror_list(
+            "# %ECSV 1.0\n"
+            "mirror_x mirror_y mirror_diameter focal_length shape_type mirror_z mirror_panel_id\n"
+            "0.0 100.0 120.0 1600.0 3.0 0.0 7\n",
+            fallback_focal_length_m=None,
+        )
+        self.assertEqual(facets[0]["id"], 0)
+        self.assertEqual(facets[0]["shape"], "hexagon_flat_x")
+        self.assertEqual(facets[0]["focal_length_m"], 16.0)
+
     def test_rejects_invalid_optional_mirror_height(self):
         with self.assertRaisesRegex(SceneCompileError, "invalid numeric field"):
             parse_simtel_mirror_list("0 0 120 1600 1 missing\n", fallback_focal_length_m=16.0)
@@ -232,7 +243,7 @@ class TestSceneCompiler(unittest.TestCase):
         self.assertEqual(scene["report"]["facet_geometry_evidence"]["normal_status"], "unavailable")
 
     def test_camera_layout_count_and_nested_response_provenance(self):
-        # T-IR-012: camera pixels are counted from the file, not only the record.
+        # T-IR-012: camera channels are counted from the file, not only the record.
         with TemporaryDirectory() as directory:
             root = Path(directory)
             self.make_ir(root)

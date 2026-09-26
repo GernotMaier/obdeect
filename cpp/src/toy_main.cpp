@@ -102,7 +102,7 @@ int main(int argc, char** argv) {
                                             {{0.0, 0.0, distance_m}, wavelength_nm, 1.0});
   } else {
     photons = obdeect::laser_photons(photon_count, config.mirror_aperture_radius_m,
-                                      {{0.0, 0.0, -1.0}, distance_m,
+                                      {{0.0, 0.0, -1.0}, {0.0, 0.0, distance_m},
                                        divergence_deg * radians_per_degree, wavelength_nm});
   }
   if (photons.size() != photon_count) {

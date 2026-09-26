@@ -8,22 +8,35 @@ from pathlib import Path
 from xml.sax.saxutils import escape
 
 
+def _parse_path_row(path: Path, row: dict[str, str]) -> list[tuple[float, float, float]]:
+    """Validate and return the ragged path vertices from one CSV record."""
+    points = []
+    try:
+        count = int(row["point_count"])
+        if not 1 <= count <= 4:
+            raise ValueError("point_count must be between 1 and 4")
+        for index in range(count):
+            point = tuple(float(row[f"{axis}{index}_m"]) for axis in "xyz")
+            if not all(math.isfinite(value) for value in point):
+                raise ValueError("non-finite path vertex")
+            points.append(point)
+    except (KeyError, TypeError, ValueError) as error:
+        raise ValueError(f"{path}: invalid path vertices: {error}") from error
+    return points
+
+
 def read_paths(path: Path):
+    """Yield terminal status and validated vertices from a trace CSV."""
     with path.open(newline="") as handle:
         for row in csv.DictReader(handle):
-            points = []
-            try:
-                count = int(row["point_count"])
-                if not 1 <= count <= 4:
-                    raise ValueError("point_count must be between 1 and 4")
-                for index in range(count):
-                    point = tuple(float(row[f"{axis}{index}_m"]) for axis in "xyz")
-                    if not all(math.isfinite(value) for value in point):
-                        raise ValueError("non-finite path vertex")
-                    points.append(point)
-            except (KeyError, TypeError, ValueError) as error:
-                raise ValueError(f"{path}: invalid path vertices: {error}") from error
-            yield row["status"], points
+            yield row["status"], _parse_path_row(path, row)
+
+
+def read_trace_rows(path: Path):
+    """Yield validated path records with source and spectral metadata."""
+    with path.open(newline="") as handle:
+        for row in csv.DictReader(handle):
+            yield row, row["status"], _parse_path_row(path, row)
 
 
 def focal_plane_hits(path: Path):
@@ -141,14 +154,22 @@ def draw_rays(plt, path: Path, telescope: str, output: Path, max_paths: int):
         "missed_primary": "0.5",
         "missed_screen": "tab:purple",
     }
-    for count, (status, points) in enumerate(read_paths(path)):
+    source_colours = {"star": "tab:blue", "illuminator": "tab:green", "laser": "tab:red"}
+    source_seen = set()
+    incidence = []
+    for count, (row, status, points) in enumerate(read_trace_rows(path)):
         if count >= max_paths:
             break
+        source = row.get("source_kind", "unknown")
+        source_seen.add(source)
+        colour = source_colours.get(source, colours.get(status, "black"))
+        if row.get("incidence_focal_deg"):
+            incidence.append(float(row["incidence_focal_deg"]))
         for axis, coordinate in zip(axes, (0, 1), strict=True):
             axis.plot(
                 [point[coordinate] for point in points],
                 [point[2] for point in points],
-                color=colours.get(status, "black"),
+                color=colour,
                 alpha=0.25,
                 linewidth=0.7,
             )
@@ -158,7 +179,9 @@ def draw_rays(plt, path: Path, telescope: str, output: Path, max_paths: int):
         axis.set_aspect("equal", adjustable="box")
         axis.set_ylim(-0.5, {"toy-mst": 8.0, "LST": 32.0, "MST": 20.0}.get(telescope, 8.0))
     axes[0].legend(loc="best")
-    figure.suptitle(f"{telescope} recorded ray paths")
+    labels = ", ".join(sorted(source_seen)) or "unknown source"
+    angle = f"; focal incidence mean {sum(incidence) / len(incidence):.3g}°" if incidence else ""
+    figure.suptitle(f"{telescope} recorded ray paths — {labels}{angle}")
     figure.tight_layout()
     figure.savefig(output, dpi=160, bbox_inches="tight")
     plt.close(figure)

@@ -89,6 +89,9 @@ struct PathRecord {
   std::uint8_t point_count{};
   double path_length_m{};
   Vec3 final_direction{};
+  double incidence_primary_deg{};
+  double incidence_secondary_deg{};
+  double incidence_focal_deg{};
 };
 
 }  // namespace obdeect

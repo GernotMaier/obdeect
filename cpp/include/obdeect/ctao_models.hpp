@@ -10,7 +10,7 @@ namespace obdeect {
 
 // These are compact, redistributable *reference optical prescriptions*. They
 // deliberately do not replace the licensed simulation-models repository:
-// segment positions, alignment and camera pixels must be imported separately.
+// segment positions, alignment and camera readout must be imported separately.
 enum class CtaoTelescopeType : std::uint8_t { lst, mst, sst, sct };
 
 [[nodiscard]] inline std::string_view to_string(CtaoTelescopeType type) {

@@ -6,7 +6,17 @@ provides plotting, PSF analysis, and model import tools.
 
 ## Installation and Build
 
-Requirements: a C++20 compiler, CMake 3.20+, Ninja or Make, and Python 3.10+.
+For a released platform wheel, Python 3.10+ is sufficient. The wheel contains
+the C++20 ray-tracing executables and headers. A source checkout additionally
+needs a C++20 compiler and CMake 3.20+.
+
+Install the current development distribution from PyPI and run the packaged
+tracer without a source checkout:
+
+```sh
+python -m pip install obdeect-dev
+obdeect-simtools-raytrace --telescope MST --photons 10000 --output trace.csv
+```
 
 Installation and build steps are as follows:
 
@@ -70,7 +80,7 @@ same Python plotter. The analytic catalogue uses public `simulation-models`
 6.3.0 identifiers as a tested baseline; the production importer accepts an
 explicitly selected version from the supplied checkout and records provenance.
 It contains optical prescriptions only: it does not load model JSON, facet positions,
-camera pixels, alignment, structures, throughput, or the SCT coordinate
+camera readout, alignment, structures, throughput, or the SCT coordinate
 transform. LST ideal-paraboloid and MST central-sphere baselines are executable
 and tested; SST/SCT are two-mirror prescription scaffolding awaiting their
 model-specific geometry validation.
@@ -185,7 +195,7 @@ counts. See [examples/README.md](examples/README.md) for the case list.
 The toy scene is MST inspired; it is not a CTAO production telescope. The
 `obdeect_ctao` command traces analytic LST/MST optical baselines and contains
 experimental SST/SCT prescriptions. CTAO plots show optical outlines only:
-structures, segmented mirrors, camera pixels, and materials are not built into
+structures, segmented mirrors, camera readout, and materials are not built into
 those traces. Importing a `simulation-models` record records provenance and
 partial geometry but does not make it trace ready. Current limitations and
 validation evidence are in [status](docs/STATUS.md). The current

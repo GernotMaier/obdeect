@@ -68,7 +68,8 @@ int main() {
 
   // T-SRC-013: laser directions stay inside configured divergence cone.
   constexpr double divergence_rad = 0.02;
-  const auto laser = laser_photons(128, 6.0, {{0.0, 0.0, -1.0}, 50.0, divergence_rad, 400.0});
+  const auto laser = laser_photons(
+      128, 6.0, {{0.0, 0.0, -1.0}, {1.5, -0.5, 50.0}, divergence_rad, 400.0});
   require(laser.size() == 128, "laser count");
   for (const auto& photon : laser) {
     require(std::acos(std::clamp(-photon.ray.direction.z, -1.0, 1.0)) <= divergence_rad + 1e-12,
@@ -77,6 +78,8 @@ int main() {
   require(std::abs(dot(laser.front().ray.position_m - laser.back().ray.position_m,
                        laser.front().ray.direction)) < 0.3,
           "laser launch samples use a plane normal to the beam");
+  require(std::abs(laser.front().ray.position_m.x - 1.5) < 6.0,
+          "laser launch plane retains configured transverse origin");
 
   std::cout << "source tests passed\n";
 }

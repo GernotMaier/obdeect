@@ -15,7 +15,7 @@ import math
 from pathlib import Path
 from typing import Any
 
-from obdeect.camera_config import CameraConfigError, parse_camera_layout
+from obdeect.camera_config import CameraConfigError, parse_camera_layout, parse_camera_layout_ecsv
 from obdeect.model_import import ImportError as ModelImportError
 from obdeect.model_import import component, record, resolve_model
 
@@ -134,11 +134,17 @@ def parse_simtel_mirror_list(
         if not line or line.startswith("#"):
             continue
         fields = line.split()
+        # Astropy ECSV keeps its column names in one un-commented header row.
+        # The numerical columns that follow have the same documented layout as
+        # sim_telarray mirror lists, so skip only this exact header form.
+        if fields[:5] == ["mirror_x", "mirror_y", "mirror_diameter", "focal_length", "shape_type"]:
+            continue
         if len(fields) < 5:
             raise SceneCompileError(f"mirror list line {line_number}: expected at least 5 columns")
         try:
             x_cm, y_cm, diameter_cm, focal_cm = (float(item) for item in fields[:4])
-            shape_code = int(fields[4])
+            shape_value = float(fields[4])
+            shape_code = int(shape_value)
             # sim_telarray parses a sixth floating-point field when present.
             # A comment immediately after the required fields means no z was
             # supplied, rather than an invalid optical datum.
@@ -149,8 +155,12 @@ def parse_simtel_mirror_list(
             raise SceneCompileError(
                 f"mirror list line {line_number}: invalid numeric field"
             ) from error
-        if not all(math.isfinite(item) for item in (x_cm, y_cm, diameter_cm, focal_cm, z_cm)):
+        if not all(
+            math.isfinite(item) for item in (x_cm, y_cm, diameter_cm, focal_cm, shape_value, z_cm)
+        ):
             raise SceneCompileError(f"mirror list line {line_number}: non-finite value")
+        if shape_value != shape_code:
+            raise SceneCompileError(f"mirror list line {line_number}: shape must be an integer")
         if diameter_cm <= 0.0:
             raise SceneCompileError(f"mirror list line {line_number}: diameter must be positive")
         if shape_code not in _SHAPES:
@@ -264,6 +274,11 @@ def compile_scene(
         # own focal length.  It is not an optical value to manufacture.
         if fallback == 0.0:
             fallback = None
+    # Some dual-mirror catalogues set every panel focal-length column to zero
+    # and provide the telescope focal length as the documented common value.
+    # Use it only as an explicit fallback, never as an inferred prescription.
+    if fallback is None and isinstance(parameters.get("focal_length"), dict):
+        fallback = _length_m(parameters["focal_length"], "focal_length")
     consumed = set()
     nominal_geometry = False
     if "mirror_list" in verified_assets:
@@ -275,6 +290,8 @@ def compile_scene(
         consumed.add("mirror_list")
         if "mirror_focal_length" in parameters:
             consumed.add("mirror_focal_length")
+        if fallback is not None and "focal_length" in parameters:
+            consumed.add("focal_length")
         nominal_fields = {"focal_length", "dish_shape_length", "mirror_offset", "parabolic_dish"}
         nominal_geometry = parameters.get("mirror_class", {}).get(
             "value"
@@ -324,14 +341,21 @@ def compile_scene(
     camera = None
     nested_assets = {}
     unresolved_references = []
-    if "camera_config_file" in verified_assets:
+    camera_asset_name = next(
+        (name for name in ("camera_config_file", "camera_pixel_layout") if name in verified_assets),
+        None,
+    )
+    if camera_asset_name is not None:
         try:
-            camera = parse_camera_layout(
-                verified_assets["camera_config_file"].read_text(encoding="utf-8")
+            contents = verified_assets[camera_asset_name].read_text(encoding="utf-8")
+            camera = (
+                parse_camera_layout_ecsv(contents)
+                if camera_asset_name == "camera_pixel_layout"
+                else parse_camera_layout(contents)
             )
         except CameraConfigError as error:
             raise SceneCompileError(str(error)) from error
-        consumed.add("camera_config_file")
+        consumed.add(camera_asset_name)
         declared_pixels = parameters.get("camera_pixels", {}).get("value")
         if isinstance(declared_pixels, bool) or not isinstance(declared_pixels, int):
             raise SceneCompileError("camera_pixels must be an integer count")
