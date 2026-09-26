@@ -5,6 +5,9 @@ on:
   push:
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   build-and-test:
     strategy:
@@ -32,10 +35,11 @@ jobs:
       - uses: actions/checkout@v7
         with:
           repository: cta-observatory/pyhessio
+          ref: 809085d7620aca261be54177c751eb1549318411
           path: hessio
       - name: Build EventIO dependency
         run: |
-          ln -sfn hessioxxx/include hessio/include
+          (cd hessio && ln -sfn hessioxxx/include include)
           cmake -S hessio -B hessio/build -DCMAKE_BUILD_TYPE=Release
           cmake --build hessio/build --target hessio --parallel
       - name: Configure and build EventIO reader
