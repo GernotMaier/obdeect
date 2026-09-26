@@ -204,7 +204,7 @@ remain gated. Current limitations and validation evidence are in [status](docs/S
 
 ```bash
 obdeect-psf scan --executable ./build/debug/obdeect_reference --photons 10000 \
-  --field-x-deg 0 0.5 1.0 --output-dir out/ reference_psf --plot out/ reference_psf.png
+  --field-x-deg 0 0.5 1.0 --output-dir out/reference_psf --plot out/reference_psf.png
 ```
 
 A scan writes one trace CSV per offset and `psf_scan.csv`/`psf_scan.json`.
