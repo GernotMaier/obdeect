@@ -132,7 +132,9 @@ def read_arrivals(path: Path) -> list[OpticalArrival]:
             throughput = _number(row, "throughput", path, line)
             path_length = _number(row, "path_length_m", path, line)
             incidence = tuple(
-                _number(row, name, path, line) if name in fields else None
+                _number(row, name, path, line)
+                if name in fields and row.get(name) not in (None, "")
+                else None
                 for name in (
                     "incidence_primary_deg",
                     "incidence_secondary_deg",
