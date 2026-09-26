@@ -35,8 +35,8 @@ event writing, and array reconstruction are outside scope.
 - Source kernels provide deterministic star, finite-distance illuminator, and
   laser samples with wavefront timing, projected-pupil weighting, and
   beam-normal laser launch planes.  CSV input preserves photon and batch
-  provenance.  An optional hessio probe checks the external library ABI; an
-  EventIO reader is not implemented.
+  provenance. An optional EventIO reader now decodes CORSIKA 7 photon
+  bunches; generated-file tests cover full, compact, 3D, nested and split blocks.
 - Tests cover analytic primitives, material and source kernels, model
   prescriptions, importer validation, and toy-scene obstruction behavior.
 - A reference-manifest tool freezes selected model revisions, input and
@@ -172,7 +172,7 @@ Each step has a deliverable and an exit criterion.  Complete the steps in
 order; later comparisons are only meaningful when earlier geometry and frame
 contracts are fixed.
 
-1. **Freeze the reference matrix.** Record the sim_telarray release, hessio
+1. **Freeze the reference matrix.** Record the sim_telarray release, EventIO library
    decoder, selected simulation-models checkout and production version, site,
    telescope variants, configuration overrides, seeds, atmosphere/extinction
    treatment, photon blocks, and coordinate frames.  The importer must support
@@ -393,7 +393,7 @@ matrix on scheduled or release builds.
 3. Complete configurable source spectra, pulses, pointing, yield, and
    beam-normal launch.  Specify a separate atmospheric propagation/scattering
    model before supporting laser side scatter.
-4. Add an optional CORSIKA7 EventIO/hessio adapter behind the existing
+4. Complete the optional CORSIKA7 EventIO adapter behind the existing
    format-neutral photon contract.  Preserve all bunch metadata and unresolved
    wavelength sentinels; compare standard, compact, and 3D blocks with an
    independent decoder.

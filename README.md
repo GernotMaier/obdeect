@@ -154,6 +154,33 @@ vertices so the plot displays the actual traced path.
 
 The C++20 core is split by responsibility so a photon kernel never needs Python, YAML, EventIO or a plotting dependency.
 
+### CORSIKA 7 EventIO input
+
+The optional C++ EventIO adapter reads CORSIKA IACT `TELFIL` files directly.
+In this workspace it builds against the adjacent EventIO C source checkout;
+an installed library can instead be selected with `-DEventio_ROOT=/path/to/install`.
+
+```bash
+cmake -S . -B build/eventio -DOBDEECT_BUILD_EVENTIO_INPUT=ON
+cmake --build build/eventio --target obdeect_eventio_summary
+./build/eventio/obdeect_eventio_summary /path/to/CORSIKA_TELFIL
+```
+
+`EventioPhotonReader` yields one weighted `OpticalPhoton` per CORSIKA bunch,
+with a `PhotonBatchContext` for run, event, reused array and telescope. It
+supports full, compact and 3D records in both array layouts. A zero wavelength
+stays unresolved; CEFFIC photoelectron-like bunches are rejected. Use
+`resolve_eventio_spectrum()` to create deterministic spectral children before
+any wavelength-dependent response. `AtmosphereTransmissionTable` reads the
+simulation transmission table and `attenuate_eventio_direct_beam()` applies
+direct-beam extinction between emission and telescope arrival. Check that the
+table's observation altitude and CORSIKA production configuration match before
+using it. These stages are separate from the file decoder and optical kernel.
+The reader's CORSIKA-local arrival rays must be transformed into the selected
+telescope scene frame before tracing. See the
+[input and atmosphere plan](docs/CORSIKA7_EVENTIO_INPUT_PLAN.md) for conventions
+and remaining production-file validation.
+
 | Component | Current implementation |
 | --- | --- |
 | `math.hpp` | `Vec3`, dot/cross/norm and checked direction normalisation. |

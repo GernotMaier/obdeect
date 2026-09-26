@@ -13,10 +13,20 @@ from obdeect.scene_compiler import (
     derive_nominal_single_reflector,
     parse_simtel_mirror_list,
     parse_simtel_segmentation,
+    require_trace_ready,
 )
 
 
 class TestSceneCompiler(unittest.TestCase):
+    def test_trace_readiness_requires_resolved_scene(self):
+        require_trace_ready({"report": {"trace_blockers": [], "native_trace_ready": True}})
+        with self.assertRaisesRegex(SceneCompileError, "detector surfaces"):
+            require_trace_ready({
+                "report": {"trace_blockers": ["physical detector surfaces are unresolved"]}
+            })
+        with self.assertRaisesRegex(SceneCompileError, "native production scene binding"):
+            require_trace_ready({"report": {"trace_blockers": []}})
+
     def test_nominal_panel_normal_and_dish_position_follow_simtel_formula(self):
         # A panel at r=2 m on a 16 m DC dish has a positive sag and
         # an inward-tilted normal; the signed mirror offset is retained.

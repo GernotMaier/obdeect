@@ -374,6 +374,7 @@ def compile_scene(
         if parameters[name].get("required_for_trace") is True:
             raise SceneCompileError(f"required field {name} is not supported by the compiler")
     report = {
+        "native_trace_ready": False,
         "consumed": sorted(consumed),
         "deferred": deferred,
         "unsupported": [],
@@ -426,6 +427,16 @@ def compile_scene(
     return compiled
 
 
+def require_trace_ready(scene: dict[str, Any]) -> None:
+    """Reject a compiled scene that cannot be passed to a production tracer."""
+    report = scene.get("report", {})
+    blockers = report.get("trace_blockers", [])
+    if not report.get("native_trace_ready", False):
+        blockers = [*blockers, "native production scene binding is unavailable"]
+    if blockers:
+        raise SceneCompileError("scene is not trace-ready: " + "; ".join(blockers))
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Compile a simulation-models IR into generic scene data."
@@ -440,12 +451,19 @@ def main() -> None:
         help="explicit sim_telarray installation for cfg/CTA camera tables",
     )
     parser.add_argument("--output", type=Path, required=True, help="compiled generic-scene JSON")
+    parser.add_argument(
+        "--require-trace-ready",
+        action="store_true",
+        help="fail if unresolved optical geometry or response prevents production tracing",
+    )
     args = parser.parse_args()
     try:
         ir = json.loads(args.ir.read_text(encoding="utf-8"))
         if not isinstance(ir, dict):
             raise SceneCompileError("IR root must be an object")
         scene = compile_scene(ir, args.source_root, simtel_root=args.simtel_root)
+        if args.require_trace_ready:
+            require_trace_ready(scene)
     except (OSError, json.JSONDecodeError, SceneCompileError) as error:
         raise SystemExit(f"scene compilation failed: {error}") from error
     args.output.write_text(json.dumps(scene, indent=2, sort_keys=True) + "\n", encoding="utf-8")
