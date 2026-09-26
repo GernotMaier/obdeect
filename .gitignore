@@ -2,6 +2,7 @@
 /build/
 /out/
 /compile_commands.json
+/tmp_planning/
 *.o
 *.obj
 *.a
