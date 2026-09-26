@@ -1,7 +1,21 @@
-"""Python diagnostics for the obdeect IACT ray-tracing prototype."""
+"""Python helpers and native executable discovery for obdeect."""
 
-__version__ = "0.1.0"
+from importlib.metadata import PackageNotFoundError, version
 
-from .plotting import read_paths
+try:
+    __version__ = version("obdeect-dev")
+except PackageNotFoundError:
+    __version__ = "0.1.0"
 
-__all__ = ["read_paths"]
+from .cli import executable_path
+
+
+def read_paths(*args, **kwargs):
+    """Read traced paths, importing plotting dependencies only when needed."""
+
+    from .plotting import read_paths as _read_paths
+
+    return _read_paths(*args, **kwargs)
+
+
+__all__ = ["executable_path", "read_paths"]

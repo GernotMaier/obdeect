@@ -18,10 +18,10 @@ void require(bool condition, const char* message) {
 
 int main() {
   using namespace obdeect;
-  ToyMstConfig configuration{};
+  ArtificialMstConfig configuration{};
   configuration.include_structure = false;
   const auto scene = compile_scene(configuration);
-  require(scene.has_value(), "valid toy scene compiles");
+  require(scene.has_value(), "valid reference scene compiles");
 
   const std::vector<Vec3> positions{{0.0, 0.0, 20.0}, {10.0, 0.0, 20.0}};
   const std::vector<Vec3> directions{{0.0, 0.0, -1.0}, {0.0, 0.0, -1.0}};

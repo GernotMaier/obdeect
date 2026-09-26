@@ -16,7 +16,7 @@ struct TraceResult {
 // Scalar reference block runner. It is intentionally allocation-free inside
 // the photon loop: output is sized before tracing and each record is written by
 // index. SIMD/threaded kernels must reproduce this contract exactly.
-[[nodiscard]] inline TraceResult trace(const CompiledToyScene& scene, const PhotonBlockView& input) {
+[[nodiscard]] inline TraceResult trace(const CompiledReferenceScene& scene, const PhotonBlockView& input) {
   TraceResult result{PhotonResultBlock{input.position_m.size()}, {}};
   if (!scene.is_valid() || !validate_photon_block(input)) {
     for (std::size_t index = 0; index < input.position_m.size(); ++index) {
@@ -26,7 +26,7 @@ struct TraceResult {
     return result;
   }
   for (std::size_t index = 0; index < input.position_m.size(); ++index) {
-    const PathRecord record = trace_toy_mst({input.position_m[index], input.direction[index]}, input.photon_id[index],
+    const PathRecord record = trace_artificial_mst({input.position_m[index], input.direction[index]}, input.photon_id[index],
                                             scene.configuration);
     const std::size_t final_index = record.point_count == 0 ? 0 : record.point_count - 1;
     result.photons.position_m[index] = record.points_m[final_index];

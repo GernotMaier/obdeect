@@ -4,9 +4,21 @@
 Cherenkov telescopes. The C++ core uses only the standard library. Python
 provides plotting, PSF analysis, and model import tools.
 
-## Start here
+## Installation and Build
 
-Requirements: a C++20 compiler, CMake 3.20+, Ninja or Make, and Python 3.10+.
+For a released platform wheel, Python 3.10+ is sufficient. The wheel contains
+the C++20 ray-tracing executables and headers. A source checkout additionally
+needs a C++20 compiler and CMake 3.20+.
+
+Install the current development distribution from PyPI and run the packaged
+tracer without a source checkout:
+
+```sh
+python -m pip install obdeect-dev
+obdeect-simtools-raytrace --telescope MST --photons 10000 --output trace.csv
+```
+
+Installation and build steps are as follows:
 
 ```sh
 python -m venv .venv
@@ -14,20 +26,27 @@ source .venv/bin/activate
 python -m pip install -e '.[dev]'
 cmake --preset debug
 cmake --build --preset debug
+```
+
+Test your installation with:
+
+```sh
 ctest --test-dir build/debug --output-on-failure
 python -m unittest discover -s python/tests
 ```
 
+## Simple Telescope Simulation
+
 Trace the simple spherical telescope and make three plots:
 
 ```sh
-./build/debug/obdeect_toy --photons 10000 --output toy.csv
-obdeect-plot-toy --telescope toy-mst --view structure --output structure.png
-obdeect-plot-toy toy.csv --telescope toy-mst --view rays --output rays.png
-obdeect-plot-toy toy.csv --telescope toy-mst --view focal-plane --output focal.png
+./build/debug/obdeect_reference --photons 10000 --output  reference.csv
+obdeect-plot-reference --telescope reference-mst --view structure --output structure.png
+obdeect-plot-reference  reference.csv --telescope reference-mst --view rays --output rays.png
+obdeect-plot-reference  reference.csv --telescope reference-mst --view focal-plane --output focal.png
 ```
 
-The structure plot shows the toy mirror, camera, and four supports in two
+The structure plot shows the reference mirror, camera, and four supports in two
 side projections. The ray plot uses actual CSV vertices. The focal plot shows
 detected weight per bin and x/y projections. `--max-paths` limits displayed
 rays; `--bins` controls the focal histogram. Coordinates are telescope frame
@@ -40,13 +59,13 @@ source models over the same entrance pupil:
 
 ```bash
 # Plane wave from an on/off-axis star; angles are telescope-frame degrees.
-./build/obdeect_toy --source star --field-x-deg 0.5 --field-y-deg 0.0
+./build/obdeect_reference --source star --field-x-deg 0.5 --field-y-deg 0.0
 
 # Finite-distance point flasher, with per-photon inverse-square weights.
-./build/obdeect_toy --source illuminator --distance-m 50
+./build/obdeect_reference --source illuminator --distance-m 50
 
 # Collimated or finite-divergence calibration laser.
-./build/obdeect_toy --source laser --distance-m 50 --divergence-deg 0.1
+./build/obdeect_reference --source laser --distance-m 50 --divergence-deg 0.1
 ```
 
 CSV output stores every traced path vertex plus wavelength, emission time,
@@ -61,7 +80,7 @@ same Python plotter. The analytic catalogue uses public `simulation-models`
 6.3.0 identifiers as a tested baseline; the production importer accepts an
 explicitly selected version from the supplied checkout and records provenance.
 It contains optical prescriptions only: it does not load model JSON, facet positions,
-camera pixels, alignment, structures, throughput, or the SCT coordinate
+detector conversion, alignment, structures, throughput, or the SCT coordinate
 transform. LST ideal-paraboloid and MST central-sphere baselines are executable
 and tested; SST/SCT are two-mirror prescription scaffolding awaiting their
 model-specific geometry validation.
@@ -145,7 +164,7 @@ and remaining production-file validation.
 | `interactions.hpp` | Checked specular reflection. |
 | `axisymmetric_optics.hpp` | Paraboloid/even-polynomial SC surfaces and forward Newton intersection. |
 | `facets.hpp` | Finite circular facet intersection, nearest-hit selection and tabulated coating response. |
-| `scene.hpp`, `trace.hpp` | Immutable directed toy-scene compilation and scalar SoA block tracing. |
+| `scene.hpp`, `trace.hpp` | Immutable directed  reference-scene compilation and scalar SoA block tracing. |
 | `diagnostics.hpp` | Status/weight closure summary. |
 | `model_import.hpp` | Canonical CTAO model provenance/import target. |
 
@@ -173,20 +192,19 @@ counts. See [examples/README.md](examples/README.md) for the case list.
 
 ## Scope
 
-The toy scene is MST inspired; it is not a CTAO production telescope. The
+The reference scene is MST inspired; it is not a CTAO production telescope. The
 `obdeect_ctao` command traces analytic LST/MST optical baselines and contains
-experimental SST/SCT prescriptions. CTAO plots show optical outlines only:
-structures, segmented mirrors, camera pixels, and materials are not built into
-those traces. Importing a `simulation-models` record records provenance and
-partial geometry but does not make it trace ready. Current limitations and
-validation evidence are in [status](docs/STATUS.md). The current
+SST/SCT polynomial prescriptions. Model-derived nominal LST/MST surface tables
+are traceable through `obdeect-simtools-raytrace --scene-file`; run-specific
+alignment, secondary structures, obscurers, and wavelength-dependent bindings
+remain gated. Current limitations and validation evidence are in [status](docs/STATUS.md). The current
 [code review](docs/CODE_REVIEW.md) records fixes and remaining duplication.
 
 ## PSF scan
 
 ```bash
-obdeect-psf scan --executable ./build/debug/obdeect_toy --photons 10000 \
-  --field-x-deg 0 0.5 1.0 --output-dir out/toy_psf --plot out/toy_psf.png
+obdeect-psf scan --executable ./build/debug/obdeect_reference --photons 10000 \
+  --field-x-deg 0 0.5 1.0 --output-dir out/reference_psf --plot out/reference_psf.png
 ```
 
 A scan writes one trace CSV per offset and `psf_scan.csv`/`psf_scan.json`.
@@ -195,24 +213,27 @@ they are not validation of a production telescope model.
 
 The [production 7.0.0 sim_telarray reference](docs/reference/7.0.0/README.md)
 includes focal-plane PSFs, integration radii, cumulative distributions, and
-archived photon lists for LST, both MST cameras, and SST across their selected
-North/South sites. These are inputs for future obdeect production-scene
-comparisons.
+archived photon lists for LST, both MST configurations, and SST across their
+selected North/South sites. These remain the comparison fixtures for native
+scene traces.
 
 ## Model provenance and scene compilation
 
-The Python adapters can select a `simulation-models` record, hash its
-declared assets, and compile a deliberately incomplete, provenance-checked
-scene hand-off. Compilation retains mirror-list geometry, derives nominal
-single-reflector panel normals, and reports run-specific alignment, detector
-surfaces, structures, and materials as trace blockers. It does not connect a
-production scene to a native trace executable yet.
+The Python adapters can select a `simulation-models` record, hash its declared
+assets, and compile a provenance-checked scene hand-off. Compilation retains
+mirror-list geometry, derives nominal single-reflector panel normals, and
+reports run-specific alignment, structures, and materials as trace blockers.
+For nominal LST and MST records it can also emit the strict native surface
+table consumed directly by the C++ tracer:
 
 ```bash
 obdeect-import-simulation-models /path/to/simulation-models LSTN-design \
   --version 7.0.0 --output lstn.ir.json
 obdeect-compile-scene lstn.ir.json --source-root /path/to/simulation-models \
-  --simtel-root /path/to/sim_telarray --output lstn.scene.json
+  --simtel-root /path/to/sim_telarray --output lstn.scene.json \
+  --native-output lstn.scene.csv
+obdeect-simtools-raytrace --scene-file lstn.scene.csv --source star \
+  --photons 10000 --output lstn-arrivals.csv
 ```
 
 `--simtel-root` is needed when a camera response table is found in
@@ -220,9 +241,10 @@ sim_telarray's `cfg/CTA` search path rather than simulation-models `Files`.
 The selected file path and SHA-256 hash are recorded in the scene provenance.
 
 CSV trace output includes source weight, wavelength, emission time, terminal
-status, path length, and path vertices. The current executable-level
-throughput is one for a detector-surface hit and zero for a loss; material and
-coating kernels exist but are not yet integrated into these analytic scenes.
+status, path length, path vertices, and primary/focal incidence angles. The
+current executable-level throughput is one for a detector-surface hit and zero
+for a loss; material and coating kernels remain separately tested primitives
+until their model bindings are selected.
 
 ## Project map
 
@@ -235,7 +257,10 @@ coating kernels exist but are not yet integrated into these analytic scenes.
 | `examples/` | Runnable end to end examples |
 | `docs/` | Tutorials, status, and comparison contracts |
 
+## License and Citation
+
 BSD-3-Clause license. Citation metadata is in [CITATION.cff](CITATION.cff).
+
 ## Generative AI disclosure
 
 Generative AI tools were used to write much of this project; outputs were

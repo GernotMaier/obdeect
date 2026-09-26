@@ -2,10 +2,17 @@
 
 import unittest
 
-from obdeect.camera_config import CameraConfigError, parse_camera_layout
+from obdeect.camera_config import CameraConfigError, parse_camera_layout, parse_camera_layout_ecsv
 
 
 class TestCameraConfig(unittest.TestCase):
+    def test_ecsv_layout_preserves_focal_plane_coordinates(self):
+        layout = parse_camera_layout_ecsv(
+            "# %ECSV 1.0\npixel_id type_id x_cm y_cm enabled\n3 1 -2.0 1.5 1\n4 2 2.0 -1.5 1\n"
+        )
+        self.assertEqual(layout["kind"], "focal_plane_layout")
+        self.assertEqual(layout["pixels"][0]["centre_xy_m"], [-0.02, 0.015])
+
     def test_pixel_layout_and_response_reference(self):
         layout = parse_camera_layout(
             'PixType 1 0 2 0.6 2 0.7 0.1 "response.dat"\n'

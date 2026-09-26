@@ -15,7 +15,7 @@ commands, tests, examples, and documentation at this worktree's base commit.
 
 ## Open design work
 
-- The toy, segmented, and general optical scenes each have separate trace
+- The  reference, segmented, and general optical scenes each have separate trace
   loops. They cannot be deduplicated safely until they share one interaction
   record and terminal-status contract.
 - Both native executables repeat CLI parsing and CSV writing. A common I/O

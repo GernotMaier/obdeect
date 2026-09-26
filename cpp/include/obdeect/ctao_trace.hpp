@@ -3,6 +3,8 @@
 #include "obdeect/ctao_models.hpp"
 #include "obdeect/photon_buffer.hpp"
 
+#include <numbers>
+
 namespace obdeect {
 
 [[nodiscard]] inline std::optional<AxisymmetricHit> intersect_primary(const Ray& ray,
@@ -23,7 +25,7 @@ namespace obdeect {
 }
 
 // Reference optical-chain tracer. It is intentionally geometric only: no
-// wavelength response, facet boundaries, obscurations or camera pixels are
+// wavelength response, facet boundaries, obscurations or detector conversion are
 // silently invented. Such features are applied only after model import.
 [[nodiscard]] inline PathRecord trace_ctao_reference(const Ray& input, std::uint64_t photon_id,
                                                       const CtaoReferenceModel& model) {
@@ -47,6 +49,9 @@ namespace obdeect {
   record.points_m[1] = first_hit->point_m;
   record.point_count = 2;
   record.path_length_m = first_hit->distance_m;
+  record.incidence_primary_deg =
+      std::acos(std::clamp(std::abs(dot(ray.direction, first_hit->unit_normal)), 0.0, 1.0)) *
+      180.0 / std::numbers::pi;
   const auto after_primary = reflect(ray, *first_hit);
   if (!after_primary) {
     record.status = PhotonStatus::invalid_input;
@@ -63,6 +68,9 @@ namespace obdeect {
     record.points_m[2] = second_hit->point_m;
     record.point_count = 3;
     record.path_length_m += second_hit->distance_m;
+    record.incidence_secondary_deg =
+        std::acos(std::clamp(std::abs(dot(ray.direction, second_hit->unit_normal)), 0.0, 1.0)) *
+        180.0 / std::numbers::pi;
     const auto after_secondary = reflect(ray, *second_hit);
     if (!after_secondary) {
       record.status = PhotonStatus::invalid_input;
@@ -80,6 +88,8 @@ namespace obdeect {
   record.points_m[model.secondary ? 3 : 2] = focal_point;
   record.point_count = model.secondary ? 4 : 3;
   record.path_length_m += *focal_distance;
+  record.incidence_focal_deg =
+      std::acos(std::clamp(std::abs(ray.direction.z), 0.0, 1.0)) * 180.0 / std::numbers::pi;
   record.final_direction = ray.direction;
   record.status = std::hypot(focal_point.x, focal_point.y) <= model.focal_plane_radius_m
                       ? PhotonStatus::detected

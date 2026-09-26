@@ -105,9 +105,21 @@ def resolve_model(root: Path, model: str, version: str) -> dict[str, Any]:
             value = parameter["value"]
             if not component(value):
                 raise ImportError(f"unsafe or invalid asset name in {parameter_path}")
-            asset_path = within_root(root / "model_parameters" / "Files" / value, root)
-            if not asset_path.is_file():
-                raise ImportError(f"declared model asset is missing: {asset_path}")
+            # Historical exports use ``model_parameters/Files`` while current
+            # simulation-models records commonly keep the asset beside the
+            # parameter JSON. Support only these two documented locations;
+            # never search arbitrary descendants or silently choose a file.
+            candidates = (
+                root / "model_parameters" / "Files" / value,
+                parameter_path.parent / value,
+            )
+            existing = [
+                within_root(candidate, root) for candidate in candidates if candidate.is_file()
+            ]
+            if len(existing) != 1:
+                locations = ", ".join(str(candidate) for candidate in candidates)
+                raise ImportError(f"declared model asset is missing or ambiguous: {locations}")
+            asset_path = existing[0]
             assets[name] = record(asset_path, root)
     return {
         "format": "obdeect.simulation-models-ir.v1",

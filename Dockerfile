@@ -1,8 +1,8 @@
 # Build image for the obdeect runtime consumed by simtools.
 #
 # The image deliberately contains the current reference executables.  The
-# production `obdeect-simtools-raytrace` executable referenced by
-# simtools will be added once the production scene/arrival contract is complete.
+# The image is retained as a source-build fallback while the PyPI wheel is
+# validated. The wheel is the preferred runtime distribution.
 #
 # Build from the obdeect repository root:
 #   docker build -t ghcr.io/gammasim/obdeect:v0.1.0 .
@@ -34,8 +34,9 @@ RUN printf '%s\n' \
       'obdeect_build_type: "Release"' \
       'obdeect_build_testing: false' \
       'reference_executables:' \
-      '  - obdeect_toy' \
-      '  - obdeect_ctao' > /opt/obdeect/build_opts.yml
+      '  - obdeect_reference' \
+      '  - obdeect_ctao' \
+      '  - obdeect-simtools-raytrace' > /opt/obdeect/build_opts.yml
 
 FROM ${RUNTIME_IMAGE}
 

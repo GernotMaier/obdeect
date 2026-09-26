@@ -78,6 +78,18 @@ class TestSimulationModelsImport(unittest.TestCase):
             with self.assertRaises(IMPORTER.ImportError):
                 IMPORTER.resolve_model(root, "TEST", "1.2.3")
 
+    def test_resolves_documented_parameter_local_asset(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "simulation-models"
+            self.make_tree(root, asset_exists=False)
+            local_asset = root / "model_parameters/TEST/mirror_list/mirrors.dat"
+            local_asset.write_text("one facet\n")
+            scene = IMPORTER.resolve_model(root, "TEST", "1.2.3")
+        self.assertEqual(
+            scene["assets"]["mirror_list"]["path"],
+            "model_parameters/TEST/mirror_list/mirrors.dat",
+        )
+
     def test_path_components_fail_closed(self):
         # T-IMPORT-003: caller controlled selections never escape the source root.
         with tempfile.TemporaryDirectory() as directory:

@@ -9,7 +9,16 @@ if(OBDEECT_BUILD_EVENTIO_INPUT)
 endif()
 
 add_library(obdeect_core INTERFACE)
-target_include_directories(obdeect_core INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/cpp/include)
+if(DEFINED SKBUILD_PLATLIB_DIR)
+  set(OBDEECT_INSTALL_INCLUDE_DIR "obdeect/_include")
+  set(OBDEECT_INSTALL_CMAKE_DIR "obdeect/cmake")
+else()
+  set(OBDEECT_INSTALL_INCLUDE_DIR "include")
+  set(OBDEECT_INSTALL_CMAKE_DIR "lib/cmake/obdeect")
+endif()
+target_include_directories(obdeect_core INTERFACE
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/cpp/include>
+  $<INSTALL_INTERFACE:${OBDEECT_INSTALL_INCLUDE_DIR}>)
 target_compile_features(obdeect_core INTERFACE cxx_std_20)
 
 function(obdeect_enable_warnings target)
@@ -29,15 +38,48 @@ if(OBDEECT_BUILD_EVENTIO_INPUT)
   obdeect_enable_warnings(obdeect_eventio_summary)
 endif()
 
-add_executable(obdeect_toy cpp/src/toy_main.cpp)
-target_link_libraries(obdeect_toy PRIVATE obdeect_core)
-obdeect_enable_warnings(obdeect_toy)
+add_executable(obdeect_reference cpp/src/reference_main.cpp)
+target_link_libraries(obdeect_reference PRIVATE obdeect_core)
+obdeect_enable_warnings(obdeect_reference)
 
 add_executable(obdeect_ctao cpp/src/ctao_main.cpp)
 target_link_libraries(obdeect_ctao PRIVATE obdeect_core)
 obdeect_enable_warnings(obdeect_ctao)
 
-install(TARGETS obdeect_toy obdeect_ctao RUNTIME DESTINATION bin)
+add_executable(obdeect-simtools-raytrace cpp/src/simtools_raytrace_main.cpp)
+target_link_libraries(obdeect-simtools-raytrace PRIVATE obdeect_core)
+obdeect_enable_warnings(obdeect-simtools-raytrace)
+
+if(DEFINED SKBUILD_PLATLIB_DIR)
+  # Wheels keep the native programs next to the Python launcher.  The launcher
+  # resolves this directory through importlib, so users do not need a source
+  # checkout or a separately installed runtime image.
+  install(TARGETS obdeect_reference obdeect_ctao obdeect-simtools-raytrace
+          RUNTIME DESTINATION obdeect/_native)
+  install(DIRECTORY cpp/include/ DESTINATION obdeect/_include)
+else()
+  install(TARGETS obdeect_reference obdeect_ctao obdeect-simtools-raytrace RUNTIME DESTINATION bin)
+  install(DIRECTORY cpp/include/ DESTINATION include)
+endif()
+
+include(CMakePackageConfigHelpers)
+install(TARGETS obdeect_core EXPORT obdeectTargets)
+install(EXPORT obdeectTargets
+        FILE obdeectTargets.cmake
+        NAMESPACE obdeect::
+        DESTINATION ${OBDEECT_INSTALL_CMAKE_DIR})
+configure_package_config_file(
+  cmake/obdeectConfig.cmake.in
+  ${CMAKE_CURRENT_BINARY_DIR}/obdeectConfig.cmake
+  INSTALL_DESTINATION ${OBDEECT_INSTALL_CMAKE_DIR})
+write_basic_package_version_file(
+  ${CMAKE_CURRENT_BINARY_DIR}/obdeectConfigVersion.cmake
+  VERSION ${PROJECT_VERSION}
+  COMPATIBILITY SameMajorVersion)
+install(FILES
+  ${CMAKE_CURRENT_BINARY_DIR}/obdeectConfig.cmake
+  ${CMAKE_CURRENT_BINARY_DIR}/obdeectConfigVersion.cmake
+  DESTINATION ${OBDEECT_INSTALL_CMAKE_DIR})
 
 if(OBDEECT_BUILD_TESTING)
   enable_testing()
@@ -107,8 +149,14 @@ if(OBDEECT_BUILD_TESTING)
   obdeect_enable_warnings(obdeect_segmented_scene_tests)
   add_test(NAME obdeect_segmented_scene_tests COMMAND obdeect_segmented_scene_tests)
 
+  add_executable(obdeect_scene_file_tests cpp/tests/test_scene_file.cpp)
+  target_link_libraries(obdeect_scene_file_tests PRIVATE obdeect_core)
+  obdeect_enable_warnings(obdeect_scene_file_tests)
+  add_test(NAME obdeect_scene_file_tests COMMAND obdeect_scene_file_tests)
+
   add_executable(obdeect_optical_scene_tests cpp/tests/test_optical_scene.cpp)
   target_link_libraries(obdeect_optical_scene_tests PRIVATE obdeect_core)
   obdeect_enable_warnings(obdeect_optical_scene_tests)
   add_test(NAME obdeect_optical_scene_tests COMMAND obdeect_optical_scene_tests)
+
 endif()

@@ -111,3 +111,49 @@ def parse_camera_layout(contents: str) -> dict[str, Any]:
         "rotation_deg": rotation_deg,
         "deferred_directives": dict(sorted(deferred.items())),
     }
+
+
+def parse_camera_layout_ecsv(contents: str) -> dict[str, Any]:
+    """Read the geometric subset of a simulation-models camera-layout ECSV.
+
+    Only ID and focal-plane coordinates are consumed. The table describes the
+    physical layout and is not interpreted as readout or response behaviour.
+    """
+    header: list[str] | None = None
+    entries: list[dict[str, Any]] = []
+    identifiers: set[int] = set()
+    for line_number, source_line in enumerate(contents.splitlines(), start=1):
+        line = source_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        fields = line.split()
+        if header is None:
+            header = fields
+            required = {"pixel_id", "type_id", "x_cm", "y_cm"}
+            if not required.issubset(header):
+                raise CameraConfigError("camera ECSV lacks geometric columns")
+            continue
+        if len(fields) != len(header):
+            raise CameraConfigError(f"camera ECSV line {line_number}: wrong column count")
+        values = dict(zip(header, fields, strict=True))
+        identifier = _integer(values["pixel_id"], line_number)
+        if identifier in identifiers:
+            raise CameraConfigError(f"camera ECSV line {line_number}: duplicate identifier")
+        identifiers.add(identifier)
+        entries.append({
+            "id": identifier,
+            "type_id": _integer(values["type_id"], line_number),
+            "centre_xy_m": [
+                _number(values["x_cm"], line_number) * 0.01,
+                _number(values["y_cm"], line_number) * 0.01,
+            ],
+        })
+    if header is None or not entries:
+        raise CameraConfigError("camera ECSV has no layout entries")
+    return {
+        "kind": "focal_plane_layout",
+        "pixel_types": [],
+        "pixels": entries,
+        "rotation_deg": 0.0,
+        "deferred_directives": {},
+    }

@@ -54,9 +54,10 @@ struct PointIlluminator {
 
 struct LaserSource {
   // Beam direction is the central propagation direction, with divergence as
-  // a hard half-angle sampling limit.  A zero-divergence laser is collimated.
+  // a hard half-angle sampling limit. A zero-divergence laser is collimated.
   Vec3 direction{0.0, 0.0, -1.0};
-  double source_plane_z_m{50.0};
+  // Centre of the launch plane. The sampled plane is normal to ``direction``.
+  Vec3 origin_m{0.0, 0.0, 50.0};
   double divergence_half_angle_rad{};
   double wavelength_nm{400.0};
 };
@@ -139,7 +140,9 @@ inline std::vector<OpticalPhoton> laser_photons(std::size_t count, double pupil_
       source.divergence_half_angle_rad >= std::numbers::pi / 2.0) {
     return photons;
   }
-  if (!std::isfinite(pupil_radius_m) || pupil_radius_m <= kEpsilon || !std::isfinite(source.source_plane_z_m)) {
+  if (!std::isfinite(pupil_radius_m) || pupil_radius_m <= kEpsilon ||
+      !std::isfinite(source.origin_m.x) || !std::isfinite(source.origin_m.y) ||
+      !std::isfinite(source.origin_m.z)) {
     return photons;
   }
   photons.reserve(count);
@@ -153,7 +156,6 @@ inline std::vector<OpticalPhoton> laser_photons(std::size_t count, double pupil_
   const Vec3 basis_y{central_direction->y * basis_x->z - central_direction->z * basis_x->y,
                      central_direction->z * basis_x->x - central_direction->x * basis_x->z,
                      central_direction->x * basis_x->y - central_direction->y * basis_x->x};
-  const Vec3 beam_origin{0.0, 0.0, source.source_plane_z_m};
   constexpr double golden_ratio_conjugate = 0.6180339887498948482;
   for (std::size_t index = 0; index < count; ++index) {
     // Position and direction use deliberately different low-discrepancy
@@ -162,7 +164,7 @@ inline std::vector<OpticalPhoton> laser_photons(std::size_t count, double pupil_
     const double position_radius = pupil_radius_m * std::sqrt(position_u);
     const double position_phi = std::fmod(static_cast<double>(index) * golden_ratio_conjugate, 1.0) *
                                 2.0 * std::numbers::pi;
-    const Vec3 position = beam_origin + *basis_x * (position_radius * std::cos(position_phi)) +
+    const Vec3 position = source.origin_m + *basis_x * (position_radius * std::cos(position_phi)) +
                           basis_y * (position_radius * std::sin(position_phi));
     const std::size_t direction_index = (index * (count - 1U) + 17U) % count;
     const double u = (static_cast<double>(direction_index) + 0.5) / static_cast<double>(count);

@@ -139,7 +139,7 @@ def update_summary(summary_path: Path, root: Path, *, check: bool = False) -> No
         return
     summary["radial_analysis"] = {
         "centre": "mean of camera-rotation-corrected focal-plane crossings",
-        "weights": "one per crossing, including pixel number -1",
+        "weights": "one per crossing, including detector channel number -1",
         "integration_radius": (
             "smallest empirical centroid-centred circle containing at least the target fraction"
         ),

@@ -1,7 +1,7 @@
 """Compile a provenance-checked simulation-models IR into generic scene data.
 
 This adapter verifies the selected production and extracts documented mirror
-footprints and camera pixel layouts. It does not invent dish sag, panel
+footprints and focal-plane layouts. It does not invent dish sag, panel
 normals, detector surfaces, or material behaviour. The output is an audited
 handoff, not a trace-ready production scene.
 """
@@ -15,7 +15,7 @@ import math
 from pathlib import Path
 from typing import Any
 
-from obdeect.camera_config import CameraConfigError, parse_camera_layout
+from obdeect.camera_config import CameraConfigError, parse_camera_layout, parse_camera_layout_ecsv
 from obdeect.model_import import ImportError as ModelImportError
 from obdeect.model_import import component, record, resolve_model
 
@@ -134,11 +134,17 @@ def parse_simtel_mirror_list(
         if not line or line.startswith("#"):
             continue
         fields = line.split()
+        # Astropy ECSV keeps its column names in one un-commented header row.
+        # The numerical columns that follow have the same documented layout as
+        # sim_telarray mirror lists, so skip only this exact header form.
+        if fields[:5] == ["mirror_x", "mirror_y", "mirror_diameter", "focal_length", "shape_type"]:
+            continue
         if len(fields) < 5:
             raise SceneCompileError(f"mirror list line {line_number}: expected at least 5 columns")
         try:
             x_cm, y_cm, diameter_cm, focal_cm = (float(item) for item in fields[:4])
-            shape_code = int(fields[4])
+            shape_value = float(fields[4])
+            shape_code = int(shape_value)
             # sim_telarray parses a sixth floating-point field when present.
             # A comment immediately after the required fields means no z was
             # supplied, rather than an invalid optical datum.
@@ -149,8 +155,12 @@ def parse_simtel_mirror_list(
             raise SceneCompileError(
                 f"mirror list line {line_number}: invalid numeric field"
             ) from error
-        if not all(math.isfinite(item) for item in (x_cm, y_cm, diameter_cm, focal_cm, z_cm)):
+        if not all(
+            math.isfinite(item) for item in (x_cm, y_cm, diameter_cm, focal_cm, shape_value, z_cm)
+        ):
             raise SceneCompileError(f"mirror list line {line_number}: non-finite value")
+        if shape_value != shape_code:
+            raise SceneCompileError(f"mirror list line {line_number}: shape must be an integer")
         if diameter_cm <= 0.0:
             raise SceneCompileError(f"mirror list line {line_number}: diameter must be positive")
         if shape_code not in _SHAPES:
@@ -264,6 +274,11 @@ def compile_scene(
         # own focal length.  It is not an optical value to manufacture.
         if fallback == 0.0:
             fallback = None
+    # Some dual-mirror catalogues set every panel focal-length column to zero
+    # and provide the telescope focal length as the documented common value.
+    # Use it only as an explicit fallback, never as an inferred prescription.
+    if fallback is None and isinstance(parameters.get("focal_length"), dict):
+        fallback = _length_m(parameters["focal_length"], "focal_length")
     consumed = set()
     nominal_geometry = False
     if "mirror_list" in verified_assets:
@@ -275,6 +290,8 @@ def compile_scene(
         consumed.add("mirror_list")
         if "mirror_focal_length" in parameters:
             consumed.add("mirror_focal_length")
+        if fallback is not None and "focal_length" in parameters:
+            consumed.add("focal_length")
         nominal_fields = {"focal_length", "dish_shape_length", "mirror_offset", "parabolic_dish"}
         nominal_geometry = parameters.get("mirror_class", {}).get(
             "value"
@@ -324,19 +341,28 @@ def compile_scene(
     camera = None
     nested_assets = {}
     unresolved_references = []
-    if "camera_config_file" in verified_assets:
+    camera_asset_name = next(
+        (name for name in ("camera_config_file", "camera_pixel_layout") if name in verified_assets),
+        None,
+    )
+    if camera_asset_name is not None:
         try:
-            camera = parse_camera_layout(
-                verified_assets["camera_config_file"].read_text(encoding="utf-8")
+            contents = verified_assets[camera_asset_name].read_text(encoding="utf-8")
+            camera = (
+                parse_camera_layout_ecsv(contents)
+                if camera_asset_name == "camera_pixel_layout"
+                else parse_camera_layout(contents)
             )
         except CameraConfigError as error:
             raise SceneCompileError(str(error)) from error
-        consumed.add("camera_config_file")
+        consumed.add(camera_asset_name)
         declared_pixels = parameters.get("camera_pixels", {}).get("value")
         if isinstance(declared_pixels, bool) or not isinstance(declared_pixels, int):
             raise SceneCompileError("camera_pixels must be an integer count")
         if len(camera["pixels"]) != declared_pixels:
-            raise SceneCompileError("camera pixel count differs from production record")
+            raise SceneCompileError(
+                "pixel count differs: focal-plane element count differs from production record"
+            )
         consumed.add("camera_pixels")
         for pixel_type in camera["pixel_types"]:
             for filename in pixel_type["response_files"]:
@@ -416,6 +442,8 @@ def compile_scene(
         "primary": primary,
         "report": report,
     }
+    if isinstance(parameters.get("focal_length"), dict):
+        compiled["focal_length_m"] = _length_m(parameters["focal_length"], "focal_length")
     if secondary is not None:
         compiled["secondary"] = secondary
     if camera is not None:
@@ -435,6 +463,128 @@ def require_trace_ready(scene: dict[str, Any]) -> None:
         raise SceneCompileError("scene is not trace-ready: " + "; ".join(blockers))
 
 
+def native_surface_rows(scene: dict[str, Any]) -> list[dict[str, Any]]:
+    """Return model-derived planar surfaces for the native scene adapter.
+
+    The exporter only accepts facets with explicit nominal centres and normals.
+    It never reconstructs a missing telescope prescription. The focal surface
+    is represented by the imported focal-plane extent at the selected focal
+    length, so the native tracer can preserve detector-boundary losses.
+    """
+    report = scene.get("report", {})
+    if report.get("facet_geometry_evidence", {}).get("normal_status") != "nominal_unperturbed":
+        raise SceneCompileError("native export requires explicit facet normals")
+    facets = scene.get("primary", {}).get("facets", [])
+    if not facets:
+        raise SceneCompileError("native export has no primary facets")
+    rows: list[dict[str, Any]] = []
+    for facet in facets:
+        centre = facet.get("nominal_centre_m")
+        normal = facet.get("nominal_normal")
+        if not isinstance(centre, list) or not isinstance(normal, list):
+            raise SceneCompileError("native export found a facet without nominal placement")
+        rows.append({
+            "surface_id": int(facet["id"]),
+            "role": "mirror",
+            "shape": facet["shape"],
+            "centre_m": centre,
+            "normal": normal,
+            "diameter_m": facet["diameter_m"],
+        })
+    camera = scene.get("camera", {})
+    # ``parse_simtel_mirror_list`` retains the focal length for every facet;
+    # use that explicit catalogue value for the detector plane.  A compiled
+    # scene intentionally does not copy the whole parameter table, so this is
+    # the only value the native exporter is allowed to consume here.
+    focal_length = scene.get("focal_length_m")
+    if (
+        not isinstance(focal_length, (int, float))
+        or not math.isfinite(float(focal_length))
+        or focal_length <= 0
+    ):
+        focal_lengths = [float(facet["focal_length_m"]) for facet in facets]
+        focal_length = focal_lengths[0]
+        if any(
+            not math.isclose(value, focal_length, rel_tol=1e-9, abs_tol=1e-12)
+            for value in focal_lengths
+        ):
+            raise SceneCompileError("native export requires an explicit focal length")
+    pixels = camera.get("pixels", [])
+    if not pixels:
+        raise SceneCompileError("native export requires focal-plane layout")
+    try:
+        extent = max(
+            math.hypot(float(pixel["centre_xy_m"][0]), float(pixel["centre_xy_m"][1]))
+            for pixel in pixels
+        )
+    except (KeyError, IndexError, TypeError, ValueError) as error:
+        raise SceneCompileError("native export found an invalid focal-plane layout") from error
+    if not math.isfinite(extent) or extent <= 0.0:
+        raise SceneCompileError("native export found an invalid focal-plane extent")
+    rows.append({
+        "surface_id": max(row["surface_id"] for row in rows) + 1,
+        "role": "detector",
+        "shape": "circle",
+        "centre_m": [0.0, 0.0, float(focal_length)],
+        "normal": [0.0, 0.0, 1.0],
+        "diameter_m": 2.0 * extent,
+    })
+    for row in rows:
+        normal = row["normal"]
+        # Stable in-plane orientation for polygonal apertures.  Project the
+        # telescope x axis into the panel plane; use y when the panel normal
+        # is parallel to x.  Circular surfaces do not consume this field.
+        candidate = [1.0, 0.0, 0.0]
+        projection = sum(candidate[index] * normal[index] for index in range(3))
+        tangent = [candidate[index] - projection * normal[index] for index in range(3)]
+        tangent_norm = math.sqrt(sum(value * value for value in tangent))
+        if tangent_norm <= 1e-12:
+            candidate = [0.0, 1.0, 0.0]
+            projection = sum(candidate[index] * normal[index] for index in range(3))
+            tangent = [candidate[index] - projection * normal[index] for index in range(3)]
+            tangent_norm = math.sqrt(sum(value * value for value in tangent))
+        row["tangent"] = [value / tangent_norm for value in tangent]
+    return rows
+
+
+def write_native_scene(scene: dict[str, Any], output: Path) -> None:
+    """Write the strict, dependency-free native scene surface table."""
+    rows = native_surface_rows(scene)
+    lines = [
+        "obdeect-scene-v1",
+        "surface_id,role,shape,cx_m,cy_m,cz_m,nx,ny,nz,tx,ty,tz,diameter_m",
+    ]
+    provenance = scene.get("provenance", {})
+    model = provenance.get("model")
+    version = provenance.get("model_version")
+    records = provenance.get("input_records", {})
+    if (
+        not isinstance(model, str)
+        or not isinstance(version, str)
+        or "," in model
+        or "," in version
+        or not isinstance(records, dict)
+    ):
+        raise SceneCompileError("native export requires model provenance")
+    content_hash = scene.get("scene_sha256")
+    if not isinstance(content_hash, str) or len(content_hash) != 64:
+        raise SceneCompileError("native export requires scene_sha256")
+    lines.insert(1, f"provenance,{model},{version},{content_hash}")
+    for row in rows:
+        centre = row["centre_m"]
+        normal = row["normal"]
+        tangent = row["tangent"]
+        lines.append(
+            ",".join([
+                str(row["surface_id"]),
+                row["role"],
+                row["shape"],
+                *(f"{value:.17g}" for value in (*centre, *normal, *tangent, row["diameter_m"])),
+            ])
+        )
+    output.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Compile a simulation-models IR into generic scene data."
@@ -449,6 +599,7 @@ def main() -> None:
         help="explicit sim_telarray installation for cfg/CTA camera tables",
     )
     parser.add_argument("--output", type=Path, required=True, help="compiled generic-scene JSON")
+    parser.add_argument("--native-output", type=Path, help="optional native surface table")
     parser.add_argument(
         "--require-trace-ready",
         action="store_true",
@@ -462,6 +613,8 @@ def main() -> None:
         scene = compile_scene(ir, args.source_root, simtel_root=args.simtel_root)
         if args.require_trace_ready:
             require_trace_ready(scene)
+        if args.native_output:
+            write_native_scene(scene, args.native_output)
     except (OSError, json.JSONDecodeError, SceneCompileError) as error:
         raise SystemExit(f"scene compilation failed: {error}") from error
     args.output.write_text(json.dumps(scene, indent=2, sort_keys=True) + "\n", encoding="utf-8")
