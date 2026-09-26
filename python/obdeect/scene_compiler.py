@@ -198,7 +198,7 @@ def compile_scene(ir: dict[str, Any], source_root: Path) -> dict[str, Any]:
         source_ir = resolve_model(source_root, model, version)
     except ModelImportError as error:
         raise SceneCompileError(f"cannot verify source production: {error}") from error
-    for key in ("input_records", "assets", "parameters"):
+    for key in ("source_root", "input_records", "assets", "parameters"):
         if ir.get(key) != source_ir[key]:
             raise SceneCompileError(f"IR {key} differs from the verified source production")
     verified_assets = {name: root / entry["path"] for name, entry in assets.items()}
