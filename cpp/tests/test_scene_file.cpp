@@ -15,8 +15,9 @@ int main() {
               "1,detector,circle,0,0,10,0,0,1,1,0,0,1\n";
   }
   const auto scene = obdeect::read_native_scene(path);
-  assert(scene.has_value());
-  assert(scene->primary_facets.size() == 1);
-  assert(scene->detector_surfaces.size() == 1);
+  if (!scene || scene->primary_facets.size() != 1 || scene->detector_surfaces.size() != 1) {
+    std::remove(path);
+    return 1;
+  }
   std::remove(path);
 }
