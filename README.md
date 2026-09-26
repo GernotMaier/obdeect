@@ -4,9 +4,11 @@
 Cherenkov telescopes. The C++ core uses only the standard library. Python
 provides plotting, PSF analysis, and model import tools.
 
-## Start here
+## Installation and Build
 
 Requirements: a C++20 compiler, CMake 3.20+, Ninja or Make, and Python 3.10+.
+
+Installation and build steps are as follows:
 
 ```sh
 python -m venv .venv
@@ -14,9 +16,16 @@ source .venv/bin/activate
 python -m pip install -e '.[dev]'
 cmake --preset debug
 cmake --build --preset debug
+```
+
+Test your installation with:
+
+```sh
 ctest --test-dir build/debug --output-on-failure
 python -m unittest discover -s python/tests
 ```
+
+## Simple Telescope Simulation
 
 Trace the simple spherical telescope and make three plots:
 
@@ -235,7 +244,10 @@ coating kernels exist but are not yet integrated into these analytic scenes.
 | `examples/` | Runnable end to end examples |
 | `docs/` | Tutorials, status, and comparison contracts |
 
+## License and Citation
+
 BSD-3-Clause license. Citation metadata is in [CITATION.cff](CITATION.cff).
+
 ## Generative AI disclosure
 
 Generative AI tools were used to write much of this project; outputs were
