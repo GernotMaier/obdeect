@@ -31,6 +31,8 @@ add_executable(obdeect_ctao cpp/src/ctao_main.cpp)
 target_link_libraries(obdeect_ctao PRIVATE obdeect_core)
 obdeect_enable_warnings(obdeect_ctao)
 
+install(TARGETS obdeect_toy obdeect_ctao RUNTIME DESTINATION bin)
+
 if(OBDEECT_BUILD_TESTING)
   enable_testing()
   add_executable(obdeect_material_tests cpp/tests/test_materials.cpp)

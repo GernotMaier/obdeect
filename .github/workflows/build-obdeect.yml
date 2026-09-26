@@ -1,0 +1,177 @@
+---
+name: build-obdeect
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+  pull_request:
+    paths:
+      - ".dockerignore"
+      - "Dockerfile"
+      - ".github/workflows/build-obdeect.yml"
+      - "CMakeLists.txt"
+      - "CMakePresets.json"
+      - "cpp/**"
+      - "python/**"
+      - "pyproject.toml"
+  schedule:
+    - cron: "0 0 1 * *"
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE: ghcr.io/gammasim/obdeect
+  BASE_IMAGE: docker.io/library/almalinux:9.8
+  RUNTIME_IMAGE: docker.io/library/almalinux:9.8-minimal
+
+jobs:
+  build:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    strategy:
+      matrix:
+        include:
+          - arch: amd64
+            platform: linux/amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            platform: linux/arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+      packages: write
+    env:
+      BASE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || 'edge' }}
+      RUN_TAG: ${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          fetch-depth: 0
+
+      - name: Set build metadata
+        run: |
+          version="$(git describe --tags --always --dirty)"
+          echo "OBDEECT_VERSION=${version}" >> "$GITHUB_ENV"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0  # v4
+
+      - name: Log in to the container registry
+        if: github.event_name == 'workflow_dispatch' || github.ref_type == 'tag'
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f  # v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a141130b1  # v6
+        with:
+          images: ${{ env.IMAGE }}
+          flavor: latest=false
+          tags: |
+            type=raw,value=${{ env.BASE_TAG }}-${{ matrix.arch }}-${{ env.RUN_TAG }}
+            type=ref,event=pr,suffix=-${{ matrix.arch }}-${{ env.RUN_TAG }}
+
+      - name: Build and push image
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a  # v7
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: ${{ matrix.platform }}
+          build-args: |
+            BUILD_BASE_IMAGE=${{ env.BASE_IMAGE }}
+            RUNTIME_IMAGE=${{ env.RUNTIME_IMAGE }}
+            OBDEECT_VERSION=${{ env.OBDEECT_VERSION }}
+            OBDEECT_REVISION=${{ github.sha }}
+          push: ${{ github.event_name == 'workflow_dispatch' || github.ref_type == 'tag' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ env.OBDEECT_VERSION }}
+          cache-from: type=gha,scope=obdeect-${{ matrix.arch }}
+          cache-to: type=gha,mode=min,scope=obdeect-${{ matrix.arch }}
+
+  build-macos:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runner: macos-15
+          - arch: amd64
+            runner: macos-15-intel
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          fetch-depth: 0
+
+      - name: Configure, build, and test
+        run: |
+          cmake -S . -B build-macos -DCMAKE_BUILD_TYPE=Release
+          cmake --build build-macos --parallel 3
+          ctest --test-dir build-macos --output-on-failure
+
+      - name: Package native macOS executables
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: |
+          package="obdeect-macos-${ARCH}"
+          cmake --install build-macos --prefix "${RUNNER_TEMP}/${package}"
+          version="$(git describe --tags --always --dirty)"
+          printf '%s\n' \
+            "obdeect_version: \"${version}\"" \
+            "obdeect_revision: \"${GITHUB_SHA}\"" \
+            "platform: \"macos/${ARCH}\"" \
+            'obdeect_build_type: "Release"' \
+            'obdeect_build_testing: true' \
+            'reference_executables:' \
+            '  - obdeect_toy' \
+            '  - obdeect_ctao' > "${RUNNER_TEMP}/${package}/build_opts.yml"
+          tar -C "$RUNNER_TEMP" -czf "${package}.tar.gz" "$package"
+          shasum -a 256 "${package}.tar.gz" > "${package}.tar.gz.sha256"
+
+      - name: Upload macOS build
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: obdeect-macos-${{ matrix.arch }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            obdeect-macos-${{ matrix.arch }}.tar.gz
+            obdeect-macos-${{ matrix.arch }}.tar.gz.sha256
+          if-no-files-found: error
+
+  publish:
+    if: github.event_name == 'workflow_dispatch' || github.ref_type == 'tag'
+    needs: [build, build-macos]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    env:
+      BASE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || 'edge' }}
+      RUN_TAG: ${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0  # v4
+
+      - name: Log in to the container registry
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f  # v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish multi-platform manifest
+        run: |
+          docker buildx imagetools create \
+            --tag "${IMAGE}:${BASE_TAG}" \
+            "${IMAGE}:${BASE_TAG}-amd64-${RUN_TAG}" \
+            "${IMAGE}:${BASE_TAG}-arm64-${RUN_TAG}"

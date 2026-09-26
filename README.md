@@ -8,12 +8,13 @@ package supplies import, plotting, and analysis commands.
 
 ## Build and test
 
-Requirements: a C++20 compiler, CMake 3.20+, Ninja, and Python 3.10+.
+Requirements: a C++20 compiler, CMake 3.20+, Ninja or Make, and Python 3.10+.
 
 ```bash
 python -m venv .venv
 source .venv/bin/activate
 python -m pip install -e '.[dev]'
+```
 
 Compile and run the C++ executables:
 
@@ -27,6 +28,22 @@ ctest --test-dir build --output-on-failure
 # Run the Python unit tests
 python -m unittest discover -s python/tests
 ```
+
+The build workflow produces Linux amd64/arm64 container images and native
+macOS arm64/Intel archives. macOS executables are built and tested on their
+respective GitHub runners and uploaded as workflow artifacts. To create the
+same native layout locally, run:
+
+```bash
+cmake -S . -B build/release -DCMAKE_BUILD_TYPE=Release
+cmake --build build/release --parallel
+ctest --test-dir build/release --output-on-failure
+cmake --install build/release --prefix /path/to/obdeect
+```
+
+The Docker image packages the same installed reference executables under
+`/opt/obdeect/bin`. These executables are analytic references; production
+model scene support is still in progress.
 
 ## Plotting and testing
 
