@@ -1,0 +1,9 @@
+# Optical comparison contract (step 2)
+
+All comparisons identify one `run_id`, `event_id`, `array_id`, `telescope_id`, `bunch_id`, and `photon_id`. The resolved photon is a telescope-local position in metres, a unit propagation direction, wavelength, emission time, and nonnegative weight. The current CSV boundary names wavelength in `wavelength_nm` and time in `time_ns`; a common comparison table must convert these to SI metres and seconds. Wavelength zero is an unresolved input sentinel and must be assigned by an explicit spectrum adapter before spectral transport. The batch carries telescope position in metres and a separate array reuse weight.
+
+Source descriptions must state source type, geometry and frame, spectral and temporal distributions, sampling policy, seed, and emitted or sampled weight. A compiled scene must state its source model and asset hashes, rigid frame transforms, surface and component IDs, material bindings, detector geometry, and unresolved fields. A scene with unresolved required geometry is not traceable.
+
+Each traced photon needs terminal status and loss component, last position and direction, surface/pixel ID, geometric and optical path in metres, group arrival time in seconds, wavelength in metres, weight, and an ordered interaction list. Each interaction needs ID, surface/component ID, position, incoming/outgoing direction, incidence angle, wavelength, time, weight, and optical action. Distinguish detector arrival, concentrator loss, and sensor conversion.
+
+Current implementation: `CsvPhotonReader` and `MemoryPhotonReader` expose a shared `OpticalPhoton` batch type; their common resolved fields are tested for equality. `RigidFrame` provides validated right-handed frame transforms and a physical-ray round trip. Native tracing still has a fixed path record and lacks the full interaction, group-time, and pixel contract. These fields must be implemented before reference comparisons use a common result table.

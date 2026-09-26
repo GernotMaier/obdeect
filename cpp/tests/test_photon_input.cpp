@@ -62,6 +62,40 @@ int main() {
   const auto second = reader.read(batch);
   require(second.count == 1 && !second.eof && batch[0].photon_id == 102,
           "pending row preserves order across capacity chunks");
+
+  // T-INP-004: CSV and in-memory adapters expose the same resolved batch.
+  const std::array<OpticalPhoton, 2> expected_photons{{
+      {{{1.0, 2.0, 3.0}, {0.0, 0.0, -1.0}}, 101, 0.0, 4.5, 0.25, 500, 12000.0, 3000.0},
+      {{{2.0, 3.0, 4.0}, {0.0, 0.0, -1.0}}, 102, 350.0, 5.5, 0.75, 501, 13000.0, 3100.0},
+  }};
+  MemoryPhotonReader memory(expected_photons, first.context);
+  std::array<OpticalPhoton, 2> memory_batch{};
+  const auto memory_result = memory.read(memory_batch);
+  require(memory_result.count == 2 && memory_result.eof &&
+              memory_result.context.event_id == first.context.event_id &&
+              memory_result.context.array_reuse_weight == first.context.array_reuse_weight,
+          "in-memory batch context matches CSV");
+  CsvPhotonReader csv_again(input.path());
+  std::array<OpticalPhoton, 2> csv_batch{};
+  const auto csv_result = csv_again.read(csv_batch);
+  require(csv_result.count == memory_result.count && !csv_result.eof,
+          "CSV batch ends at the same event boundary");
+  for (std::size_t index = 0; index < csv_result.count; ++index) {
+    const auto& csv = csv_batch[index];
+    const auto& in_memory = memory_batch[index];
+    require(csv.photon_id == in_memory.photon_id && csv.bunch_id == in_memory.bunch_id &&
+                csv.ray.position_m.x == in_memory.ray.position_m.x &&
+                csv.ray.position_m.y == in_memory.ray.position_m.y &&
+                csv.ray.position_m.z == in_memory.ray.position_m.z &&
+                csv.ray.direction.x == in_memory.ray.direction.x &&
+                csv.ray.direction.y == in_memory.ray.direction.y &&
+                csv.ray.direction.z == in_memory.ray.direction.z &&
+                csv.wavelength_nm == in_memory.wavelength_nm && csv.time_ns == in_memory.time_ns &&
+                csv.weight == in_memory.weight &&
+                csv.emission_height_m == in_memory.emission_height_m &&
+                csv.emission_distance_m == in_memory.emission_distance_m,
+            "CSV and in-memory photons agree exactly");
+  }
   const auto third = reader.read(batch);
   require(third.count == 1 && third.eof && third.context.event_id == 11 && batch[0].photon_id == 103,
           "event boundary begins a new batch and final row is retained");
@@ -103,6 +137,26 @@ int main() {
     rejected = true;
   }
   require(rejected, "zero direction is rejected");
+
+  TemporaryFile nonunit_direction{std::string{kHeader} +
+                                  "1,2,3,4,5,0,0,0,0,0,-2,400,0,1,0,0,0,0,0,0,1\n"};
+  rejected = false;
+  try {
+    CsvPhotonReader invalid(nonunit_direction.path());
+    (void)invalid.read(batch);
+  } catch (const std::invalid_argument&) {
+    rejected = true;
+  }
+  require(rejected, "non-unit CSV direction is rejected");
+  auto invalid_memory_photon = expected_photons;
+  invalid_memory_photon[0].ray.direction = {0.0, 0.0, -2.0};
+  rejected = false;
+  try {
+    MemoryPhotonReader invalid(invalid_memory_photon, first.context);
+  } catch (const std::invalid_argument&) {
+    rejected = true;
+  }
+  require(rejected, "non-unit in-memory direction is rejected");
 
   TemporaryFile negative_id{std::string{kHeader} +
                             "1,2,3,4,-5,0,0,0,0,0,-1,400,0,1,0,0,0,0,0,0,1\n"};

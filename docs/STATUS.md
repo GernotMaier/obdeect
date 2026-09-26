@@ -34,16 +34,61 @@ event writing, and array reconstruction are outside scope.
   EventIO reader is not implemented.
 - Tests cover analytic primitives, material and source kernels, model
   prescriptions, importer validation, and toy-scene obstruction behavior.
+- A reference-manifest tool freezes selected model revisions, input and
+  executable hashes, commands, and comparison conventions. CSV and in-memory
+  photon batches have an equivalence test; right-handed rigid frame transforms
+  have a ray round-trip test. The full comparison result contract is pending.
+
+## Plan progress
+
+- Step 1: manifest creation and hash verification are implemented. Real
+  reference commands and photon blocks are still needed to meet the exit gate.
+- Step 2: input equivalence and frame round trips pass. The complete SI result
+  and interaction schema remains open.
+- Step 3: in progress. The compiler verifies imported records and assets and
+  extracts mirror-list/segmentation footprints and camera pixel layouts.
+  Nested camera response files are hashed when present and missing references
+  are reported. Normals, physical detector surfaces, structures, and materials
+  remain unresolved, so these scenes are not trace-ready. The selected 6.3.0
+  and 7.0.0 design records yield LST 198, MST 86, SST 18, and SCT 48/24
+  primary/secondary mirror footprints; camera files yield 1855, 1764/1855,
+  2048, and 11328 pixels respectively. The SCT camera references
+  `Angular_response_MPPC_Prod3.dat`, absent from the local checkout. Patch
+  productions 6.0.1, 6.0.2, 6.1.1, and 6.2.1 declare no primary geometry asset
+  and cannot compile standalone scenes.
+- Step 4: in progress. An immutable generic planar scene now traces the
+  globally nearest finite mirror, detector, or opaque surface on each segment
+  with a bounded interaction count. Analytic tests cover ordering before and
+  after reflection, gaps, path/time, terminal IDs, and the interaction cap.
+  Curved/aspheric surfaces, closed solids, active-area masks, and optical
+  material behavior are not yet part of this scene.
+
+## Exact missing inputs and contracts
+
+- Reference matrix: installed sim_telarray and hessio decoder revisions,
+  executable paths, selected site/configuration/seeds, and checksummed photon
+  blocks and commands have not been supplied; no real comparison manifest can
+  be frozen yet.
+- Model data: the local 7.0.0 SCT camera config references
+  `Angular_response_MPPC_Prod3.dat`, which is absent from its `Files`
+  directory. The mirror lists and segmentation files do not supply aligned
+  panel normals; the extracted camera pixels do not supply a compiled physical
+  detector surface. Structure geometry and optical material semantics are
+  also not yet compiled.
+- Kernel: the new generic scene currently represents finite planar surfaces.
+  It still needs closed rods/caps and baffles, curved/aspheric reflectors and
+  detectors, pixel masks, material bindings, and bounded interaction records
+  before it can replace the toy/segmented paths or trace a production model.
 
 ## External compatibility requirements
 
 The local `../simulation-models` checkout contains the detailed, versioned
 model data and is the primary import source.  A remote checkout is an allowed
 acquisition route, but every production scene must record the resolved release,
-parameter-record versions, asset paths, and SHA-256 hashes.  The importer now
-parses only mirror-list centres, footprints, focal lengths, and optional z;
-it deliberately stops because those files do not encode panel normals,
-orientation, alignment, camera geometry, structures, or material semantics.
+parameter-record versions, asset paths, and SHA-256 hashes.  The compiler now
+extracts mirror-list or segmentation footprints and camera pixel layouts; it
+stops before assigning panel normals, physical detector surfaces, structure
+geometry, or material semantics that these records do not establish alone.
 
 `../simtools` currently delegates these workflows to sim_telarray and its
 `LightEmission` programs.  Their optical contracts define required obdeect
