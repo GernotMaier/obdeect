@@ -1,4 +1,5 @@
 #include "obdeect/abi.hpp"
+#include "obdeect/cli_parse.hpp"
 #include "obdeect/frames.hpp"
 #include "obdeect/tables.hpp"
 
@@ -20,6 +21,18 @@ void require(bool condition, const char* message) {
 
 int main() {
   using namespace obdeect;
+
+  // T-CLI-001: CLI numeric parsing works with libc++ before floating from_chars.
+  std::size_t count = 0;
+  double scalar = 0.0;
+  require(parse_positive_size("42", count) && count == 42, "positive count accepted");
+  require(!parse_positive_size("0", count) && !parse_positive_size("-1", count),
+          "nonpositive count rejected");
+  require(parse_finite_double("-1.25e-2", scalar) && std::abs(scalar + 0.0125) < 1e-15,
+          "scientific decimal accepted");
+  require(!parse_finite_double("1.2tail", scalar) && !parse_finite_double(" 1.2", scalar) &&
+              !parse_finite_double("1e999", scalar),
+          "partial, spaced, or nonfinite decimal rejected");
 
   // T-TAB-001: linear interpolation and out-of-range rejection.
   const std::vector<double> wavelength{300.0, 400.0, 500.0};
