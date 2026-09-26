@@ -76,3 +76,7 @@ area predictions.
 BSD-3-Clause license. Citation metadata is in [CITATION.cff](CITATION.cff).
 Generative AI tools were used to write much of this project; outputs were
 reviewed and validated by the authors.
+
+## Generative AI disclosure
+
+Generative AI tools (mostly ChatGPT 5.6) were used to write the entire code of this project. All AI-assisted outputs were reviewed, validated, and, where necessary, modified by the authors to ensure accuracy and reliability.
