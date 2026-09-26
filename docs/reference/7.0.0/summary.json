@@ -1,0 +1,281 @@
+{
+  "format": "obdeect.simtel-reference-summary.v1",
+  "scope": "sim_telarray reference only; obdeect production scenes are pending",
+  "model_version": "7.0.0",
+  "simtools_source_commit": "7547f17c540cda4acf3869897da9fbb602fc17b8",
+  "simulation_models_commit": "9ddb4768ce5079202f503e37773a88c3344a7bdb",
+  "sim_telarray_release": "2025.246.0",
+  "container_image_digest": "sha256:43ae79e39b0c1148f61ce7d2910911aaffaee9afd974d57e857ab32d0188691a",
+  "random_seed": 19780503,
+  "source_distance_km": 10.0,
+  "zenith_angle_deg": 20.0,
+  "off_axis_x_deg": 0.0,
+  "off_axis_y_deg": 0.0,
+  "star_photons": 50000,
+  "rows": [
+    {
+      "site": "North",
+      "model": "LSTN-design",
+      "figure": "North_LSTN-design.png",
+      "focal_plane_crossings": 27469,
+      "d80_m": 0.03040967206221204,
+      "effective_area_m2": 375.2649966,
+      "centroid_x_m": 1.6504646642021064e-05,
+      "centroid_y_m": -9.016918754710154e-05,
+      "sha256": {
+        "config": "5fe0b017970f961c551f4679ec8329daea5c6b0e37e59611737f918b1885c0e1",
+        "stars": "03d8db094ee5c9246497ce375ee371def8421548e1e3db7196620aa114a63dac",
+        "imaging_list": "be39679b54554fee450b08b4bfd27673b69efe2ae5c10b89424f99da64139d0e",
+        "simtel_log": "22ebceb68daec5f1f9b76e7528e5b91d37e3e9e72ca426064ef13c1d6d3f28ec",
+        "imaging_list_archive": "787265513e0bb01e6f3571d35822df88934a2de7517e070666afd8851dcae52b",
+        "cumulative_profile": "1e10b12f0a1769d0c6200bbf904b8d35647846f1aa7cbaf9f0e72c258d71e68d"
+      },
+      "config_audit": {
+        "camera_config_file": "camera_CTA-LST-234_analogsum21_v2020-04-14.dat",
+        "focal_length": "2800.0",
+        "mirror_class": "0",
+        "mirror_list": "mirror_CTA-N-LST2_v2020-04-07_rotated.dat",
+        "altitude": "2156.0"
+      },
+      "imaging_list_archive": "imaging/North_LSTN-design.lis.gz",
+      "cumulative_profile": "profiles/North_LSTN-design.csv",
+      "integration_radii_cm": {
+        "0.5": 0.8934759896347746,
+        "0.68": 1.2135362262904983,
+        "0.8": 1.5171971929884358,
+        "0.9": 1.9328883592086554,
+        "0.95": 2.339198851504336,
+        "0.99": 3.251143730725195
+      },
+      "exact_d80_m": 0.030343943859768716
+    },
+    {
+      "site": "South",
+      "model": "LSTS-design",
+      "figure": "South_LSTS-design.png",
+      "focal_plane_crossings": 27468,
+      "d80_m": 0.031165569374348077,
+      "effective_area_m2": 375.2513352,
+      "centroid_x_m": 9.746706227175769e-06,
+      "centroid_y_m": -8.922007941067789e-05,
+      "sha256": {
+        "config": "5820382d6a8a359dfb91398665e9bf48f923ff6c6024dab90e12486297ea8976",
+        "stars": "03d8db094ee5c9246497ce375ee371def8421548e1e3db7196620aa114a63dac",
+        "imaging_list": "281ee8ee391f78dcaf6dca0fa9386a30b4246688288010f99473d318c668a4f7",
+        "simtel_log": "084ee357458b2bb17006ec4dc1842b2d59a83fc02ecfe03ad75a2d56b6c7da14",
+        "imaging_list_archive": "122c9be2e02ce05de43d3ac7d25cbd2185ded6963472e7e07c7831b3a5dbf134",
+        "cumulative_profile": "1a3c0e7448c67b65bba785969d7925560c81f1e24b65feae1d18a6f9f0211c1b"
+      },
+      "config_audit": {
+        "camera_config_file": "camera_CTA-LST-234_analogsum21_v2020-04-14.dat",
+        "focal_length": "2800.0",
+        "mirror_class": "0",
+        "mirror_list": "mirror_CTA-S-LST_v2020-04-07_rotated.dat",
+        "altitude": "2147.0"
+      },
+      "imaging_list_archive": "imaging/South_LSTS-design.lis.gz",
+      "cumulative_profile": "profiles/South_LSTS-design.csv",
+      "integration_radii_cm": {
+        "0.5": 0.9178886399763803,
+        "0.68": 1.2370309129290777,
+        "0.8": 1.5536704969519806,
+        "0.9": 1.982479628906575,
+        "0.95": 2.403758467934088,
+        "0.99": 3.293555858203764
+      },
+      "exact_d80_m": 0.03107340993903961
+    },
+    {
+      "site": "North",
+      "model": "MSTx-FlashCam",
+      "figure": "North_MSTx-FlashCam.png",
+      "focal_plane_crossings": 23986,
+      "d80_m": 0.01871523724884385,
+      "effective_area_m2": 100.5876896,
+      "centroid_x_m": 0.0002668248561660969,
+      "centroid_y_m": -7.33039272909197e-05,
+      "sha256": {
+        "config": "3323ab43ecf4597b8501753014fb47f21b4c5217d5995f47de900b89f4e6afa2",
+        "stars": "03d8db094ee5c9246497ce375ee371def8421548e1e3db7196620aa114a63dac",
+        "imaging_list": "bb2883a317fa6a177f255c72b339f71d42251f114acab5d3e904c4ca1d31e03d",
+        "simtel_log": "13ada4aab581db697ad44007e7f3a311e096493dd674ce3bd473130adc6e7536",
+        "imaging_list_archive": "b4cc7eca2d22dca632b765a407356613cf3570cff57fd08f155cadd45620a15a",
+        "cumulative_profile": "c1f671796fd9fb0ffb5968b38536155b9c73aa5bc10a4a6d2a595fbd33eefa25"
+      },
+      "config_audit": {
+        "camera_config_file": "camera_CTA-MST-FlashCam_patch3_digitalsum9_neweff2.dat",
+        "focal_length": "1600.0",
+        "mirror_class": "0",
+        "mirror_list": "mirror_CTA-100_1.20-86-0.04.dat",
+        "altitude": "2156.0"
+      },
+      "imaging_list_archive": "imaging/North_MSTx-FlashCam.lis.gz",
+      "cumulative_profile": "profiles/North_MSTx-FlashCam.csv",
+      "integration_radii_cm": {
+        "0.5": 0.5789664957749898,
+        "0.68": 0.7651685753979578,
+        "0.8": 0.9348353845209912,
+        "0.9": 1.1532926487804807,
+        "0.95": 1.3490985763420533,
+        "0.99": 1.7269172223992135
+      },
+      "exact_d80_m": 0.018696707690419825
+    },
+    {
+      "site": "South",
+      "model": "MSTx-FlashCam",
+      "figure": "South_MSTx-FlashCam.png",
+      "focal_plane_crossings": 23986,
+      "d80_m": 0.01871523724884385,
+      "effective_area_m2": 100.5876896,
+      "centroid_x_m": 0.0002668248561660969,
+      "centroid_y_m": -7.33039272909197e-05,
+      "sha256": {
+        "config": "28874b62c97d8797a39693032d41384323fbd95747c17196423bf4345700b3a3",
+        "stars": "03d8db094ee5c9246497ce375ee371def8421548e1e3db7196620aa114a63dac",
+        "imaging_list": "bb2883a317fa6a177f255c72b339f71d42251f114acab5d3e904c4ca1d31e03d",
+        "simtel_log": "a2a7c5733df0c100faf205f8d07f136c8547b6d54b5136e12e364bdc87d577be",
+        "imaging_list_archive": "b4cc7eca2d22dca632b765a407356613cf3570cff57fd08f155cadd45620a15a",
+        "cumulative_profile": "c1f671796fd9fb0ffb5968b38536155b9c73aa5bc10a4a6d2a595fbd33eefa25"
+      },
+      "config_audit": {
+        "camera_config_file": "camera_CTA-MST-FlashCam_patch3_digitalsum9_neweff2.dat",
+        "focal_length": "1600.0",
+        "mirror_class": "0",
+        "mirror_list": "mirror_CTA-100_1.20-86-0.04.dat",
+        "altitude": "2147.0"
+      },
+      "imaging_list_archive": "imaging/North_MSTx-FlashCam.lis.gz",
+      "cumulative_profile": "profiles/North_MSTx-FlashCam.csv",
+      "integration_radii_cm": {
+        "0.5": 0.5789664957749898,
+        "0.68": 0.7651685753979578,
+        "0.8": 0.9348353845209912,
+        "0.9": 1.1532926487804807,
+        "0.95": 1.3490985763420533,
+        "0.99": 1.7269172223992135
+      },
+      "exact_d80_m": 0.018696707690419825
+    },
+    {
+      "site": "North",
+      "model": "MSTx-NectarCam",
+      "figure": "North_MSTx-NectarCam.png",
+      "focal_plane_crossings": 23948,
+      "d80_m": 0.018718916071288273,
+      "effective_area_m2": 100.42833279999999,
+      "centroid_x_m": 0.00026711995294973184,
+      "centroid_y_m": -6.963574622693083e-05,
+      "sha256": {
+        "config": "bdba9c577994df2907fcc4889111d21c1f5def6767c98ee9f79a621b5a7262ef",
+        "stars": "03d8db094ee5c9246497ce375ee371def8421548e1e3db7196620aa114a63dac",
+        "imaging_list": "ac26c683b2fde3d1210189e9ce976496035b98338331d059e8954f6d7737f83b",
+        "simtel_log": "a85efea1f804b83305cdd8f4675cfa04372981d62d6c9b23cf271651a470691a",
+        "imaging_list_archive": "cd8ffac4ffde62565e93ad43d4b379f19727b47713ec90b1f7035df7846f56ba",
+        "cumulative_profile": "8f09a3f782ddd91823f54e4d2dfa8a1a9a6380b222f565cc91f826f0c55438ca"
+      },
+      "config_audit": {
+        "camera_config_file": "camera_CTA-MST-NectarCam_20191120_majority-3nn.dat",
+        "focal_length": "1600.0",
+        "mirror_class": "0",
+        "mirror_list": "mirror_CTA-100_1.20-86-0.04.dat",
+        "altitude": "2156.0"
+      },
+      "imaging_list_archive": "imaging/North_MSTx-NectarCam.lis.gz",
+      "cumulative_profile": "profiles/North_MSTx-NectarCam.csv",
+      "integration_radii_cm": {
+        "0.5": 0.5792776073201873,
+        "0.68": 0.7652933983862145,
+        "0.8": 0.9351072781888481,
+        "0.9": 1.1532239615088018,
+        "0.95": 1.3487318701745523,
+        "0.99": 1.726758731626124
+      },
+      "exact_d80_m": 0.018702145563776962
+    },
+    {
+      "site": "South",
+      "model": "MSTx-NectarCam",
+      "figure": "South_MSTx-NectarCam.png",
+      "focal_plane_crossings": 23948,
+      "d80_m": 0.018718916071288273,
+      "effective_area_m2": 100.42833279999999,
+      "centroid_x_m": 0.00026711995294973184,
+      "centroid_y_m": -6.963574622693083e-05,
+      "sha256": {
+        "config": "305b883d159f3b29f40209d85c33d654abbc10827409596eac262bc88ead1dd9",
+        "stars": "03d8db094ee5c9246497ce375ee371def8421548e1e3db7196620aa114a63dac",
+        "imaging_list": "ac26c683b2fde3d1210189e9ce976496035b98338331d059e8954f6d7737f83b",
+        "simtel_log": "a4be3205a014ada0ac402ed59a4dbb7f626426c6b7fe31c361cabe6af61da96e",
+        "imaging_list_archive": "cd8ffac4ffde62565e93ad43d4b379f19727b47713ec90b1f7035df7846f56ba",
+        "cumulative_profile": "8f09a3f782ddd91823f54e4d2dfa8a1a9a6380b222f565cc91f826f0c55438ca"
+      },
+      "config_audit": {
+        "camera_config_file": "camera_CTA-MST-NectarCam_20191120_majority-3nn.dat",
+        "focal_length": "1600.0",
+        "mirror_class": "0",
+        "mirror_list": "mirror_CTA-100_1.20-86-0.04.dat",
+        "altitude": "2147.0"
+      },
+      "imaging_list_archive": "imaging/North_MSTx-NectarCam.lis.gz",
+      "cumulative_profile": "profiles/North_MSTx-NectarCam.csv",
+      "integration_radii_cm": {
+        "0.5": 0.5792776073201873,
+        "0.68": 0.7652933983862145,
+        "0.8": 0.9351072781888481,
+        "0.9": 1.1532239615088018,
+        "0.95": 1.3487318701745523,
+        "0.99": 1.726758731626124
+      },
+      "exact_d80_m": 0.018702145563776962
+    },
+    {
+      "site": "South",
+      "model": "SSTS-design",
+      "figure": "South_SSTS-design.png",
+      "focal_plane_crossings": 19139,
+      "d80_m": 0.007053866621132297,
+      "effective_area_m2": 7.785745199999999,
+      "centroid_x_m": 3.3674173154292276e-06,
+      "centroid_y_m": -1.8123099430482266e-05,
+      "sha256": {
+        "config": "aacf0401891d95755888c19070ea2debb03788948e5bf531dc5db9ce6b982feb",
+        "stars": "03d8db094ee5c9246497ce375ee371def8421548e1e3db7196620aa114a63dac",
+        "imaging_list": "5470f18f754812823b79484af6ee12579d441cc63dbc6ac55c0ea4c916390dd2",
+        "simtel_log": "83d7bcbbc75d562b6a919db8a34c4fd20a47813355db15d756db9a578655a231",
+        "imaging_list_archive": "be384528b006839b9a50bf4e144076b9872f3b857a49652e6b14ab9fc4460d70",
+        "cumulative_profile": "8702ab6ce9034d3686cf4fa18cb21a638851864c79fb0364d9f6f597ff802470"
+      },
+      "config_audit": {
+        "camera_config_file": "camera_CHEC-S_x9r_6mm.dat",
+        "focal_length": "215.0",
+        "mirror_class": "2",
+        "mirror_list": "none",
+        "altitude": "2147.0"
+      },
+      "imaging_list_archive": "imaging/South_SSTS-design.lis.gz",
+      "cumulative_profile": "profiles/South_SSTS-design.csv",
+      "integration_radii_cm": {
+        "0.5": 0.23437892381188438,
+        "0.68": 0.3017119225477882,
+        "0.8": 0.35262455127888936,
+        "0.9": 0.40817997090645985,
+        "0.95": 0.45099878442728464,
+        "0.99": 0.5305040412434099
+      },
+      "exact_d80_m": 0.007052491025577787
+    }
+  ],
+  "run_method": "Direct sim_telarray replay of the simtools validate-optics generated config/overrides; star_photons increased 10x. Direct replay needed because the current simtools checkout cannot resolve legacy model asset paths.",
+  "analysis_simtools_source_commit": "127ba856861fee28d68de652929b743f5e7d4bfd",
+  "reference_directory": "/private/tmp/obdeect-ref-50k-7.0.0",
+  "config_generation_test_mode": true,
+  "radial_analysis": {
+    "centre": "mean of camera-rotation-corrected focal-plane crossings",
+    "weights": "one per crossing, including pixel number -1",
+    "integration_radius": "smallest empirical centroid-centred circle containing at least the target fraction",
+    "profile": "empirical cumulative distribution sampled at target fractions 0, 0.001, ..., 1",
+    "position_unit": "cm in the focal plane",
+    "d80_m": "simtools iterative result; exact_d80_m is twice the empirical 80% radius"
+  }
+}

@@ -5,6 +5,7 @@ import argparse
 import csv
 import math
 from pathlib import Path
+from xml.sax.saxutils import escape
 
 
 def read_paths(path: Path):
@@ -208,6 +209,61 @@ def draw_focal_plane(plt, path: Path, output: Path, bins: int, telescope: str):
     plt.close(figure)
 
 
+def draw_focal_plane_svg(path: Path, output: Path, bins: int, telescope: str):
+    """Write a weighted PSF map and measured summary without plotting dependencies."""
+    from obdeect.analysis import analyse_trace_csv
+
+    samples = list(focal_plane_hits(path))
+    result = analyse_trace_csv(path)
+    extent = max(max(abs(x), abs(y)) for x, y, _ in samples) * 1.05
+    extent = max(extent, 1e-6)
+    histogram = [[0.0] * bins for _ in range(bins)]
+    for x, y, weight in samples:
+        ix = min(bins - 1, max(0, int((x + extent) * bins / (2 * extent))))
+        iy = min(bins - 1, max(0, int((y + extent) * bins / (2 * extent))))
+        histogram[iy][ix] += weight
+    maximum = max(max(row) for row in histogram)
+    left = 95
+    top = 90
+    size = 520
+    cell = size / bins
+    elements = [
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 760">',
+        '<rect width="720" height="760" fill="white"/>',
+        f"<title>{escape(telescope)} weighted focal-plane PSF</title>",
+        f'<text x="95" y="38" font-size="24">{escape(telescope)} focal-plane PSF</text>',
+        '<rect x="95" y="90" width="520" height="520" fill="#101827"/>',
+    ]
+    for iy, row in enumerate(histogram):
+        for ix, weight in enumerate(row):
+            if weight <= 0:
+                continue
+            fraction = math.sqrt(weight / maximum)
+            red = round(25 + 230 * fraction)
+            green = round(35 + 190 * fraction)
+            blue = round(70 + 85 * (1 - fraction))
+            elements.append(
+                f'<rect x="{left + ix * cell:.4f}" y="{top + (bins - 1 - iy) * cell:.4f}" '
+                f'width="{cell:.4f}" height="{cell:.4f}" fill="#{red:02x}{green:02x}{blue:02x}"/>'
+            )
+    centroid_x = left + (result.centroid_x_m + extent) * size / (2 * extent)
+    centroid_y = top + (extent - result.centroid_y_m) * size / (2 * extent)
+    elements.extend([
+        f'<circle cx="{centroid_x:.4f}" cy="{centroid_y:.4f}" r="5" '
+        'fill="none" stroke="white" stroke-width="2"/>',
+        '<text x="95" y="645" font-size="16">x and y [m]; '
+        "colour: weighted detected photons per bin</text>",
+        f'<text x="95" y="676" font-size="16">Centroid: '
+        f"({result.centroid_x_m:.6g}, {result.centroid_y_m:.6g}) m</text>",
+        f'<text x="95" y="702" font-size="16">D80: {result.d80_m:.6g} m; '
+        f"throughput: {result.optical_throughput:.4g}</text>",
+        f'<text x="95" y="728" font-size="14">{bins} x {bins} bins; '
+        f"axis extent: ±{extent:.6g} m; input: {escape(path.name)}</text>",
+        "</svg>",
+    ])
+    output.write_text("\n".join(elements) + "\n", encoding="utf-8")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Plot an obdeect telescope reference outline and traced paths."
@@ -245,6 +301,10 @@ def main():
         parser.error("paths CSV is required for rays and focal plane")
     if args.focal_plane and args.view != "rays":
         parser.error("--focal-plane cannot be combined with --view")
+
+    if args.focal_plane and args.output.suffix.lower() == ".svg":
+        draw_focal_plane_svg(args.paths, args.output, args.bins, args.telescope)
+        return
 
     try:
         import matplotlib

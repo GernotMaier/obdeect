@@ -3,6 +3,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <iostream>
+#include <limits>
 #include <numbers>
 #include <vector>
 
@@ -96,5 +97,26 @@ int main() {
   invalid.frame.z_axis = {0.0, 0.0, -1.0};
   require(!compile_optical_scene({provenance, {invalid}, 4}),
           "T-GEO-008: non-rigid or left-handed transform fails closed");
+
+  auto curved = mirror;
+  curved.id = 50;
+  curved.shape = FacetShape::circle;
+  curved.sag = paraboloid(4.0);
+  curved.inner_radius_m = 0.5;
+  const OpticalSurfaceRecord beneath{51, {{0.0, 0.0, -1.0}}, FacetShape::circle, 2.0,
+                                     SurfaceRole::detector};
+  const auto curved_scene = compile_optical_scene({provenance, {beneath, curved}, 4});
+  require(curved_scene.has_value(), "T-GEO-010: annular asphere compiles");
+  const auto curved_hit = intersect_nearest_surface({{1.0, 0.0, 2.0}, {0.0, 0.0, -1.0}}, *curved_scene);
+  require(curved_hit && curved_hit->surface_id == 50 &&
+              std::abs(curved_hit->point_m.z - 1.0 / 16.0) < 1e-12 &&
+              std::abs(curved_hit->normal.x + 0.125 / std::hypot(1.0, 0.125)) < 1e-12,
+          "T-GEO-011: globally nearest curved hit has physical sag and normal");
+  const auto hole_hit = intersect_nearest_surface({{0.0, 0.0, 2.0}, {0.0, 0.0, -1.0}}, *curved_scene);
+  require(hole_hit && hole_hit->surface_id == beneath.id,
+          "T-GEO-012: central aperture hole passes the ray to the next surface");
+  curved.sag->coefficient_m[1] = std::numeric_limits<double>::quiet_NaN();
+  require(!compile_optical_scene({provenance, {curved}, 4}),
+          "T-GEO-013: non-finite asphere coefficients fail closed");
   std::cout << "optical scene tests passed\n";
 }

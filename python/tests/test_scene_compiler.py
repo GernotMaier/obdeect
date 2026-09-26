@@ -1,6 +1,7 @@
 """Tests for the generic simulation-models scene compiler."""
 
 import json
+import math
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -9,12 +10,40 @@ from obdeect.model_import import resolve_model
 from obdeect.scene_compiler import (
     SceneCompileError,
     compile_scene,
+    derive_nominal_single_reflector,
     parse_simtel_mirror_list,
     parse_simtel_segmentation,
+    require_trace_ready,
 )
 
 
 class TestSceneCompiler(unittest.TestCase):
+    def test_trace_readiness_requires_resolved_scene(self):
+        require_trace_ready({"report": {"trace_blockers": [], "native_trace_ready": True}})
+        with self.assertRaisesRegex(SceneCompileError, "detector surfaces"):
+            require_trace_ready({
+                "report": {"trace_blockers": ["physical detector surfaces are unresolved"]}
+            })
+        with self.assertRaisesRegex(SceneCompileError, "native production scene binding"):
+            require_trace_ready({"report": {"trace_blockers": []}})
+
+    def test_nominal_panel_normal_and_dish_position_follow_simtel_formula(self):
+        # A panel at r=2 m on a 16 m DC dish has a positive sag and
+        # an inward-tilted normal; the signed mirror offset is retained.
+        parameters = {
+            "focal_length": {"value": 1600, "unit": "cm"},
+            "dish_shape_length": {"value": 1600, "unit": "cm"},
+            "mirror_offset": {"value": -100, "unit": "cm"},
+            "parabolic_dish": {"value": False},
+        }
+        facets = [{"centre_m": [2.0, 0.0, 0.0]}]
+        derive_nominal_single_reflector(facets, parameters)
+        sag = 16 - math.sqrt(16**2 - 2**2)
+        inclination = 0.5 * math.atan2(2, 16 - sag)
+        self.assertAlmostEqual(facets[0]["nominal_centre_m"][2], sag + 1)
+        self.assertAlmostEqual(facets[0]["nominal_normal"][0], -math.sin(inclination))
+        self.assertAlmostEqual(facets[0]["nominal_normal"][2], math.cos(inclination))
+
     def make_ir(self, root: Path, *, mirror_contents: str | None = None, focal_cm=1600.0) -> dict:
         asset = root / "model_parameters/Files/mirrors.dat"
         asset.parent.mkdir(parents=True)
@@ -237,6 +266,25 @@ class TestSceneCompiler(unittest.TestCase):
             scene = compile_scene(ir, root)
             self.assertEqual(scene["report"]["camera_layout_evidence"]["pixel_count"], 2)
             self.assertIn("response.dat", scene["provenance"]["nested_assets"])
+            (files / "response.dat").unlink()
+            simtel_root = root / "sim_telarray"
+            fallback = simtel_root / "cfg" / "CTA" / "response.dat"
+            fallback.parent.mkdir(parents=True)
+            fallback.write_text("300 0.7\n")
+            scene = compile_scene(ir, root, simtel_root=simtel_root)
+            self.assertEqual(
+                scene["provenance"]["nested_assets"]["response.dat"]["source_root"],
+                "sim_telarray",
+            )
+            self.assertEqual(
+                scene["report"]["camera_layout_evidence"]["unresolved_response_files"], []
+            )
+            self.assertEqual(
+                compile_scene(ir, root)["report"]["camera_layout_evidence"][
+                    "unresolved_response_files"
+                ],
+                ["response.dat"],
+            )
             count_record = root / "model_parameters/GENERIC/camera_pixels/camera_pixels-1.0.0.json"
             data = json.loads(count_record.read_text())
             data["value"] = 3

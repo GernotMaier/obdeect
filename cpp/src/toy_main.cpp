@@ -1,7 +1,7 @@
+#include "obdeect/cli_parse.hpp"
 #include "obdeect/sources.hpp"
 #include "obdeect/toy_mst.hpp"
 
-#include <charconv>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
@@ -9,18 +9,6 @@
 #include <string>
 
 namespace {
-
-bool parse_size(const char* value, std::size_t& output) {
-  const std::string text{value};
-  const auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), output);
-  return error == std::errc{} && end == text.data() + text.size() && output > 0;
-}
-
-bool parse_double(const char* value, double& output) {
-  const std::string text{value};
-  const auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), output);
-  return error == std::errc{} && end == text.data() + text.size() && std::isfinite(output);
-}
 
 bool parse_source(const std::string& value, obdeect::ArtificialSourceKind& output) {
   if (value == "star") {
@@ -50,6 +38,8 @@ void usage() {
 }  // namespace
 
 int main(int argc, char** argv) {
+  using obdeect::parse_finite_double;
+  using obdeect::parse_positive_size;
   std::size_t photon_count = 10000;
   std::string output_path{"toy_mst_paths.csv"};
   obdeect::ToyMstConfig config{};
@@ -61,7 +51,7 @@ int main(int argc, char** argv) {
   double wavelength_nm = 400.0;
   for (int index = 1; index < argc; ++index) {
     const std::string argument{argv[index]};
-    if (argument == "--photons" && index + 1 < argc && parse_size(argv[++index], photon_count)) continue;
+    if (argument == "--photons" && index + 1 < argc && parse_positive_size(argv[++index], photon_count)) continue;
     if (argument == "--output" && index + 1 < argc) {
       output_path = argv[++index];
       continue;
@@ -71,17 +61,17 @@ int main(int argc, char** argv) {
       continue;
     }
     if (argument == "--source" && index + 1 < argc && parse_source(argv[++index], source_kind)) continue;
-    if (argument == "--field-x-deg" && index + 1 < argc && parse_double(argv[++index], field_x_deg)) continue;
-    if (argument == "--field-y-deg" && index + 1 < argc && parse_double(argv[++index], field_y_deg)) continue;
-    if (argument == "--distance-m" && index + 1 < argc && parse_double(argv[++index], distance_m) &&
+    if (argument == "--field-x-deg" && index + 1 < argc && parse_finite_double(argv[++index], field_x_deg)) continue;
+    if (argument == "--field-y-deg" && index + 1 < argc && parse_finite_double(argv[++index], field_y_deg)) continue;
+    if (argument == "--distance-m" && index + 1 < argc && parse_finite_double(argv[++index], distance_m) &&
         distance_m > 0.0) {
       continue;
     }
-    if (argument == "--divergence-deg" && index + 1 < argc && parse_double(argv[++index], divergence_deg) &&
+    if (argument == "--divergence-deg" && index + 1 < argc && parse_finite_double(argv[++index], divergence_deg) &&
         divergence_deg >= 0.0) {
       continue;
     }
-    if (argument == "--wavelength-nm" && index + 1 < argc && parse_double(argv[++index], wavelength_nm) &&
+    if (argument == "--wavelength-nm" && index + 1 < argc && parse_finite_double(argv[++index], wavelength_nm) &&
         wavelength_nm > 0.0) {
       continue;
     }

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "obdeect/axisymmetric_optics.hpp"
 #include "obdeect/frames.hpp"
 #include "obdeect/segmented_scene.hpp"
 
@@ -24,6 +25,10 @@ struct OpticalSurfaceRecord {
   double diameter_m{};
   SurfaceRole role{SurfaceRole::obscurer};
   std::uint32_t material_id{std::numeric_limits<std::uint32_t>::max()};
+  // Optional local z(r) surface with a circular/annular aperture. The frame
+  // maps its vertex and local normal into the parent scene.
+  std::optional<EvenPolynomialSurface> sag{};
+  double inner_radius_m{};
 };
 
 struct ImportedOpticalScene {
@@ -65,6 +70,12 @@ class CompiledOpticalScene {
         surface.shape > FacetShape::hexagon_flat_x || surface.role > SurfaceRole::obscurer ||
         !ids.insert(surface.id).second)
       return std::nullopt;
+    if (!std::isfinite(surface.inner_radius_m) || surface.inner_radius_m < 0.0 ||
+        (surface.sag && (surface.shape != FacetShape::circle ||
+                         !is_valid(AxisymmetricMirror{0.0, surface.inner_radius_m,
+                                                      surface.diameter_m / 2.0, *surface.sag}))) ||
+        (!surface.sag && surface.inner_radius_m != 0.0))
+      return std::nullopt;
   }
   return CompiledOpticalScene{input.provenance, input.surfaces, input.max_interactions};
 }
@@ -81,13 +92,27 @@ struct OpticalSurfaceHit {
     const Ray& ray, const CompiledOpticalScene& scene) {
   std::optional<OpticalSurfaceHit> nearest;
   for (const auto& surface : scene.surfaces()) {
-    const ImportedDetectorSurface plane{surface.id, surface.frame.origin_m, surface.frame.z_axis,
-                                        surface.diameter_m, surface.shape, surface.frame.x_axis};
-    const auto hit = intersect_detector_surface_unchecked(ray, plane);
-    if (hit && (!nearest || hit->distance_m < nearest->distance_m ||
-                (hit->distance_m == nearest->distance_m && surface.id < nearest->surface_id)))
-      nearest = OpticalSurfaceHit{surface.id, surface.role, hit->distance_m, hit->point_m,
-                                  hit->unit_normal};
+    std::optional<OpticalSurfaceHit> candidate;
+    if (surface.sag) {
+      const auto local_hit = intersect_axisymmetric_mirror(
+          surface.frame.ray_from_parent(ray),
+          AxisymmetricMirror{0.0, surface.inner_radius_m, surface.diameter_m / 2.0, *surface.sag});
+      if (local_hit)
+        candidate = OpticalSurfaceHit{surface.id, surface.role, local_hit->distance_m,
+                                      surface.frame.point_to_parent(local_hit->point_m),
+                                      surface.frame.direction_to_parent(local_hit->unit_normal)};
+    } else {
+      const ImportedDetectorSurface plane{surface.id, surface.frame.origin_m, surface.frame.z_axis,
+                                          surface.diameter_m, surface.shape, surface.frame.x_axis};
+      const auto hit = intersect_detector_surface_unchecked(ray, plane);
+      if (hit)
+        candidate = OpticalSurfaceHit{surface.id, surface.role, hit->distance_m, hit->point_m,
+                                      hit->unit_normal};
+    }
+    if (candidate && (!nearest || candidate->distance_m < nearest->distance_m ||
+                      (candidate->distance_m == nearest->distance_m &&
+                       surface.id < nearest->surface_id)))
+      nearest = candidate;
   }
   return nearest;
 }

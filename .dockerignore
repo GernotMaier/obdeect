@@ -1,0 +1,14 @@
+.git
+.github
+.venv
+build
+out
+docs
+examples
+models
+python
+validation
+*.egg-info
+__pycache__
+*.pyc
+*.png

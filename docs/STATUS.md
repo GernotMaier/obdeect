@@ -5,6 +5,10 @@ yet a CTAO production simulator or a replacement for sim_telarray/ROBAST.
 Current CTAO commands execute analytic optical prescriptions; they do not
 construct the selected telescope from model assets.
 
+The current production target is simulation-models 7.0.0: LST and both MST
+camera variants at North and South, plus SST at South. SCT is deferred from
+implementation and testing at the user's request.
+
 The supported scope ends at optical arrival at a physical detector surface.
 Sensor conversion may be added as a separate contract.  Electronics, triggers,
 event writing, and array reconstruction are outside scope.
@@ -19,7 +23,8 @@ event writing, and array reconstruction are outside scope.
   The production importer resolves an explicitly selected simulation-models
   production from the supplied checkout, records parameter records and asset
   SHA-256 hashes, retains metadata, constrains asset paths, and reports
-  unresolved fields.  It does not yet parse assets into a trace-ready scene.
+  unresolved fields. It derives nominal single-reflector panel geometry but
+  does not yet produce a trace-ready production scene.
 - LST and MST have analytic reference prescriptions.  SST/SCT have tested
   two-mirror polynomial prescriptions, including corrected Schwarzschild--
   Couder reference-radius scaling and focal-plane vertices.  None is a
@@ -30,8 +35,8 @@ event writing, and array reconstruction are outside scope.
 - Source kernels provide deterministic star, finite-distance illuminator, and
   laser samples with wavefront timing, projected-pupil weighting, and
   beam-normal laser launch planes.  CSV input preserves photon and batch
-  provenance.  An optional hessio probe checks the external library ABI; an
-  EventIO reader is not implemented.
+  provenance. An optional EventIO reader now decodes CORSIKA 7 photon
+  bunches; generated-file tests cover full, compact, 3D, nested and split blocks.
 - Tests cover analytic primitives, material and source kernels, model
   prescriptions, importer validation, and toy-scene obstruction behavior.
 - A reference-manifest tool freezes selected model revisions, input and
@@ -41,44 +46,87 @@ event writing, and array reconstruction are outside scope.
 
 ## Plan progress
 
-- Step 1: manifest creation and hash verification are implemented. Real
-  reference commands and photon blocks are still needed to meet the exit gate.
+- Step 1: manifest creation and hash verification are implemented. A compact
+  fixed-seed simtools/sim_telarray reference matrix now exists for the selected
+  three families; the [reference summary](reference/7.0.0/summary.json) records
+  source revisions, image digest, settings, output hashes, D80, area, and exact
+  integration radii. Five distinct 50000-photon imaging lists and their
+  cumulative PSF profiles are archived with hash-verified regeneration.
+  Shared launched photon blocks and replayable commands still need freezing.
 - Step 2: input equivalence and frame round trips pass. The complete SI result
   and interaction schema remains open.
 - Step 3: in progress. The compiler verifies imported records and assets and
   extracts mirror-list/segmentation footprints and camera pixel layouts.
+  For single-reflector records it now derives unperturbed panel centres and
+  normals using sim_telarray's `tel_setup_primary` prescription. These are
+  nominal geometry only; run-specific random distance and alignment remain
+  unresolved.
   Nested camera response files are hashed when present and missing references
-  are reported. Normals, physical detector surfaces, structures, and materials
-  remain unresolved, so these scenes are not trace-ready. The selected 6.3.0
+  are reported. An explicit sim_telarray root resolves and hashes camera tables
+  from its `cfg/CTA` search path. Aligned normals, physical detector surfaces,
+  structures, and materials remain unresolved, so these scenes are not
+  trace-ready. The selected 6.3.0
   and 7.0.0 design records yield LST 198, MST 86, SST 18, and SCT 48/24
   primary/secondary mirror footprints; camera files yield 1855, 1764/1855,
   2048, and 11328 pixels respectively. The SCT camera references
-  `Angular_response_MPPC_Prod3.dat`, absent from the local checkout. Patch
+  `Angular_response_MPPC_Prod3.dat`; it is present under the local
+  `../sim_telarray/cfg/CTA` and resolves when that root is supplied. Patch
   productions 6.0.1, 6.0.2, 6.1.1, and 6.2.1 declare no primary geometry asset
   and cannot compile standalone scenes.
-- Step 4: in progress. An immutable generic planar scene now traces the
+- Step 4: in progress. An immutable generic scene now traces the
   globally nearest finite mirror, detector, or opaque surface on each segment
   with a bounded interaction count. Analytic tests cover ordering before and
   after reflection, gaps, path/time, terminal IDs, and the interaction cap.
-  Curved/aspheric surfaces, closed solids, active-area masks, and optical
+  Circular and annular even-polynomial aspheres can now participate in the
+  same nearest-hit search, with tests for sag, normal, and a central hole.
+  Segmented asphere masks, closed solids, active-area masks, and optical
   material behavior are not yet part of this scene.
+- Step 10: analytic-reference CSVs can now produce a dependency-free weighted
+  SVG focal-plane map annotated with centroid, D80, and throughput, plus a
+  machine-readable PSF report. This does not validate production optics.
 
 ## Exact missing inputs and contracts
 
-- Reference matrix: installed sim_telarray and hessio decoder revisions,
-  executable paths, selected site/configuration/seeds, and checksummed photon
-  blocks and commands have not been supplied; no real comparison manifest can
-  be frozen yet.
-- Model data: the local 7.0.0 SCT camera config references
-  `Angular_response_MPPC_Prod3.dat`, which is absent from its `Files`
-  directory. The mirror lists and segmentation files do not supply aligned
-  panel normals; the extracted camera pixels do not supply a compiled physical
-  detector surface. Structure geometry and optical material semantics are
-  also not yet compiled.
-- Kernel: the new generic scene currently represents finite planar surfaces.
-  It still needs closed rods/caps and baffles, curved/aspheric reflectors and
-  detectors, pixel masks, material bindings, and bounded interaction records
-  before it can replace the toy/segmented paths or trace a production model.
+- Reference matrix: the local `simtools-dev` environment and Podman image run
+  sim_telarray release 2025.246.0. The seven selected 7.0.0 on-axis design
+  configs were generated through simtools `validate-optics` in test mode, then
+  replayed directly with 50000 star photons (10×), a 10 km source, 20° zenith,
+  and an explicit seed of 19780503. The current simtools checkout no longer
+  resolves some legacy model asset paths; the replay uses the original
+  hash-verified configs and star lists.
+  The reference uses `validate-optics` overrides (`camera_filter=none`,
+  `camera_transmission=1`, and zero night-sky background), so it tests optical
+  geometry/PSF rather than complete camera throughput.
+  Generated configurations, imaging lists, and logs are in
+  `/private/tmp/obdeect-ref-50k-7.0.0`; the checked-in summary has their
+  hashes, focal-plane figures, integration radii, and cumulative profiles.
+  A matched launched photon block, exact
+  interaction records, production obdeect scene output, and predeclared
+  comparison tolerances are still absent.
+- Model data: the local 7.0.0 SCT camera response resolves from the explicit
+  sim_telarray `cfg/CTA` root and is SHA-256 checked. Single-reflector nominal
+  normals can be derived, but aligned
+  panel normals require the selected run settings and random draws. The
+  extracted camera pixels do not supply a compiled physical detector surface.
+  Structure geometry and optical material semantics are also not yet compiled.
+
+The audited 7.0.0 design matrix is LST North/South (198 panels, 1855 pixels),
+MST FlashCam/NectarCam for both sites (86 panels, 1764/1855 pixels), SST South
+(18 M1 segments, 2048 pixels), and SCT South (48 M1 plus 24 M2 segments,
+11328 pixels). The checkout has no North SST/SCT design records. SCT is
+currently deferred. The available sim_telarray image has `MAX_PIXELS=2368` and
+cannot run the 11328-pixel SCT camera. simtools'
+`SimulatorRayTracing` writes a star file, generates a telescope/site config,
+and runs sim_telarray with `IMAGING_LIST`, `random_state=none`, one telescope,
+disabled camera filter and night-sky background, and 100000 photons per run
+(5000 in test mode). It does not export the launched photon block; a matched
+input comparison still needs a shared source block; the compact reference
+matrix overrides the generated seed to 19780503.
+- Kernel: the generic scene represents finite planes and circular/annular
+  polynomial aspheres. It still needs closed rods/caps and baffles, segmented
+  asphere masks, pixel masks, material bindings, and bounded interaction
+  records before it can replace the toy/segmented paths or trace a production
+  model.
 
 ## External compatibility requirements
 
@@ -86,9 +134,10 @@ The local `../simulation-models` checkout contains the detailed, versioned
 model data and is the primary import source.  A remote checkout is an allowed
 acquisition route, but every production scene must record the resolved release,
 parameter-record versions, asset paths, and SHA-256 hashes.  The compiler now
-extracts mirror-list or segmentation footprints and camera pixel layouts; it
-stops before assigning panel normals, physical detector surfaces, structure
-geometry, or material semantics that these records do not establish alone.
+extracts mirror-list or segmentation footprints and camera pixel layouts and
+derives nominal single-reflector panel normals. It stops before run-specific
+alignment, physical detector surfaces, structure geometry, or material
+semantics are established.
 
 `../simtools` currently delegates these workflows to sim_telarray and its
 `LightEmission` programs.  Their optical contracts define required obdeect
@@ -123,7 +172,7 @@ Each step has a deliverable and an exit criterion.  Complete the steps in
 order; later comparisons are only meaningful when earlier geometry and frame
 contracts are fixed.
 
-1. **Freeze the reference matrix.** Record the sim_telarray release, hessio
+1. **Freeze the reference matrix.** Record the sim_telarray release, EventIO library
    decoder, selected simulation-models checkout and production version, site,
    telescope variants, configuration overrides, seeds, atmosphere/extinction
    treatment, photon blocks, and coordinate frames.  The importer must support
@@ -344,7 +393,7 @@ matrix on scheduled or release builds.
 3. Complete configurable source spectra, pulses, pointing, yield, and
    beam-normal launch.  Specify a separate atmospheric propagation/scattering
    model before supporting laser side scatter.
-4. Add an optional CORSIKA7 EventIO/hessio adapter behind the existing
+4. Complete the optional CORSIKA7 EventIO adapter behind the existing
    format-neutral photon contract.  Preserve all bunch metadata and unresolved
    wavelength sentinels; compare standard, compact, and 3D blocks with an
    independent decoder.
