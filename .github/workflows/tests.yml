@@ -25,6 +25,33 @@ jobs:
         run: ctest --test-dir build --output-on-failure && pytest python/tests
       - name: Run and render examples
         run: python examples/run_examples.py --build build --output out/examples --photons 128
+  build-and-test-eventio:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7
+        with:
+          repository: cta-observatory/pyhessio
+          path: hessio
+      - name: Build EventIO dependency
+        run: |
+          ln -sfn hessioxxx/include hessio/include
+          cmake -S hessio -B hessio/build -DCMAKE_BUILD_TYPE=Release
+          cmake --build hessio/build --target hessio --parallel
+      - name: Configure and build EventIO reader
+        run: >-
+          cmake -S . -B build-eventio -DCMAKE_BUILD_TYPE=Release
+          -DOBDEECT_BUILD_EVENTIO_INPUT=ON
+          -DEventio_ROOT=${{ github.workspace }}/hessio
+          -DEventio_LIBRARY=${{ github.workspace }}/hessio/build/lib/libhessio.so
+          -DEventio_CORSIKA_INCLUDE_DIR=${{ github.workspace }}/hessio/include
+          -DEventio_BASIC_INCLUDE_DIR=${{ github.workspace }}/hessio/include
+          -DEventio_COMMON_INCLUDE_DIR=${{ github.workspace }}/hessio/include
+          && cmake --build build-eventio --parallel
+      - name: Run EventIO reader test
+        run: >-
+          LD_LIBRARY_PATH=${{ github.workspace }}/hessio/build/lib:${LD_LIBRARY_PATH}
+          ctest --test-dir build-eventio --output-on-failure -R obdeect_eventio_input_tests
   sanitizers:
     runs-on: ubuntu-24.04
     steps:
