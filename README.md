@@ -1,14 +1,12 @@
 # obdeect
 
-`obdeect` is a C++20 optical ray tracing prototype for imaging atmospheric
-Cherenkov telescopes. The C++ core uses only the standard library. Python
-provides plotting, PSF analysis, and model import tools.
+`obdeect` is an optical ray tracing code for imaging atmospheric Cherenkov telescopes.
+The C++20 core uses only the standard library.
+Python provides plotting, PSF analysis, and model import tools.
 
 ## Installation and Build
 
-For a released platform wheel, Python 3.10+ is sufficient. The wheel contains
-the C++20 ray-tracing executables and headers. A source checkout additionally
-needs a C++20 compiler and CMake 3.20+.
+## Users
 
 Install the current development distribution from PyPI and run the packaged
 tracer without a source checkout:
@@ -18,7 +16,9 @@ python -m pip install obdeect-dev
 obdeect-simtools-raytrace --telescope MST --photons 10000 --output trace.csv
 ```
 
-Installation and build steps are as follows:
+## Developers
+
+Developers require to clone the repository first and build the project from source.
 
 ```sh
 python -m venv .venv
