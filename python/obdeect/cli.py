@@ -47,16 +47,16 @@ def _run(name: str) -> int:
     return 1
 
 
-def reference_main() -> int:
-    """Run the packaged  reference ray tracer."""
+def demo_mst_main() -> int:
+    """Run the packaged developer MST demonstration."""
 
-    return _run("obdeect_reference")
+    return _run("obdeect-demo-mst")
 
 
-def ctao_main() -> int:
-    """Run the packaged CTAO reference ray tracer."""
+def analytic_optics_main() -> int:
+    """Run the packaged analytic-optics developer diagnostic."""
 
-    return _run("obdeect_ctao")
+    return _run("obdeect-analytic-optics")
 
 
 def simtools_raytrace_main() -> int:

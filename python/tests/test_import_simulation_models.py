@@ -56,7 +56,7 @@ class TestSimulationModelsImport(unittest.TestCase):
             (assets / "mirrors.dat").write_text("one facet\n")
 
     def test_resolves_every_parameter_and_asset_with_hashes(self):
-        # T-IMPORT-001: the IR retains all selected records; no field is silently ignored.
+        # T-IMPORT-001: the IR retains every selected ray-tracing record and asset.
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory) / "simulation-models"
             self.make_tree(root)
@@ -69,6 +69,55 @@ class TestSimulationModelsImport(unittest.TestCase):
         )
         self.assertIn("mirror_list", scene["assets"])
         self.assertEqual(len(scene["assets"]["mirror_list"]["sha256"]), 64)
+
+    def test_excludes_camera_electronics_from_ray_tracing_ir(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "simulation-models"
+            self.make_tree(root)
+            manifest = root / "productions/1.2.3/TEST.json"
+            data = json.loads(manifest.read_text())
+            data["parameters"]["TEST"]["fadc_noise"] = "1.0.0"
+            manifest.write_text(json.dumps(data))
+            electronics = root / "model_parameters/TEST/fadc_noise"
+            electronics.mkdir()
+            (electronics / "fadc_noise-1.0.0.json").write_text(
+                json.dumps({
+                    "instrument": "TEST",
+                    "parameter": "fadc_noise",
+                    "parameter_version": "1.0.0",
+                    "type": "float64",
+                    "unit": "ct",
+                    "value": 1.0,
+                    "file": False,
+                })
+            )
+            scene = IMPORTER.resolve_model(root, "TEST", "1.2.3")
+        self.assertNotIn("fadc_noise", scene["parameters"])
+        self.assertNotIn("parameter:fadc_noise", scene["input_records"])
+
+    def test_keeps_dual_reflector_optical_parameters(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "simulation-models"
+            self.make_tree(root)
+            manifest = root / "productions/1.2.3/TEST.json"
+            data = json.loads(manifest.read_text())
+            data["parameters"]["TEST"]["secondary_mirror_parameters"] = "1.0.0"
+            manifest.write_text(json.dumps(data))
+            parameter = root / "model_parameters/TEST/secondary_mirror_parameters"
+            parameter.mkdir()
+            (parameter / "secondary_mirror_parameters-1.0.0.json").write_text(
+                json.dumps({
+                    "instrument": "TEST",
+                    "parameter": "secondary_mirror_parameters",
+                    "parameter_version": "1.0.0",
+                    "type": "float64",
+                    "unit": ["cm"],
+                    "value": [1.0],
+                    "file": False,
+                })
+            )
+            scene = IMPORTER.resolve_model(root, "TEST", "1.2.3")
+        self.assertIn("secondary_mirror_parameters", scene["parameters"])
 
     def test_missing_declared_asset_fails_closed(self):
         # T-IMPORT-002: an asset reference can never become an untracked path.

@@ -13,6 +13,7 @@
 #include <iostream>
 #include <numbers>
 #include <string>
+#include <vector>
 
 namespace {
 void usage() {
@@ -20,10 +21,11 @@ void usage() {
             << "  --scene-file FILE  model-derived obdeect-scene-v1 surface table\n"
             << "  --source star|illuminator|laser  (default: star)\n"
             << "  --photons N --output FILE --field-x-deg D --field-y-deg D\n"
-            << "  --distance-m D --wavelength-nm D --divergence-deg D\n"
+            << "  --distance-m D --wavelength-nm N[,N...] --divergence-deg D\n"
             << "  --source-x-m D --source-y-m D --source-z-m D\n"
             << "  --direction-x D --direction-y D --direction-z D  (laser axis)\n"
-            << "  Without --scene-file, use the built-in CTAO reference prescription.\n";
+            << "  --scene-file is required for model-derived CTAO simulations; it accepts general panel geometry.\n"
+            << "  Without it, this runs an analytic diagnostic prescription only.\n";
 }
 
 bool value(int& index, int argc, char** argv, const char* option, std::string& result) {
@@ -42,7 +44,8 @@ int main(int argc, char** argv) {
   std::string output_path{"obdeect_paths.csv"};
   std::size_t photons_count = 10000;
   double field_x_deg = 0.0, field_y_deg = 0.0, distance_m = 10000.0;
-  double wavelength_nm = 400.0, divergence_deg = 0.0;
+  std::vector<double> wavelengths_nm{400.0};
+  double divergence_deg = 0.0;
   double source_x_m = 0.0, source_y_m = 0.0, source_z_m = 50.0;
   double direction_x = 0.0, direction_y = 0.0, direction_z = -1.0;
   for (int index = 1; index < argc; ++index) {
@@ -54,14 +57,20 @@ int main(int argc, char** argv) {
         value(index, argc, argv, "--output", output_path)) {
       continue;
     }
+    if (std::string{argv[index]} == "-h" || std::string{argv[index]} == "--help") {
+      usage();
+      return 0;
+    }
     if (std::string{argv[index]} == "--photons" && index + 1 < argc &&
         parse_positive_size(argv[++index], photons_count)) continue;
+    if (std::string{argv[index]} == "--wavelength-nm" && index + 1 < argc &&
+        obdeect::parse_wavelengths_nm(argv[++index], wavelengths_nm)) continue;
     auto number = [&](const char* option, double& target) {
       return std::string{argv[index]} == option && index + 1 < argc &&
              parse_finite_double(argv[++index], target);
     };
     if (number("--field-x-deg", field_x_deg) || number("--field-y-deg", field_y_deg) ||
-        number("--distance-m", distance_m) || number("--wavelength-nm", wavelength_nm) ||
+        number("--distance-m", distance_m) ||
         number("--divergence-deg", divergence_deg) || number("--source-x-m", source_x_m) ||
         number("--source-y-m", source_y_m) || number("--source-z-m", source_z_m) ||
         number("--direction-x", direction_x) || number("--direction-y", direction_y) ||
@@ -73,7 +82,7 @@ int main(int argc, char** argv) {
   const auto imported_scene = scene_file.empty() ? std::optional<obdeect::CompiledSegmentedScene>{}
                                                  : obdeect::read_native_scene(scene_file);
   if ((!model && !imported_scene) || (source != "star" && source != "illuminator" && source != "laser") ||
-      wavelength_nm <= 0.0 || distance_m <= 0.0 || divergence_deg < 0.0 || divergence_deg >= 90.0) {
+      distance_m <= 0.0 || divergence_deg < 0.0 || divergence_deg >= 90.0) {
     usage();
     return 2;
   }
@@ -92,21 +101,23 @@ int main(int argc, char** argv) {
   if (source == "star") {
     input = obdeect::star_photons(photons_count, pupil_radius,
                                   {field_x_deg * radians_per_degree, field_y_deg * radians_per_degree,
-                                   distance_m, wavelength_nm});
+                                   distance_m, wavelengths_nm.front()});
   } else if (source == "illuminator") {
     input = obdeect::illuminator_photons(
         photons_count, pupil_radius,
-        {{source_x_m, source_y_m, source_z_m}, wavelength_nm, 1.0});
+        {{source_x_m, source_y_m, source_z_m}, wavelengths_nm.front(), 1.0});
   } else {
     input = obdeect::laser_photons(
         photons_count, pupil_radius,
         {{direction_x, direction_y, direction_z}, {source_x_m, source_y_m, source_z_m},
-         divergence_deg * radians_per_degree, wavelength_nm});
+         divergence_deg * radians_per_degree, wavelengths_nm.front()});
   }
   if (input.size() != photons_count) {
     std::cerr << "source configuration produced no valid photons\n";
     return 1;
   }
+  for (std::size_t index = 0; index < input.size(); ++index)
+    input[index].wavelength_nm = wavelengths_nm[index % wavelengths_nm.size()];
   std::ofstream output{output_path};
   if (!output) {
     std::cerr << "cannot write " << output_path << '\n';

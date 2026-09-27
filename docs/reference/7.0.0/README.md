@@ -23,10 +23,10 @@ The [summary](summary.json) records revisions, hashes, focal-plane crossings,
 effective area, and exact centroid-centred integration radii at 50%, 68%, 80%,
 90%, 95%, and 99% containment. Each linked CSV gives the empirical cumulative
 distribution every 0.1% in centimetres, including the enclosed photon count.
-The five distinct compressed [imaging lists](imaging/) are archived here; the
-North and South MST rows share identical photon lists. Recalculate and verify
-all profiles and hashes with
-`PYTHONPATH=python python -m obdeect.simtel_reference_psf docs/reference/7.0.0 --check`.
+Raw sim_telarray photon lists are intentionally not retained in this repository.
+The derived PSF figures, containment radii, and cumulative profiles are the
+reference products. Regenerate them from a frozen sim_telarray manifest when a
+new reference is required.
 The summary keeps simtools' iterative D80 and also reports the exact empirical
 `exact_d80_m`. The figures draw simtools' D80 circle.
 

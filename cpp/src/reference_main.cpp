@@ -27,11 +27,11 @@ bool parse_source(const std::string& value, obdeect::ArtificialSourceKind& outpu
 }
 
 void usage() {
-  std::cout << "Usage: obdeect_reference [--photons N] [--output paths.csv] [--no-structure]\n"
+  std::cout << "Usage: obdeect-demo-mst [--photons N] [--output paths.csv] [--no-structure]\n"
             << "                    [--source star|illuminator|laser] [--field-x-deg D]\n"
             << "                    [--field-y-deg D] [--distance-m D] [--divergence-deg D]\n"
             << "                    [--wavelength-nm D]\n"
-            << "Trace monochromatic artificial photons through a simple MST-inspired spherical\n"
+            << "Developer demonstration: trace artificial photons through a simple MST-inspired spherical\n"
             << "mirror, camera shadow and four mast supports.\n";
 }
 
@@ -51,6 +51,7 @@ int main(int argc, char** argv) {
   double wavelength_nm = 400.0;
   for (int index = 1; index < argc; ++index) {
     const std::string argument{argv[index]};
+    if (argument == "-h" || argument == "--help") { usage(); return 0; }
     if (argument == "--photons" && index + 1 < argc && parse_positive_size(argv[++index], photon_count)) continue;
     if (argument == "--output" && index + 1 < argc) {
       output_path = argv[++index];
@@ -85,8 +86,9 @@ int main(int argc, char** argv) {
     return 1;
   }
   output << std::setprecision(17);
-  output << "photon_id,wavelength_nm,emission_time_ns,source_weight,throughput,status,point_count,path_length_m,"
-            "x0_m,y0_m,z0_m,x1_m,y1_m,z1_m,x2_m,y2_m,z2_m,x3_m,y3_m,z3_m\n";
+  output << "contract_version,photon_id,source_kind,wavelength_nm,emission_time_ns,source_weight,throughput,"
+            "status,point_count,path_length_m,incidence_primary_deg,incidence_secondary_deg,"
+            "incidence_focal_deg,x0_m,y0_m,z0_m,x1_m,y1_m,z1_m,x2_m,y2_m,z2_m,x3_m,y3_m,z3_m\n";
 
   std::size_t detected = 0;
   std::size_t camera_blocked = 0;
@@ -116,9 +118,10 @@ int main(int argc, char** argv) {
     camera_blocked += record.status == obdeect::PhotonStatus::blocked_camera;
     mast_blocked += record.status == obdeect::PhotonStatus::blocked_mast;
     const double throughput = record.status == obdeect::PhotonStatus::detected ? 1.0 : 0.0;
-    output << record.photon_id << ',' << record.wavelength_nm << ',' << photon.time_ns << ',' << photon.weight << ','
-           << throughput << ',' << obdeect::to_string(record.status) << ',' << static_cast<int>(record.point_count)
-           << ',' << record.path_length_m;
+    output << "obdeect-arrival-v1," << record.photon_id << ',' << obdeect::to_string(source_kind) << ','
+           << record.wavelength_nm << ',' << photon.time_ns << ',' << photon.weight << ',' << throughput << ','
+           << obdeect::to_string(record.status) << ',' << static_cast<int>(record.point_count) << ','
+           << record.path_length_m << ",,,";
     for (const auto& point : record.points_m) output << ',' << point.x << ',' << point.y << ',' << point.z;
     output << '\n';
   }

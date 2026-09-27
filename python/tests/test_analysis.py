@@ -93,6 +93,7 @@ class TestPsfAnalysis(unittest.TestCase):
                 [
                     "obdeect-psf",
                     "derive",
+                    "--input",
                     str(trace),
                     "--field-x-deg",
                     "0.5",
@@ -128,7 +129,7 @@ class TestPsfAnalysis(unittest.TestCase):
                     "field_x_deg": [0.0000001, 0.0000002],
                     "field_y_deg": 0.0,
                     "photons": 4,
-                    "executable": root / "obdeect_reference",
+                    "executable": root / "obdeect-demo-mst",
                     "extra_argument": [],
                     "plot": None,
                 },

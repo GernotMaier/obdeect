@@ -33,30 +33,30 @@ def run_examples(build: Path, output: Path, photons: int) -> None:
     output.mkdir(parents=True, exist_ok=True)
     suffix = ".exe" if os.name == "nt" else ""
     cases = [
-        ("reference_star", "obdeect_reference", ["--source", "star"], "reference-mst", True),
+        ("reference_star", "obdeect-demo-mst", ["--source", "star"], "reference-mst", True),
         (
             "reference_flasher",
-            "obdeect_reference",
+            "obdeect-demo-mst",
             ["--source", "illuminator", "--distance-m", "50"],
             "reference-mst",
             False,
         ),
         (
             "reference_laser",
-            "obdeect_reference",
+            "obdeect-demo-mst",
             ["--source", "laser", "--divergence-deg", "0.1"],
             "reference-mst",
             True,
         ),
-        ("lst_on_axis", "obdeect_ctao", ["--telescope", "LST"], "LST", True),
+        ("lst_on_axis", "obdeect-analytic-optics", ["--telescope", "LST"], "LST", True),
         (
             "lst_off_axis",
-            "obdeect_ctao",
+            "obdeect-analytic-optics",
             ["--telescope", "LST", "--field-x-deg", "0.5"],
             "LST",
             True,
         ),
-        ("mst_sphere", "obdeect_ctao", ["--telescope", "MST"], "MST", True),
+        ("mst_sphere", "obdeect-analytic-optics", ["--telescope", "MST"], "MST", True),
     ]
     summary = {}
     for name, executable, flags, telescope, require_detected in cases:
@@ -80,6 +80,7 @@ def run_examples(build: Path, output: Path, photons: int) -> None:
                 [
                     sys.executable,
                     str(root / "python/obdeect/plotting.py"),
+                    "--input",
                     str(csv_path),
                     "--telescope",
                     telescope,

@@ -9,6 +9,7 @@ from tempfile import TemporaryDirectory
 from obdeect.model_import import resolve_model
 from obdeect.scene_compiler import (
     SceneCompileError,
+    _dual_reflector_surfaces,
     compile_scene,
     derive_nominal_single_reflector,
     parse_simtel_mirror_list,
@@ -19,6 +20,24 @@ from obdeect.scene_compiler import (
 
 
 class TestSceneCompiler(unittest.TestCase):
+    def test_dual_reflector_surfaces_preserve_si_aspheres_and_holes(self):
+        coefficient = {"value": [0.0, 0.01], "unit": ["cm", "cm"]}
+        parameters = {
+            "primary_mirror_parameters": coefficient,
+            "primary_mirror_diameter": {"value": 400.0, "unit": "cm"},
+            "primary_mirror_hole_diameter": {"value": 20.0, "unit": "cm"},
+            "secondary_mirror_parameters": {"value": [300.0, 0.02], "unit": ["cm", "cm"]},
+            "secondary_mirror_diameter": {"value": 180.0, "unit": "cm"},
+            "secondary_mirror_hole_diameter": {"value": 0.0, "unit": "cm"},
+            "focal_surface_parameters": {"value": [200.0], "unit": ["cm"]},
+        }
+        surfaces = _dual_reflector_surfaces(parameters)
+        self.assertIsNotNone(surfaces)
+        self.assertEqual(surfaces["primary"]["inner_radius_m"], 0.1)
+        self.assertEqual(surfaces["primary"]["outer_radius_m"], 2.0)
+        self.assertAlmostEqual(surfaces["primary"]["coefficient_m"][1], 1.0)
+        self.assertAlmostEqual(surfaces["secondary"]["coefficient_m"][0], 3.0)
+
     def test_native_scene_export_contains_provenance_and_detector_surface(self):
         scene = {
             "provenance": {"model": "GENERIC", "model_version": "1.0.0", "input_records": {}},

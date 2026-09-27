@@ -160,13 +160,15 @@ def verify(manifest: dict[str, Any], model_root: Path) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("freeze", "verify"))
-    parser.add_argument("path", type=Path, help="configuration or frozen manifest JSON")
+    parser.add_argument("--action", choices=("freeze", "verify"), required=True)
+    parser.add_argument(
+        "--input", type=Path, required=True, help="configuration or frozen manifest JSON"
+    )
     parser.add_argument("--model-root", type=Path, required=True)
     parser.add_argument("--output", type=Path, help="required for freeze")
     args = parser.parse_args()
     try:
-        data = _object(json.loads(args.path.read_text(encoding="utf-8")), "JSON root")
+        data = _object(json.loads(args.input.read_text(encoding="utf-8")), "JSON root")
         if args.action == "freeze":
             if args.output is None:
                 raise ManifestError("freeze requires --output")
@@ -174,8 +176,10 @@ def main() -> None:
             args.output.write_text(
                 json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8"
             )
+            print(f"Wrote frozen reference manifest to {args.output}")
         else:
             verify(data, args.model_root)
+            print(f"Verified reference manifest {args.input}")
     except (OSError, ValueError, json.JSONDecodeError) as error:
         raise SystemExit(f"reference manifest failed: {error}") from error
 

@@ -33,9 +33,9 @@ RUN printf '%s\n' \
       "obdeect_version: \"${OBDEECT_VERSION}\"" \
       'obdeect_build_type: "Release"' \
       'obdeect_build_testing: false' \
-      'reference_executables:' \
-      '  - obdeect_reference' \
-      '  - obdeect_ctao' \
+      'native_executables:' \
+      '  - obdeect-demo-mst' \
+      '  - obdeect-analytic-optics' \
       '  - obdeect-simtools-raytrace' > /opt/obdeect/build_opts.yml
 
 FROM ${RUNTIME_IMAGE}

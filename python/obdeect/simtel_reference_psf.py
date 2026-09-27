@@ -152,10 +152,11 @@ def update_summary(summary_path: Path, root: Path, *, check: bool = False) -> No
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("reference_dir", type=Path)
+    parser.add_argument("--reference-dir", type=Path, required=True)
     parser.add_argument("--check", action="store_true", help="verify without rewriting products")
     args = parser.parse_args()
     update_summary(args.reference_dir / "summary.json", args.reference_dir, check=args.check)
+    print(f"Verified derived PSF products in {args.reference_dir}")
 
 
 if __name__ == "__main__":

@@ -246,7 +246,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
     derive = commands.add_parser("derive", help="analyse existing trace CSV output")
-    derive.add_argument("paths", type=Path, nargs="+")
+    derive.add_argument("--input", dest="paths", type=Path, nargs="+", required=True)
     derive.add_argument("--field-x-deg", type=float, nargs="*", default=[])
     derive.add_argument("--output", type=Path, required=True)
     derive.add_argument("--scan-csv", type=Path)

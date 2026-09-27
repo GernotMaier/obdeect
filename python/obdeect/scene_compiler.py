@@ -233,6 +233,84 @@ def derive_nominal_single_reflector(
         facet["nominal_normal"] = [nx, ny, math.cos(inclination)]
 
 
+def _even_polynomial_surface(parameter: dict[str, Any], name: str) -> list[float]:
+    """Convert a physical-centimetre even polynomial into SI coefficients."""
+    value, unit = parameter.get("value"), parameter.get("unit")
+    if (
+        not isinstance(value, list)
+        or not isinstance(unit, list)
+        or len(value) != len(unit)
+        or not 1 <= len(value) <= 20
+        or any(entry != "cm" for entry in unit)
+    ):
+        raise SceneCompileError(f"{name} must be a physical-centimetre coefficient list")
+    coefficients = []
+    for index, coefficient in enumerate(value):
+        if isinstance(coefficient, bool) or not isinstance(coefficient, (int, float)):
+            raise SceneCompileError(f"{name} has a non-numeric coefficient")
+        converted = float(coefficient) * 0.01 ** (1 - 2 * index)
+        if not math.isfinite(converted):
+            raise SceneCompileError(f"{name} has a non-finite coefficient")
+        coefficients.append(converted)
+    if any(value != 0.0 for value in coefficients[13:]):
+        raise SceneCompileError(f"{name} exceeds the native 13-coefficient surface contract")
+    return coefficients[:13] + [0.0] * (13 - len(coefficients[:13]))
+
+
+def _dual_reflector_surfaces(parameters: dict[str, Any]) -> dict[str, dict[str, Any]] | None:
+    """Return imported SSTS-like aspheres without inferring absent geometry."""
+    required = {
+        "primary_mirror_parameters",
+        "primary_mirror_diameter",
+        "primary_mirror_hole_diameter",
+        "secondary_mirror_parameters",
+        "secondary_mirror_diameter",
+        "secondary_mirror_hole_diameter",
+        "focal_surface_parameters",
+    }
+    present = required & set(parameters)
+    if not present:
+        return None
+    if present != required:
+        raise SceneCompileError(
+            "dual-reflector optical prescription is incomplete: "
+            + ", ".join(sorted(required - present))
+        )
+
+    def surface(prefix: str) -> dict[str, Any]:
+        outer = _length_m(parameters[f"{prefix}_diameter"], f"{prefix}_diameter") * 0.5
+        inner = (
+            _length_m(
+                parameters[f"{prefix}_hole_diameter"], f"{prefix}_hole_diameter", allow_zero=True
+            )
+            * 0.5
+        )
+        if inner >= outer:
+            raise SceneCompileError(f"{prefix} hole must be smaller than its aperture")
+        return {
+            "coefficient_m": _even_polynomial_surface(
+                parameters[f"{prefix}_parameters"], f"{prefix}_parameters"
+            ),
+            "inner_radius_m": inner,
+            "outer_radius_m": outer,
+        }
+
+    primary = surface("primary_mirror")
+    secondary = surface("secondary_mirror")
+    focal_value = _even_polynomial_surface(
+        parameters["focal_surface_parameters"], "focal_surface_parameters"
+    )
+    return {
+        "primary": primary,
+        "secondary": secondary,
+        "focal_surface": {
+            "coefficient_m": focal_value,
+            "inner_radius_m": 0.0,
+            "outer_radius_m": None,
+        },
+    }
+
+
 def compile_scene(
     ir: dict[str, Any], source_root: Path, *, simtel_root: Path | None = None
 ) -> dict[str, Any]:
@@ -280,6 +358,7 @@ def compile_scene(
     if fallback is None and isinstance(parameters.get("focal_length"), dict):
         fallback = _length_m(parameters["focal_length"], "focal_length")
     consumed = set()
+    dual_surfaces = _dual_reflector_surfaces(parameters)
     nominal_geometry = False
     if "mirror_list" in verified_assets:
         facets = parse_simtel_mirror_list(
@@ -338,6 +417,18 @@ def compile_scene(
             ),
         }
         consumed.add("secondary_mirror_segmentation")
+    if dual_surfaces is not None:
+        consumed.update({
+            "primary_mirror_parameters",
+            "primary_mirror_diameter",
+            "primary_mirror_hole_diameter",
+            "secondary_mirror_parameters",
+            "secondary_mirror_diameter",
+            "secondary_mirror_hole_diameter",
+            "focal_surface_parameters",
+        })
+        primary["aspheric_surface"] = dual_surfaces["primary"]
+        secondary = {"kind": "aspheric_mirror", **dual_surfaces["secondary"]}
     camera = None
     nested_assets = {}
     unresolved_references = []
@@ -430,6 +521,19 @@ def compile_scene(
             "unresolved_response_files": sorted(set(unresolved_references)),
             "surface_status": "unavailable",
         }
+    compiled_focal_surface = None
+    if dual_surfaces is not None:
+        compiled_focal_surface = dict(dual_surfaces["focal_surface"])
+        # The camera layout bounds the only model-derived focal aperture.  A
+        # native curved detector is intentionally not fabricated until its
+        # coordinate transform and active boundary are represented by the
+        # native scene format.
+        if camera is not None:
+            extent = max(
+                math.hypot(float(pixel["centre_xy_m"][0]), float(pixel["centre_xy_m"][1]))
+                for pixel in camera["pixels"]
+            )
+            compiled_focal_surface["outer_radius_m"] = extent
     compiled = {
         "format": "obdeect.compiled-scene.v1",
         "provenance": {
@@ -446,6 +550,8 @@ def compile_scene(
         compiled["focal_length_m"] = _length_m(parameters["focal_length"], "focal_length")
     if secondary is not None:
         compiled["secondary"] = secondary
+    if compiled_focal_surface is not None:
+        compiled["focal_surface"] = compiled_focal_surface
     if camera is not None:
         compiled["camera"] = camera
     canonical = json.dumps(compiled, sort_keys=True, separators=(",", ":")).encode()
@@ -589,7 +695,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="Compile a simulation-models IR into generic scene data."
     )
-    parser.add_argument("ir", type=Path, help="provenance-checked scene IR JSON")
+    parser.add_argument(
+        "--input", type=Path, required=True, help="provenance-checked scene IR JSON"
+    )
     parser.add_argument(
         "--source-root", type=Path, required=True, help="root used to resolve IR asset paths"
     )
@@ -607,7 +715,7 @@ def main() -> None:
     )
     args = parser.parse_args()
     try:
-        ir = json.loads(args.ir.read_text(encoding="utf-8"))
+        ir = json.loads(args.input.read_text(encoding="utf-8"))
         if not isinstance(ir, dict):
             raise SceneCompileError("IR root must be an object")
         scene = compile_scene(ir, args.source_root, simtel_root=args.simtel_root)
@@ -618,6 +726,9 @@ def main() -> None:
     except (OSError, json.JSONDecodeError, SceneCompileError) as error:
         raise SystemExit(f"scene compilation failed: {error}") from error
     args.output.write_text(json.dumps(scene, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    print(f"Compiled {scene['provenance']['model']} geometry into {args.output}")
+    if args.native_output:
+        print(f"Wrote native surface table to {args.native_output}")
 
 
 if __name__ == "__main__":
