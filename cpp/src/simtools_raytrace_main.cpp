@@ -108,7 +108,10 @@ int main(int argc, char** argv) {
   const auto model = scene_file.empty() ? obdeect::ctao_reference_model(telescope) : std::nullopt;
   auto imported_scene = scene_file.empty() ? std::optional<obdeect::CompiledSegmentedScene>{}
                                            : obdeect::read_native_scene(scene_file);
-  if ((!model && !imported_scene) || (source != "star" && source != "illuminator" && source != "laser") ||
+  const auto axisymmetric_scene = scene_file.empty() ? std::optional<obdeect::AxisymmetricScene>{}
+                                                      : obdeect::read_native_axisymmetric_scene(scene_file);
+  if ((!model && !imported_scene && !axisymmetric_scene) ||
+      (source != "star" && source != "illuminator" && source != "laser") ||
       distance_m <= 0.0 || divergence_deg < 0.0 || divergence_deg >= 90.0 || pulse_width_ns < 0.0 ||
       (panel_id && !imported_scene) ||
       ((screen_x_set || screen_y_set || screen_z_set || screen_radius_set) &&
@@ -156,7 +159,8 @@ int main(int argc, char** argv) {
                                                                   facet.diameter_m * 0.5);
                                       return radius;
                                     }()
-                                  : model->primary_outer_radius_m;
+                                  : axisymmetric_scene ? axisymmetric_scene->primary.outer_radius_m
+                                                       : model->primary_outer_radius_m;
   if (!std::isfinite(pupil_radius) || pupil_radius <= 0.0) return 1;
   std::vector<obdeect::OpticalPhoton> input;
   if (source == "star") {
@@ -237,6 +241,9 @@ int main(int argc, char** argv) {
           }
         }
       }
+    } else if (axisymmetric_scene) {
+      path = obdeect::trace_axisymmetric_scene(photon.ray, photon.photon_id, *axisymmetric_scene);
+      path.wavelength_nm = photon.wavelength_nm;
     } else {
       path = obdeect::trace_ctao_reference(photon.ray, photon.photon_id, *model);
       path.wavelength_nm = photon.wavelength_nm;
@@ -250,7 +257,7 @@ int main(int argc, char** argv) {
     for (const auto& point : path.points_m) output << ',' << point.x << ',' << point.y << ',' << point.z;
     output << '\n';
   }
-  if (imported_scene) {
+  if (imported_scene || axisymmetric_scene) {
     std::cout << "native scene " << scene_file << ": " << photons_count << " " << source
               << " photons, detected " << detected;
     if (panel_id) std::cout << ", panel " << *panel_id;

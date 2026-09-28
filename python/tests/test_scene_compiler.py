@@ -38,6 +38,25 @@ class TestSceneCompiler(unittest.TestCase):
         self.assertAlmostEqual(surfaces["primary"]["coefficient_m"][1], 1.0)
         self.assertAlmostEqual(surfaces["secondary"]["coefficient_m"][0], 3.0)
 
+    def test_dual_reflector_preserves_simtel_reference_radius_convention(self):
+        parameters = {
+            "primary_mirror_parameters": {"value": [0.0, 0.1], "unit": ["cm", "cm"]},
+            "primary_mirror_ref_radius": {"value": 500.0, "unit": "cm"},
+            "primary_mirror_diameter": {"value": 800.0, "unit": "cm"},
+            "primary_mirror_hole_diameter": {"value": 0.0, "unit": "cm"},
+            "secondary_mirror_parameters": {"value": [1.0], "unit": ["cm"]},
+            "secondary_mirror_ref_radius": {"value": 500.0, "unit": "cm"},
+            "secondary_mirror_diameter": {"value": 400.0, "unit": "cm"},
+            "secondary_mirror_hole_diameter": {"value": 0.0, "unit": "cm"},
+            "focal_surface_parameters": {"value": [2.0], "unit": ["cm"]},
+            "focal_surface_ref_radius": {"value": 500.0, "unit": "cm"},
+        }
+        surfaces = _dual_reflector_surfaces(parameters)
+        self.assertIsNotNone(surfaces)
+        self.assertEqual(surfaces["primary"]["radial_scale_m"], 5.0)
+        self.assertEqual(surfaces["primary"]["coefficient_m"][:2], [0.0, 0.5])
+        self.assertEqual(surfaces["focal_surface"]["coefficient_m"][0], 10.0)
+
     def test_native_scene_export_contains_provenance_and_detector_surface(self):
         scene = {
             "provenance": {"model": "GENERIC", "model_version": "1.0.0", "input_records": {}},

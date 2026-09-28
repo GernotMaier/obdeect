@@ -277,6 +277,47 @@ def _dual_reflector_surfaces(parameters: dict[str, Any]) -> dict[str, dict[str, 
             + ", ".join(sorted(required - present))
         )
 
+    def radial_scale(prefix: str) -> float | None:
+        parameter = parameters.get(f"{prefix}_ref_radius")
+        if parameter is None:
+            return None
+        return _length_m(parameter, f"{prefix}_ref_radius")
+
+    def polynomial(prefix: str) -> tuple[list[float], float]:
+        """Return SI sag coefficients and their explicit radial scale.
+
+        sim_telarray accepts the SC prescription as ``z = R sum(a_i (r/R)^2i)``.
+        The SST records use R=1 cm, which is algebraically identical to the
+        physical-centimetre convention; SCT uses its 558.63-cm reference
+        radius and must therefore retain the scale rather than expanding the
+        coefficients as physical centimetre powers.
+        """
+        scale = radial_scale(prefix)
+        if scale is None:
+            return _even_polynomial_surface(
+                parameters[f"{prefix}_parameters"], f"{prefix}_parameters"
+            ), 1.0
+        values = parameters[f"{prefix}_parameters"].get("value")
+        units = parameters[f"{prefix}_parameters"].get("unit")
+        if (
+            not isinstance(values, list)
+            or not isinstance(units, list)
+            or len(values) != len(units)
+            or not 1 <= len(values) <= 20
+            or any(unit != "cm" for unit in units)
+        ):
+            raise SceneCompileError(f"{prefix}_parameters must be a centimetre coefficient list")
+        if any(isinstance(value, bool) or not isinstance(value, (int, float)) for value in values):
+            raise SceneCompileError(f"{prefix}_parameters has a non-numeric coefficient")
+        coefficient_m = [float(value) * scale for value in values]
+        if not all(math.isfinite(value) for value in coefficient_m):
+            raise SceneCompileError(f"{prefix}_parameters has a non-finite coefficient")
+        if any(value != 0.0 for value in coefficient_m[13:]):
+            raise SceneCompileError(
+                f"{prefix}_parameters exceeds the native 13-coefficient surface contract"
+            )
+        return coefficient_m[:13] + [0.0] * (13 - len(coefficient_m[:13])), scale
+
     def surface(prefix: str) -> dict[str, Any]:
         outer = _length_m(parameters[f"{prefix}_diameter"], f"{prefix}_diameter") * 0.5
         inner = (
@@ -287,24 +328,23 @@ def _dual_reflector_surfaces(parameters: dict[str, Any]) -> dict[str, dict[str, 
         )
         if inner >= outer:
             raise SceneCompileError(f"{prefix} hole must be smaller than its aperture")
+        coefficient_m, scale = polynomial(prefix)
         return {
-            "coefficient_m": _even_polynomial_surface(
-                parameters[f"{prefix}_parameters"], f"{prefix}_parameters"
-            ),
+            "coefficient_m": coefficient_m,
+            "radial_scale_m": scale,
             "inner_radius_m": inner,
             "outer_radius_m": outer,
         }
 
     primary = surface("primary_mirror")
     secondary = surface("secondary_mirror")
-    focal_value = _even_polynomial_surface(
-        parameters["focal_surface_parameters"], "focal_surface_parameters"
-    )
+    focal_value, focal_scale = polynomial("focal_surface")
     return {
         "primary": primary,
         "secondary": secondary,
         "focal_surface": {
             "coefficient_m": focal_value,
+            "radial_scale_m": focal_scale,
             "inner_radius_m": 0.0,
             "outer_radius_m": None,
         },
@@ -427,6 +467,15 @@ def compile_scene(
             "secondary_mirror_hole_diameter",
             "focal_surface_parameters",
         })
+        consumed.update(
+            name
+            for name in (
+                "primary_mirror_ref_radius",
+                "secondary_mirror_ref_radius",
+                "focal_surface_ref_radius",
+            )
+            if name in parameters
+        )
         primary["aspheric_surface"] = dual_surfaces["primary"]
         secondary = {"kind": "aspheric_mirror", **dual_surfaces["secondary"]}
     camera = None
@@ -655,6 +704,18 @@ def native_surface_rows(scene: dict[str, Any]) -> list[dict[str, Any]]:
 
 def write_native_scene(scene: dict[str, Any], output: Path) -> None:
     """Write the strict, dependency-free native scene surface table."""
+    primary = scene.get("primary", {})
+    secondary = scene.get("secondary", {})
+    focal = scene.get("focal_surface", {})
+    if (
+        isinstance(primary, dict)
+        and isinstance(secondary, dict)
+        and isinstance(focal, dict)
+        and isinstance(primary.get("aspheric_surface"), dict)
+        and secondary.get("kind") == "aspheric_mirror"
+    ):
+        _write_native_axisymmetric_scene(scene, output)
+        return
     rows = native_surface_rows(scene)
     lines = [
         "obdeect-scene-v1",
@@ -688,6 +749,71 @@ def write_native_scene(scene: dict[str, Any], output: Path) -> None:
                 *(f"{value:.17g}" for value in (*centre, *normal, *tangent, row["diameter_m"])),
             ])
         )
+    output.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _write_native_axisymmetric_scene(scene: dict[str, Any], output: Path) -> None:
+    """Write an exact rotationally symmetric SST/SCT optical prescription.
+
+    The source model defines these surfaces as an even polynomial around the
+    telescope optical axis.  This format carries the radius convention and
+    never replaces them with a faceted approximation.
+    """
+    provenance = scene.get("provenance", {})
+    model, version = provenance.get("model"), provenance.get("model_version")
+    content_hash = scene.get("scene_sha256")
+    if (
+        not isinstance(model, str)
+        or not isinstance(version, str)
+        or not isinstance(content_hash, str)
+    ):
+        raise SceneCompileError("native export requires model provenance")
+    if len(content_hash) != 64 or "," in model or "," in version:
+        raise SceneCompileError("native export requires valid model provenance")
+
+    def row(role: str, surface: dict[str, Any]) -> str:
+        coefficients = surface.get("coefficient_m")
+        outer = surface.get("outer_radius_m")
+        inner = surface.get("inner_radius_m", 0.0)
+        scale = surface.get("radial_scale_m", 1.0)
+        if (
+            not isinstance(coefficients, list)
+            or len(coefficients) != 13
+            or not all(
+                isinstance(value, (int, float)) and math.isfinite(value) for value in coefficients
+            )
+            or not all(
+                isinstance(value, (int, float)) and math.isfinite(value)
+                for value in (inner, outer, scale)
+            )
+            or inner < 0
+            or outer <= inner
+            or scale <= 0
+        ):
+            raise SceneCompileError(f"invalid {role} aspheric surface")
+        # The native intersection is z = vertex + polynomial(r), so retain
+        # the physical vertex separately from the zeroed polynomial constant.
+        local = [float(value) for value in coefficients]
+        vertex = local[0]
+        local[0] = 0.0
+        return ",".join([
+            role,
+            *(f"{value:.17g}" for value in (vertex, inner, outer, scale, *local)),
+        ])
+
+    primary = scene["primary"]["aspheric_surface"]
+    secondary = scene["secondary"]
+    focal = scene.get("focal_surface")
+    if not isinstance(focal, dict) or focal.get("outer_radius_m") is None:
+        raise SceneCompileError("native dual-mirror export requires a bounded focal surface")
+    lines = [
+        "obdeect-axisymmetric-scene-v1",
+        f"provenance,{model},{version},{content_hash}",
+        "role,vertex_z_m,inner_radius_m,outer_radius_m,radial_scale_m,c0_m,c1_m,c2_m,c3_m,c4_m,c5_m,c6_m,c7_m,c8_m,c9_m,c10_m,c11_m,c12_m",
+        row("primary", primary),
+        row("secondary", secondary),
+        row("detector", focal),
+    ]
     output.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 

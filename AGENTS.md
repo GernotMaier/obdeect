@@ -55,8 +55,12 @@ python -m unittest discover -s python/tests
 ruff format --check python
 ruff check python
 find cpp -type f \( -name '*.cpp' -o -name '*.hpp' \) -print0 | \
-  xargs -0 clang-format --dry-run --Werror
+xargs -0 clang-format --dry-run --Werror
 ```
+
+Ruff is configured with a 100-character line limit. Run `ruff format` before
+`ruff check`, and manually wrap long strings or boolean expressions that the
+formatter leaves unchanged.
 
 Run `clang-tidy -p build/debug cpp/src/<changed-file>.cpp` for changed C++
 translation units when available, and `pre-commit run --all-files` before

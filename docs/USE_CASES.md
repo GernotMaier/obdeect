@@ -9,7 +9,7 @@ MODEL_VERSION=7.0.0
 
 ## Select and compile a telescope
 
-This creates auditable LST/MST nominal geometry. Use the selected production model; do not substitute an analytic telescope name.
+This creates auditable geometry from the selected production. LST/MST export finite panels; SST/SCT export their exact model-defined rotationally symmetric M1, M2, and curved focal-surface prescriptions.
 
 ```sh
 obdeect-import-simulation-models \
@@ -20,7 +20,7 @@ obdeect-compile-scene \
   --output lst.geometry.json --native-output lst.surfaces.csv
 ```
 
-For an MST, replace `LSTN-design` with `MSTx-FlashCam` or `MSTx-NectarCam`. The native table contains finite panel apertures and the focal boundary. It is not a full telescope assembly.
+For an MST, replace `LSTN-design` with `MSTx-FlashCam` or `MSTx-NectarCam`. For a dual-mirror run, use `SSTS-design` or `SCTS-design`; their export is accepted directly by `obdeect-simtools-raytrace`.
 
 ## Runnable native studies
 
@@ -125,6 +125,6 @@ These requests need geometry or response data that the current native scene form
 | Shadowing versus offset (1D/2D) | Camera housing, masts, baffles, and other obscurer solids. |
 | Throughput versus offset and input spectrum | Mirror/coating response, alignment perturbations, obscurer geometry, and spectral weights. |
 | Full structure-and-ray rendering | Compiled 3D component geometry and per-component interaction records. |
-| Native SST/SCT PSF | M1/M2 segmentation/aspheres, obscurations, curved focal surface, and validation fixtures. |
+| Segmented SST/SCT structure, shadowing, and throughput | Segment placement/alignment, masts, camera housing, baffles, material binding, and validation fixtures. The M1/M2/focal aspheres are exported and traced. |
 
 The existing native structure plot shows only compiled panel centres and the focal boundary. It intentionally does not draw unmodelled hardware.
