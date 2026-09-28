@@ -81,5 +81,14 @@ int main() {
   require(std::abs(laser.front().ray.position_m.x - 1.5) < 1e-12,
           "laser launch plane retains configured transverse origin");
 
+  // T-SRC-014: a pulse preserves any source-specific phase already present
+  // and adds a deterministic emission-time distribution.
+  const auto original_star_time = tilted_star.front().time_ns;
+  auto pulsed_star = tilted_star;
+  require(apply_top_hat_emission_times(pulsed_star, 4.0, 8.0), "valid top-hat pulse");
+  require(std::abs(pulsed_star.front().time_ns - (original_star_time + 4.0 + 8.0 / 256.0)) < 1e-14,
+          "pulse adds start and deterministic width without losing star phase");
+  require(!apply_top_hat_emission_times(pulsed_star, 0.0, -1.0), "negative pulse width is rejected");
+
   std::cout << "source tests passed\n";
 }

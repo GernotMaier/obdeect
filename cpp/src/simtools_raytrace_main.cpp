@@ -11,7 +11,9 @@
 #include <cmath>
 #include <iomanip>
 #include <iostream>
+#include <limits>
 #include <numbers>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -21,9 +23,11 @@ void usage() {
             << "  --scene-file FILE  model-derived obdeect-scene-v1 surface table\n"
             << "  --source star|illuminator|laser  (default: star)\n"
             << "  --photons N --output FILE --field-x-deg D --field-y-deg D\n"
-            << "  --distance-m D --wavelength-nm N[,N...] --divergence-deg D\n"
+            << "  --distance-m D --wavelength-nm N[,N...] --divergence-deg D --panel-id N\n"
             << "  --source-x-m D --source-y-m D --source-z-m D\n"
+            << "  --screen-x-m D --screen-y-m D --screen-z-m D --screen-radius-m D\n"
             << "  --direction-x D --direction-y D --direction-z D  (laser axis)\n"
+            << "  --emission-time-ns D --pulse-width-ns D  (deterministic top-hat pulse)\n"
             << "  --scene-file is required for model-derived CTAO simulations; it accepts general panel geometry.\n"
             << "  Without it, this runs an analytic diagnostic prescription only.\n";
 }
@@ -48,6 +52,10 @@ int main(int argc, char** argv) {
   double divergence_deg = 0.0;
   double source_x_m = 0.0, source_y_m = 0.0, source_z_m = 50.0;
   double direction_x = 0.0, direction_y = 0.0, direction_z = -1.0;
+  double emission_time_ns = 0.0, pulse_width_ns = 0.0;
+  double screen_x_m = 0.0, screen_y_m = 0.0, screen_z_m = 0.0, screen_radius_m = 0.0;
+  bool screen_x_set = false, screen_y_set = false, screen_z_set = false, screen_radius_set = false;
+  std::optional<std::uint32_t> panel_id;
   for (int index = 1; index < argc; ++index) {
     std::string value_string;
     if (value(index, argc, argv, "--telescope", telescope) ||
@@ -65,26 +73,79 @@ int main(int argc, char** argv) {
         parse_positive_size(argv[++index], photons_count)) continue;
     if (std::string{argv[index]} == "--wavelength-nm" && index + 1 < argc &&
         obdeect::parse_wavelengths_nm(argv[++index], wavelengths_nm)) continue;
-    auto number = [&](const char* option, double& target) {
-      return std::string{argv[index]} == option && index + 1 < argc &&
-             parse_finite_double(argv[++index], target);
+    if (std::string{argv[index]} == "--panel-id" && index + 1 < argc) {
+      std::uint32_t parsed{};
+      if (!obdeect::parse_uint32(argv[++index], parsed)) {
+        usage();
+        return 2;
+      }
+      panel_id = parsed;
+      continue;
+    }
+    auto number = [&](const char* option, double& target, bool* provided = nullptr) {
+      if (std::string{argv[index]} != option || index + 1 >= argc ||
+          !parse_finite_double(argv[index + 1], target)) {
+        return false;
+      }
+      ++index;
+      if (provided) *provided = true;
+      return true;
     };
     if (number("--field-x-deg", field_x_deg) || number("--field-y-deg", field_y_deg) ||
         number("--distance-m", distance_m) ||
         number("--divergence-deg", divergence_deg) || number("--source-x-m", source_x_m) ||
         number("--source-y-m", source_y_m) || number("--source-z-m", source_z_m) ||
         number("--direction-x", direction_x) || number("--direction-y", direction_y) ||
-        number("--direction-z", direction_z)) continue;
+        number("--direction-z", direction_z) || number("--emission-time-ns", emission_time_ns) ||
+        number("--pulse-width-ns", pulse_width_ns) ||
+        number("--screen-x-m", screen_x_m, &screen_x_set) ||
+        number("--screen-y-m", screen_y_m, &screen_y_set) ||
+        number("--screen-z-m", screen_z_m, &screen_z_set) ||
+        number("--screen-radius-m", screen_radius_m, &screen_radius_set)) continue;
     usage();
     return 2;
   }
   const auto model = scene_file.empty() ? obdeect::ctao_reference_model(telescope) : std::nullopt;
-  const auto imported_scene = scene_file.empty() ? std::optional<obdeect::CompiledSegmentedScene>{}
-                                                 : obdeect::read_native_scene(scene_file);
+  auto imported_scene = scene_file.empty() ? std::optional<obdeect::CompiledSegmentedScene>{}
+                                           : obdeect::read_native_scene(scene_file);
   if ((!model && !imported_scene) || (source != "star" && source != "illuminator" && source != "laser") ||
-      distance_m <= 0.0 || divergence_deg < 0.0 || divergence_deg >= 90.0) {
+      distance_m <= 0.0 || divergence_deg < 0.0 || divergence_deg >= 90.0 || pulse_width_ns < 0.0 ||
+      (panel_id && !imported_scene) ||
+      ((screen_x_set || screen_y_set || screen_z_set || screen_radius_set) &&
+       !(screen_x_set && screen_y_set && screen_z_set && screen_radius_set)) ||
+      (screen_radius_set && screen_radius_m <= 0.0)) {
     usage();
     return 2;
+  }
+  if (panel_id) {
+    auto& facets = imported_scene->primary_facets;
+    facets.erase(std::remove_if(facets.begin(), facets.end(), [&](const auto& facet) {
+      return facet.id != *panel_id;
+    }), facets.end());
+    if (facets.empty()) {
+      std::cerr << "panel " << *panel_id << " is not present in " << scene_file << '\n';
+      return 2;
+    }
+  }
+  if (screen_x_set) {
+    if (!imported_scene) {
+      std::cerr << "a custom screen requires --scene-file\n";
+      return 2;
+    }
+    std::uint32_t maximum_id = 0;
+    for (const auto& facet : imported_scene->primary_facets) maximum_id = std::max(maximum_id, facet.id);
+    for (const auto& detector : imported_scene->detector_surfaces)
+      maximum_id = std::max(maximum_id, detector.id);
+    if (maximum_id == std::numeric_limits<std::uint32_t>::max()) {
+      std::cerr << "cannot allocate a custom screen ID\n";
+      return 2;
+    }
+    imported_scene->detector_surfaces = {{maximum_id + 1,
+                                          {screen_x_m, screen_y_m, screen_z_m},
+                                          {0.0, 0.0, 1.0},
+                                          2.0 * screen_radius_m,
+                                          obdeect::FacetShape::circle,
+                                          {1.0, 0.0, 0.0}}};
   }
   const double radians_per_degree = std::numbers::pi / 180.0;
   const double pupil_radius = imported_scene
@@ -118,6 +179,10 @@ int main(int argc, char** argv) {
   }
   for (std::size_t index = 0; index < input.size(); ++index)
     input[index].wavelength_nm = wavelengths_nm[index % wavelengths_nm.size()];
+  if (!obdeect::apply_top_hat_emission_times(input, emission_time_ns, pulse_width_ns)) {
+    std::cerr << "invalid emission-time or pulse-width value\n";
+    return 2;
+  }
   std::ofstream output{output_path};
   if (!output) {
     std::cerr << "cannot write " << output_path << '\n';
@@ -187,7 +252,9 @@ int main(int argc, char** argv) {
   }
   if (imported_scene) {
     std::cout << "native scene " << scene_file << ": " << photons_count << " " << source
-              << " photons, detected " << detected << "\n";
+              << " photons, detected " << detected;
+    if (panel_id) std::cout << ", panel " << *panel_id;
+    std::cout << "\n";
   } else {
     std::cout << "reference " << model->identifier << ": " << photons_count << " " << source
               << " photons, detected " << detected << "\n";

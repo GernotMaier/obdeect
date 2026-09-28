@@ -1,66 +1,13 @@
 # Tutorials
 
-Run these commands from the repository root after [building the project](../README.md).
+Use [USE_CASES.md](USE_CASES.md) for the supported commands:
 
-## 1. Explore the reference telescope
+- compile nominal LST/MST geometry selected from `simulation-models`;
+- measure a single-panel 2F image on an explicit test screen;
+- trace stars, nearby illuminators, and lasers;
+- derive PSF, focal-plane, and optical arrival-time products;
+- run full CTAO production studies through `simtools`/`sim_telarray`.
 
-```sh
-obdeect-plot-reference --view structure --telescope reference-mst --output  reference_structure.png
-./build/debug/obdeect-demo-mst --photons 10000 --output reference.csv
-obdeect-plot-reference --input reference.csv --view rays --max-paths 150 --output reference_rays.png
-obdeect-plot-reference --input reference.csv --view focal-plane --bins 80 --output reference_focal.png
-```
+Developer programs `obdeect-demo-mst` and `obdeect-analytic-optics` are not CTAO model simulations. They are useful only for kernel checks and examples.
 
-The structure view has x-z and y-z projections. Rays are coloured by terminal
-status; blue rays reach the focal screen. The focal image contains only
-`detected` rows, weighted by `source_weight × throughput`.
-
-## 2. Change the source
-
-```sh
-./build/debug/obdeect-demo-mst --source star --field-x-deg 0.5 --output off_axis.csv
-./build/debug/obdeect-demo-mst --source illuminator --distance-m 50 --output flasher.csv
-./build/debug/obdeect-demo-mst --source laser --distance-m 50 --divergence-deg 0.1 --output laser.csv
-obdeect-plot-reference --input off_axis.csv --view rays --output off_axis.png
-```
-
-The star is a plane wave. The illuminator is a finite distance point source
-with relative inverse square weights. The laser samples a beam with the given
-angular divergence. All three are artificial calibration sources.
-
-## 3. Compare analytic optical references
-
-```sh
-./build/debug/obdeect-analytic-optics --telescope LST --photons 10000 --output lst.csv
-obdeect-plot-reference --telescope LST --view structure --output lst_outline.png
-obdeect-plot-reference --input lst.csv --telescope LST --view rays --output lst_rays.png
-obdeect-plot-reference --input lst.csv --telescope LST --view focal-plane --output lst_focal.png
-```
-
-`MST` is another tested continuous-mirror baseline. LST/MST structure views
-are optical surface outlines only. SST/SCT outlines are marked unavailable
-until their two mirror geometry is validated.
-
-## 4. Measure a PSF and scan field angle
-
-```sh
-obdeect-psf derive lst.csv --field-x-deg 0 --output lst_psf.json
-obdeect-psf scan --executable ./build/debug/obdeect-demo-mst --photons 10000 \
-  --field-x-deg 0 0.5 1.0 --output-dir out/scan --plot out/scan.png
-```
-
-`derive` reports weighted centroid, R80/D80, throughput, and terminal losses.
-The scan writes one trace per offset and a summary table.
-
-## 5. Inspect a production model
-
-```sh
-obdeect-import-simulation-models --source-root /path/to/simulation-models --model LSTN-design \
-  --version 6.3.0 --output lst.ir.json
-obdeect-compile-scene --input lst.ir.json --source-root /path/to/simulation-models \
-  --output lst.scene.json
-```
-
-The IR hashes selected records and assets. The compiler extracts supported
-mirror and camera geometry and lists unresolved trace requirements. It does
-not produce a trace executable or a validated production model.
+All Python examples use named arguments. Run `--help` before adapting a recipe.

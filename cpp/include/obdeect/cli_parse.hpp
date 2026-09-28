@@ -3,6 +3,7 @@
 #include <charconv>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <locale>
 #include <sstream>
 #include <string>
@@ -14,6 +15,11 @@ namespace obdeect {
 inline bool parse_positive_size(std::string_view text, std::size_t& output) {
   const auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), output);
   return error == std::errc{} && end == text.data() + text.size() && output > 0;
+}
+
+inline bool parse_uint32(std::string_view text, std::uint32_t& output) {
+  const auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), output);
+  return error == std::errc{} && end == text.data() + text.size();
 }
 
 // Floating-point from_chars is unavailable in the libc++ shipped with
