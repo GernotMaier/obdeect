@@ -48,6 +48,16 @@ int main() {
   require(contains_facet_point(circle, {0.0, 0.99, 0.0}) &&
               !contains_facet_point(circle, {1.01, 0.0, 0.0}),
           "circle uses diameter as diameter");
+  const ImportedDetectorSurface square_detector{12, {0.0, 0.0, 2.0}, {0.0, 0.0, 1.0}, 2.0,
+                                                FacetShape::square, {1.0, 0.0, 0.0}};
+  require(contains_detector_point(square_detector, {0.99, 0.99, 2.0}) &&
+              !contains_detector_point(square_detector, {1.01, 0.0, 2.0}),
+          "detector and facet use the same square aperture rule");
+  auto curved = circle;
+  curved.curvature_radius_m = 20.0;
+  const auto curved_hit = intersect_segmented_facet({{0.5, 0.0, 5.0}, {0.0, 0.0, -1.0}}, curved);
+  require(curved_hit && curved_hit->point_m.z < 0.0 && curved_hit->unit_normal.x > 0.0,
+          "spherical panel uses its focal-length curvature and aperture");
 
   // T-SEG-002: the closest finite panel wins, and reflection exposes the
   // supplied panel normal rather than an inferred dish normal.
@@ -113,5 +123,20 @@ int main() {
   invalid_detector.diameter_m = 0.0;
   require(!compile_segmented_scene({provenance, {near, far}, {invalid_detector}}),
           "T-SEG-008: invalid detector geometry fails closed");
+
+  // T-SEG-009: model-provided opaque structure is part of the scene and wins
+  // whenever it is closer than a mirror or detector intersection.
+  const ImportedCylinderObscurer obscurer{30, {0.0, 0.0, 4.0}, {0.0, 0.0, 5.0}, 0.2};
+  const auto obscured_scene = compile_segmented_scene({provenance, {near, far}, {nearer_detector}, {obscurer}});
+  require(obscured_scene.has_value(), "scene with cylinder obscurer compiles");
+  const auto obscured = trace(*obscured_scene, input);
+  require(obscured.photons.status[0] == PhotonStatus::blocked_obscurer &&
+              obscured.photons.surface_id[0] == obscurer.id,
+          "opaque cylinder blocks before primary mirror");
+
+  const SpectralResponse reflectivity{{300.0, 500.0}, {0.7, 0.9}};
+  require(reflectivity.is_valid() && std::abs(*reflectivity.at(400.0) - 0.8) < 1.e-12 &&
+              !reflectivity.at(250.0),
+          "spectral reflectivity interpolates only within declared range");
   std::cout << "segmented scene tests passed\n";
 }

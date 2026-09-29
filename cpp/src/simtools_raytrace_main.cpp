@@ -210,8 +210,12 @@ int main(int argc, char** argv) {
         path.status = obdeect::PhotonStatus::invalid_input;
       } else {
         const obdeect::Ray ray{photon.ray.position_m, *direction};
+        const auto incoming_obscurer = obdeect::intersect_cylinder_obscurers_unchecked(ray, *imported_scene);
         const auto primary_hit = obdeect::intersect_segmented_primary_unchecked(ray, *imported_scene);
-        if (!primary_hit) {
+        if (incoming_obscurer && (!primary_hit || incoming_obscurer->distance_m < primary_hit->distance_m)) {
+          path.status = obdeect::PhotonStatus::blocked_obscurer;
+          path.final_direction = *direction;
+        } else if (!primary_hit) {
           path.status = obdeect::PhotonStatus::missed_primary;
           path.final_direction = *direction;
         } else {
@@ -226,7 +230,14 @@ int main(int argc, char** argv) {
           } else {
             const auto detector_hit = obdeect::intersect_detector_surfaces_unchecked(
                 obdeect::Ray{primary_hit->point_m, *reflected}, *imported_scene);
-            if (!detector_hit) {
+            const obdeect::Ray reflected_ray{primary_hit->point_m, *reflected};
+            const auto outgoing_obscurer =
+                obdeect::intersect_cylinder_obscurers_unchecked(reflected_ray, *imported_scene);
+            if (outgoing_obscurer && (!detector_hit || outgoing_obscurer->distance_m < detector_hit->distance_m)) {
+              path.status = obdeect::PhotonStatus::blocked_obscurer;
+              path.path_length_m += outgoing_obscurer->distance_m;
+              path.final_direction = *reflected;
+            } else if (!detector_hit) {
               path.status = obdeect::PhotonStatus::missed_screen;
               path.final_direction = *reflected;
             } else {
@@ -248,8 +259,30 @@ int main(int argc, char** argv) {
       path = obdeect::trace_ctao_reference(photon.ray, photon.photon_id, *model);
       path.wavelength_nm = photon.wavelength_nm;
     }
+    double throughput = path.status == obdeect::PhotonStatus::detected ? 1.0 : 0.0;
+    if (path.status == obdeect::PhotonStatus::detected && imported_scene && imported_scene->primary_reflectivity) {
+      const auto response = imported_scene->primary_reflectivity->at(photon.wavelength_nm);
+      if (!response) {
+        path.status = obdeect::PhotonStatus::invalid_input;
+        throughput = 0.0;
+      } else {
+        throughput = *response;
+      }
+    }
+    if (path.status == obdeect::PhotonStatus::detected && axisymmetric_scene) {
+      for (const auto* response : {axisymmetric_scene->primary_reflectivity ? &*axisymmetric_scene->primary_reflectivity : nullptr,
+                                   axisymmetric_scene->secondary_reflectivity ? &*axisymmetric_scene->secondary_reflectivity : nullptr}) {
+        if (!response) continue;
+        const auto value = response->at(photon.wavelength_nm);
+        if (!value) {
+          path.status = obdeect::PhotonStatus::invalid_input;
+          throughput = 0.0;
+          break;
+        }
+        throughput *= *value;
+      }
+    }
     detected += path.status == obdeect::PhotonStatus::detected;
-    const double throughput = path.status == obdeect::PhotonStatus::detected ? 1.0 : 0.0;
     output << "obdeect-arrival-v1," << path.photon_id << ',' << source << ',' << photon.wavelength_nm << ',' << photon.time_ns << ',' << photon.weight << ','
            << throughput << ',' << obdeect::to_string(path.status) << ',' << static_cast<int>(path.point_count) << ','
            << path.path_length_m << ',' << path.incidence_primary_deg << ',' << path.incidence_secondary_deg << ','

@@ -193,12 +193,20 @@ cache time. Do not enable a telescope/source workflow until its fixture passes.
 
 The simtools backend selector, container integration, native scene loader,
 incident-angle path and CSV PSF reader exist. The imported LST/MST scene path
-currently traces nominal panel planes and a physical focal boundary. Full
-production equivalence still requires run-specific alignment and roughness,
-secondary and support geometry, obscurers, wavelength-dependent materials,
-and acceptance fixtures for every telescope family.
+traces nominal curved spherical panels, a physical focal boundary, primary
+wavelength response where the model supplies a one-dimensional table, and
+model-provided finite cylindrical obscurers. Full production equivalence still
+requires run-specific alignment and roughness, secondary and noncylindrical
+support geometry, incidence-dependent materials, pixel boundaries, and
+acceptance fixtures for every telescope family.
 
 Claim production compatibility only after LST, MST and SST pass the complete
 ray-tracing, PSF, effective-area/focal-length, source and incidence-angle
 matrix. SCT requires a separate gate. Keep sim_telarray available as the
 default and permanent comparison backend.
+
+The September 2026 five-model nominal smoke check is recorded in
+[CODE_REVIEW.md](CODE_REVIEW.md). SCT exported successfully but its 1,000-ray
+on-axis sample produced no focal hits after M1/M2 intersections. Its
+prescription and frame conventions need a matched reference investigation;
+the smoke check is not a production validation fixture.

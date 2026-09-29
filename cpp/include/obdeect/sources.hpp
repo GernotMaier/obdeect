@@ -91,8 +91,8 @@ inline std::vector<OpticalPhoton> star_photons(std::size_t count, double pupil_r
   const auto positions = fibonacci_pupil_points(count, pupil_radius_m, source.source_plane_z_m);
   photons.reserve(positions.size());
   // Samples on a horizontal launch plane have different phases for an
-  // off-axis plane wave.  Carry that phase as an emission time so translating
-  // the launch plane cannot change arrival-time differences at the pupil.
+  // off-axis plane wave. Points farther along the propagation direction
+  // cross a common wavefront later: t(r) = d dot (r - reference) / c.
   const Vec3 reference{0.0, 0.0, source.source_plane_z_m};
   for (std::size_t index = 0; index < positions.size(); ++index) {
     photons.push_back({{positions[index], *direction}, static_cast<std::uint64_t>(index),

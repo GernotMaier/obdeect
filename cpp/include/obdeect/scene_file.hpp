@@ -21,6 +21,8 @@ struct AxisymmetricScene {
   AxisymmetricMirror primary;
   AxisymmetricMirror secondary;
   AxisymmetricMirror detector;
+  std::optional<SpectralResponse> primary_reflectivity;
+  std::optional<SpectralResponse> secondary_reflectivity;
 };
 
 // Dependency-free interchange format emitted by the Python model adapter.
@@ -80,16 +82,36 @@ inline std::optional<CompiledSegmentedScene> read_native_scene(const std::string
   if (provenance_fields.size() != 4 || provenance_fields[0] != "provenance") return std::nullopt;
   ModelProvenance provenance{provenance_fields[1], provenance_fields[2], provenance_fields[3]};
   if (!has_valid_provenance(provenance)) return std::nullopt;
-  if (!read_line() ||
-      line != "surface_id,role,shape,cx_m,cy_m,cz_m,nx,ny,nz,tx,ty,tz,diameter_m")
+  if (!read_line() || (line != "surface_id,role,shape,cx_m,cy_m,cz_m,nx,ny,nz,tx,ty,tz,diameter_m" &&
+                       line != "surface_id,role,shape,cx_m,cy_m,cz_m,nx,ny,nz,tx,ty,tz,diameter_m,focal_length_m"))
     return std::nullopt;
+  const bool has_focal_length = line.ends_with(",focal_length_m");
 
   std::vector<ImportedFacet> facets;
   std::vector<ImportedDetectorSurface> detectors;
+  std::vector<ImportedCylinderObscurer> obscurers;
+  SpectralResponse primary_reflectivity;
   while (read_line()) {
     if (line.empty()) continue;
     const auto fields = split_scene_fields(line);
-    if (fields.size() != 13) return std::nullopt;
+    if (fields.size() == 3 && fields[0] == "primary_reflectivity") {
+      double wavelength = 0.0, response = 0.0;
+      if (!scene_number(fields[1], wavelength) || !scene_number(fields[2], response)) return std::nullopt;
+      primary_reflectivity.wavelength_nm.push_back(wavelength);
+      primary_reflectivity.response.push_back(response);
+      continue;
+    }
+    if (fields.size() == 9 && fields[0] == "obscurer_cylinder") {
+      std::uint32_t id = 0;
+      if (!scene_uint(fields[1], id)) return std::nullopt;
+      double values[7]{};
+      for (std::size_t index = 0; index < 7; ++index)
+        if (!scene_number(fields[index + 2], values[index])) return std::nullopt;
+      obscurers.push_back({id, {values[0], values[1], values[2]}, {values[3], values[4], values[5]},
+                           values[6]});
+      continue;
+    }
+    if (fields.size() != (has_focal_length ? 14U : 13U)) return std::nullopt;
     std::uint32_t id = 0;
     if (!scene_uint(fields[0], id)) return std::nullopt;
     const auto shape = scene_shape(fields[2]);
@@ -104,7 +126,12 @@ inline std::optional<CompiledSegmentedScene> read_native_scene(const std::string
       // The focal length is only used for import validation. The native
       // segmented kernel traces the explicit plane placement and therefore
       // does not infer a prescription from it.
-      facets.push_back({id, centre, normal, values[9], values[9], *shape, tangent});
+      const double focal_length_m = has_focal_length ? [&] {
+        double value = 0.0;
+        return scene_number(fields[13], value) ? value : std::numeric_limits<double>::quiet_NaN();
+      }() : values[9];
+      facets.push_back({id, centre, normal, values[9], focal_length_m, *shape, tangent,
+                        has_focal_length ? 2.0 * focal_length_m : 0.0});
     } else if (fields[1] == "detector") {
       detectors.push_back({id, centre, normal, values[9], *shape, tangent});
     } else {
@@ -112,8 +139,11 @@ inline std::optional<CompiledSegmentedScene> read_native_scene(const std::string
     }
   }
   if (facets.empty() || detectors.empty()) return std::nullopt;
+  const std::optional<SpectralResponse> reflectivity = primary_reflectivity.wavelength_nm.empty()
+                                                          ? std::nullopt
+                                                          : std::optional{std::move(primary_reflectivity)};
   return compile_segmented_scene(ImportedSegmentedScene{std::move(provenance), std::move(facets),
-                                                         std::move(detectors)});
+                                                         std::move(detectors), std::move(obscurers), reflectivity});
 }
 
 [[nodiscard]] inline std::optional<AxisymmetricScene> read_native_axisymmetric_scene(const std::string& path) {
@@ -134,8 +164,17 @@ inline std::optional<CompiledSegmentedScene> read_native_scene(const std::string
       line != "role,vertex_z_m,inner_radius_m,outer_radius_m,radial_scale_m,c0_m,c1_m,c2_m,c3_m,c4_m,c5_m,c6_m,c7_m,c8_m,c9_m,c10_m,c11_m,c12_m")
     return std::nullopt;
   std::optional<AxisymmetricMirror> primary, secondary, detector;
+  SpectralResponse primary_reflectivity, secondary_reflectivity;
   while (read_line()) {
     const auto fields = split_scene_fields(line);
+    if (fields.size() == 3 && (fields[0] == "primary_reflectivity" || fields[0] == "secondary_reflectivity")) {
+      double wavelength = 0.0, response = 0.0;
+      if (!scene_number(fields[1], wavelength) || !scene_number(fields[2], response)) return std::nullopt;
+      auto& table = fields[0] == "primary_reflectivity" ? primary_reflectivity : secondary_reflectivity;
+      table.wavelength_nm.push_back(wavelength);
+      table.response.push_back(response);
+      continue;
+    }
     if (fields.size() != 18) return std::nullopt;
     double values[17]{};
     for (std::size_t index = 0; index < 17; ++index)
@@ -154,7 +193,12 @@ inline std::optional<CompiledSegmentedScene> read_native_scene(const std::string
     else return std::nullopt;
   }
   if (!primary || !secondary || !detector) return std::nullopt;
-  return AxisymmetricScene{std::move(provenance), *primary, *secondary, *detector};
+  const auto optional_response = [](SpectralResponse response) -> std::optional<SpectralResponse> {
+    return response.wavelength_nm.empty() ? std::nullopt : std::optional{std::move(response)};
+  };
+  return AxisymmetricScene{std::move(provenance), *primary, *secondary, *detector,
+                           optional_response(std::move(primary_reflectivity)),
+                           optional_response(std::move(secondary_reflectivity))};
 }
 
 [[nodiscard]] inline PathRecord trace_axisymmetric_scene(const Ray& input, std::uint64_t photon_id,

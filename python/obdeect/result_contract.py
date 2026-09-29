@@ -63,7 +63,7 @@ _REQUIRED = {
     "path_length_m",
 }
 
-_STATUSES = {
+TERMINAL_STATUSES = frozenset({
     "detected",
     "blocked_camera",
     "blocked_mast",
@@ -74,7 +74,7 @@ _STATUSES = {
     "invalid_input",
     "escaped_scene",
     "interaction_limit",
-}
+})
 
 
 def _number(row: dict[str, str], name: str, path: Path, line: int) -> float:
@@ -125,7 +125,7 @@ def read_arrivals(path: Path) -> list[OpticalArrival]:
             if source_kind not in {"star", "illuminator", "laser"}:
                 raise ArrivalContractError(f"{path}:{line}: invalid source_kind")
             status = row["status"]
-            if status not in _STATUSES:
+            if status not in TERMINAL_STATUSES:
                 raise ArrivalContractError(f"{path}:{line}: invalid status")
             emission_time = _number(row, "emission_time_ns", path, line)
             source_weight = _number(row, "source_weight", path, line)

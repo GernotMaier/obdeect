@@ -50,6 +50,16 @@ int main() {
   const auto tilted_star = star_photons(128, 6.0, {0.02, 0.0, 50.0, 400.0});
   require(tilted_star.front().time_ns != tilted_star.back().time_ns,
           "off-axis star has launch-plane phase times");
+  // A plane perpendicular to the propagation direction is one wavefront.
+  // Propagating every launch sample to it must give the same arrival time.
+  const Vec3 direction = tilted_star.front().ray.direction;
+  const Vec3 reference{0.0, 0.0, 50.0};
+  const double reference_plane = dot(direction, reference);
+  for (const auto& photon : tilted_star) {
+    const double distance = reference_plane - dot(direction, photon.ray.position_m);
+    const double arrival_ns = photon.time_ns + distance / kSpeedOfLightMPerNs;
+    require(std::abs(arrival_ns) < 1e-12, "off-axis star samples share one wavefront");
+  }
 
   // T-SRC-012: a finite illuminator has pupil-dependent direction and 1/r^2 weight.
   const auto illuminator = illuminator_photons(128, 6.0, {{0.0, 0.0, 30.0}, 400.0, 2.0});

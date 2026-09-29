@@ -70,6 +70,8 @@ RAY_TRACING_PARAMETERS = frozenset({
     "focal_surface_ref_radius",
     "camera_config_file",
     "telescope_axis_height",
+    "telescope_obscuration_cylinders",
+    "telescope_obscuration_quadrilaterals",
     "telescope_random_angle",
     "telescope_random_error",
     "telescope_sphere_radius",

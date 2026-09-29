@@ -191,6 +191,97 @@ def parse_simtel_mirror_list(
     return facets
 
 
+def parse_obscuration_cylinders(contents: str) -> list[dict[str, Any]]:
+    """Parse finite opaque cylinders in the documented primary-mirror frame."""
+    header: list[str] | None = None
+    cylinders: list[dict[str, Any]] = []
+    required = {"id", "x1", "y1", "z1", "x2", "y2", "z2", "diameter"}
+    for line_number, source_line in enumerate(contents.splitlines(), start=1):
+        line = source_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        fields = line.split()
+        if header is None:
+            header = fields
+            if not required.issubset(header):
+                raise SceneCompileError("obscuration cylinders lack required columns")
+            continue
+        if len(fields) != len(header):
+            raise SceneCompileError(f"obscuration cylinder line {line_number}: wrong column count")
+        row = dict(zip(header, fields, strict=True))
+        try:
+            values = [float(row[name]) for name in ("x1", "y1", "z1", "x2", "y2", "z2", "diameter")]
+        except ValueError as error:
+            raise SceneCompileError(
+                f"obscuration cylinder line {line_number}: invalid number"
+            ) from error
+        if not all(math.isfinite(value) for value in values) or values[-1] <= 0:
+            raise SceneCompileError(f"obscuration cylinder line {line_number}: invalid geometry")
+        if math.dist(values[:3], values[3:6]) <= 1.0e-12:
+            raise SceneCompileError(f"obscuration cylinder line {line_number}: zero length")
+        cylinders.append({
+            "id": row["id"],
+            "first_endpoint_m": values[:3],
+            "second_endpoint_m": values[3:6],
+            "diameter_m": values[6],
+        })
+    if header is None or not cylinders:
+        raise SceneCompileError("obscuration cylinder table is empty")
+    return cylinders
+
+
+def parse_wavelength_response(contents: str, name: str) -> list[dict[str, float]]:
+    """Read a one-dimensional model response table without discarding angle data."""
+    header: list[str] | None = None
+    response: list[dict[str, float]] = []
+    for line_number, source_line in enumerate(contents.splitlines(), start=1):
+        line = source_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        fields = line.split()
+        if header is None:
+            header = fields
+            if "wavelength" not in header or "reflectivity" not in header:
+                raise SceneCompileError(f"{name} lacks wavelength and reflectivity columns")
+            if "incidence_angle" in header:
+                raise SceneCompileError(f"{name} has incidence-dependent response")
+            continue
+        if len(fields) != len(header):
+            raise SceneCompileError(f"{name} line {line_number}: wrong column count")
+        row = dict(zip(header, fields, strict=True))
+        try:
+            wavelength, value = float(row["wavelength"]), float(row["reflectivity"])
+        except ValueError as error:
+            raise SceneCompileError(f"{name} line {line_number}: invalid response") from error
+        if (
+            not math.isfinite(wavelength)
+            or not math.isfinite(value)
+            or wavelength <= 0
+            or not 0 <= value <= 1
+        ):
+            raise SceneCompileError(f"{name} line {line_number}: invalid response")
+        response.append({"wavelength_nm": wavelength, "response": value})
+    if len(response) < 2 or any(
+        left["wavelength_nm"] > right["wavelength_nm"]
+        for left, right in zip(response, response[1:])
+    ):
+        raise SceneCompileError(f"{name} must have strictly increasing wavelengths")
+    # Some released response tables repeat a wavelength for independent
+    # measurements. A table-driven transport kernel needs one ordinate per
+    # abscissa, so retain their arithmetic mean instead of depending on parser
+    # row order.
+    reduced: list[dict[str, float]] = []
+    samples: list[int] = []
+    for entry in response:
+        if reduced and entry["wavelength_nm"] == reduced[-1]["wavelength_nm"]:
+            samples[-1] += 1
+            reduced[-1]["response"] += (entry["response"] - reduced[-1]["response"]) / samples[-1]
+        else:
+            reduced.append(entry)
+            samples.append(1)
+    return reduced
+
+
 def derive_nominal_single_reflector(
     facets: list[dict[str, Any]], parameters: dict[str, Any]
 ) -> None:
@@ -448,6 +539,21 @@ def compile_scene(
         }
     else:
         raise SceneCompileError("IR has no tracked primary mirror geometry asset")
+    if "telescope_obscuration_cylinders" in verified_assets:
+        primary["cylinder_obscurers"] = parse_obscuration_cylinders(
+            verified_assets["telescope_obscuration_cylinders"].read_text(encoding="utf-8")
+        )
+        consumed.add("telescope_obscuration_cylinders")
+    if "mirror_reflectivity" in verified_assets:
+        try:
+            primary["reflectivity"] = parse_wavelength_response(
+                verified_assets["mirror_reflectivity"].read_text(encoding="utf-8"),
+                "mirror_reflectivity",
+            )
+            consumed.add("mirror_reflectivity")
+        except SceneCompileError as error:
+            if "incidence-dependent response" not in str(error):
+                raise
     secondary = None
     if "secondary_mirror_segmentation" in verified_assets:
         secondary = {
@@ -478,6 +584,16 @@ def compile_scene(
         )
         primary["aspheric_surface"] = dual_surfaces["primary"]
         secondary = {"kind": "aspheric_mirror", **dual_surfaces["secondary"]}
+        if "secondary_mirror_reflectivity" in verified_assets:
+            try:
+                secondary["reflectivity"] = parse_wavelength_response(
+                    verified_assets["secondary_mirror_reflectivity"].read_text(encoding="utf-8"),
+                    "secondary_mirror_reflectivity",
+                )
+                consumed.add("secondary_mirror_reflectivity")
+            except SceneCompileError as error:
+                if "incidence-dependent response" not in str(error):
+                    raise
     camera = None
     nested_assets = {}
     unresolved_references = []
@@ -555,7 +671,17 @@ def compile_scene(
             "run-specific panel alignment and distance are not compiled"
             if nominal_geometry
             else "facet surface normals and alignment are not compiled",
-            "physical detector surfaces, obstructions, and materials remain deferred",
+            "physical detector surfaces and materials remain deferred",
+            *(
+                ["primary incidence-dependent reflectivity remains deferred"]
+                if "mirror_reflectivity" in parameters and "mirror_reflectivity" not in consumed
+                else []
+            ),
+            *(
+                ["quadrilateral obscurers remain deferred"]
+                if "telescope_obscuration_quadrilaterals" in parameters
+                else []
+            ),
             *[f"camera response asset is missing: {name}" for name in unresolved_references],
         ],
         "facet_geometry_evidence": evidence,
@@ -578,11 +704,7 @@ def compile_scene(
         # coordinate transform and active boundary are represented by the
         # native scene format.
         if camera is not None:
-            extent = max(
-                math.hypot(float(pixel["centre_xy_m"][0]), float(pixel["centre_xy_m"][1]))
-                for pixel in camera["pixels"]
-            )
-            compiled_focal_surface["outer_radius_m"] = extent
+            compiled_focal_surface["outer_radius_m"] = _camera_extent_m(camera)
     compiled = {
         "format": "obdeect.compiled-scene.v1",
         "provenance": {
@@ -618,7 +740,34 @@ def require_trace_ready(scene: dict[str, Any]) -> None:
         raise SceneCompileError("scene is not trace-ready: " + "; ".join(blockers))
 
 
-def native_surface_rows(scene: dict[str, Any]) -> list[dict[str, Any]]:
+def _camera_extent_m(camera: dict[str, Any]) -> float:
+    """Bound every known entrance footprint, including its half diameter."""
+    try:
+        radii = {
+            pixel_type["id"]: float(pixel_type["funnel_diameter_m"]) * 0.5
+            for pixel_type in camera.get("pixel_types", [])
+        }
+        if any(not math.isfinite(radius) or radius <= 0 for radius in radii.values()):
+            raise ValueError("invalid pixel entrance radius")
+        extent = 0.0
+        for pixel in camera["pixels"]:
+            x, y = pixel["centre_xy_m"]
+            if radii and pixel.get("type_id") not in radii:
+                raise ValueError("pixel entrance type is undefined")
+            extent = max(
+                extent,
+                math.hypot(float(x), float(y)) + radii.get(pixel.get("type_id"), 0.0),
+            )
+    except (KeyError, IndexError, TypeError, ValueError) as error:
+        raise SceneCompileError("native export found an invalid focal-plane layout") from error
+    if not math.isfinite(extent) or extent <= 0.0:
+        raise SceneCompileError("native export found an invalid focal-plane extent")
+    return extent
+
+
+def native_surface_rows(
+    scene: dict[str, Any],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[tuple[float, float]]]:
     """Return model-derived planar surfaces for the native scene adapter.
 
     The exporter only accepts facets with explicit nominal centres and normals.
@@ -645,6 +794,7 @@ def native_surface_rows(scene: dict[str, Any]) -> list[dict[str, Any]]:
             "centre_m": centre,
             "normal": normal,
             "diameter_m": facet["diameter_m"],
+            "focal_length_m": facet["focal_length_m"],
         })
     camera = scene.get("camera", {})
     # ``parse_simtel_mirror_list`` retains the focal length for every facet;
@@ -667,15 +817,7 @@ def native_surface_rows(scene: dict[str, Any]) -> list[dict[str, Any]]:
     pixels = camera.get("pixels", [])
     if not pixels:
         raise SceneCompileError("native export requires focal-plane layout")
-    try:
-        extent = max(
-            math.hypot(float(pixel["centre_xy_m"][0]), float(pixel["centre_xy_m"][1]))
-            for pixel in pixels
-        )
-    except (KeyError, IndexError, TypeError, ValueError) as error:
-        raise SceneCompileError("native export found an invalid focal-plane layout") from error
-    if not math.isfinite(extent) or extent <= 0.0:
-        raise SceneCompileError("native export found an invalid focal-plane extent")
+    extent = _camera_extent_m(camera)
     rows.append({
         "surface_id": max(row["surface_id"] for row in rows) + 1,
         "role": "detector",
@@ -684,6 +826,35 @@ def native_surface_rows(scene: dict[str, Any]) -> list[dict[str, Any]]:
         "normal": [0.0, 0.0, 1.0],
         "diameter_m": 2.0 * extent,
     })
+    obscurers = scene.get("primary", {}).get("cylinder_obscurers", [])
+    if not isinstance(obscurers, list):
+        raise SceneCompileError("native export found invalid cylinder obscurers")
+    next_surface_id = max(row["surface_id"] for row in rows) + 1
+    native_obscurers = []
+    for obscurer in obscurers:
+        if not isinstance(obscurer, dict):
+            raise SceneCompileError("native export found invalid cylinder obscurer")
+        try:
+            first = [float(value) for value in obscurer["first_endpoint_m"]]
+            second = [float(value) for value in obscurer["second_endpoint_m"]]
+            diameter = float(obscurer["diameter_m"])
+        except (KeyError, TypeError, ValueError) as error:
+            raise SceneCompileError("native export found invalid cylinder obscurer") from error
+        if (
+            len(first) != 3
+            or len(second) != 3
+            or not all(math.isfinite(value) for value in (*first, *second, diameter))
+            or diameter <= 0
+            or math.dist(first, second) <= 1e-12
+        ):
+            raise SceneCompileError("native export found invalid cylinder obscurer")
+        native_obscurers.append({
+            "surface_id": next_surface_id,
+            "first": first,
+            "second": second,
+            "diameter_m": diameter,
+        })
+        next_surface_id += 1
     for row in rows:
         normal = row["normal"]
         # Stable in-plane orientation for polygonal apertures.  Project the
@@ -699,7 +870,31 @@ def native_surface_rows(scene: dict[str, Any]) -> list[dict[str, Any]]:
             tangent = [candidate[index] - projection * normal[index] for index in range(3)]
             tangent_norm = math.sqrt(sum(value * value for value in tangent))
         row["tangent"] = [value / tangent_norm for value in tangent]
-    return rows
+    reflectivity = scene.get("primary", {}).get("reflectivity", [])
+    if not isinstance(reflectivity, list):
+        raise SceneCompileError("native export found invalid primary reflectivity")
+    native_reflectivity = []
+    for entry in reflectivity:
+        if not isinstance(entry, dict):
+            raise SceneCompileError("native export found invalid primary reflectivity")
+        try:
+            wavelength = float(entry["wavelength_nm"])
+            value = float(entry["response"])
+        except (KeyError, TypeError, ValueError) as error:
+            raise SceneCompileError("native export found invalid primary reflectivity") from error
+        if (
+            not math.isfinite(wavelength)
+            or not math.isfinite(value)
+            or wavelength <= 0
+            or not 0 <= value <= 1
+        ):
+            raise SceneCompileError("native export found invalid primary reflectivity")
+        native_reflectivity.append((wavelength, value))
+    if any(
+        left[0] >= right[0] for left, right in zip(native_reflectivity, native_reflectivity[1:])
+    ):
+        raise SceneCompileError("native export found unordered primary reflectivity")
+    return rows, native_obscurers, native_reflectivity
 
 
 def write_native_scene(scene: dict[str, Any], output: Path) -> None:
@@ -716,10 +911,10 @@ def write_native_scene(scene: dict[str, Any], output: Path) -> None:
     ):
         _write_native_axisymmetric_scene(scene, output)
         return
-    rows = native_surface_rows(scene)
+    rows, obscurers, reflectivity = native_surface_rows(scene)
     lines = [
         "obdeect-scene-v1",
-        "surface_id,role,shape,cx_m,cy_m,cz_m,nx,ny,nz,tx,ty,tz,diameter_m",
+        "surface_id,role,shape,cx_m,cy_m,cz_m,nx,ny,nz,tx,ty,tz,diameter_m,focal_length_m",
     ]
     provenance = scene.get("provenance", {})
     model = provenance.get("model")
@@ -747,8 +942,22 @@ def write_native_scene(scene: dict[str, Any], output: Path) -> None:
                 row["role"],
                 row["shape"],
                 *(f"{value:.17g}" for value in (*centre, *normal, *tangent, row["diameter_m"])),
+                f"{row.get('focal_length_m', 0.0):.17g}",
             ])
         )
+    for obscurer in obscurers:
+        lines.append(
+            ",".join([
+                "obscurer_cylinder",
+                str(obscurer["surface_id"]),
+                *(
+                    f"{value:.17g}"
+                    for value in (*obscurer["first"], *obscurer["second"], obscurer["diameter_m"])
+                ),
+            ])
+        )
+    for wavelength, value in reflectivity:
+        lines.append(f"primary_reflectivity,{wavelength:.17g},{value:.17g}")
     output.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
@@ -814,6 +1023,26 @@ def _write_native_axisymmetric_scene(scene: dict[str, Any], output: Path) -> Non
         row("secondary", secondary),
         row("detector", focal),
     ]
+    for role, surface in (("primary", primary), ("secondary", secondary)):
+        response = surface.get("reflectivity", [])
+        if not isinstance(response, list):
+            raise SceneCompileError(f"invalid {role} reflectivity")
+        for entry in response:
+            if not isinstance(entry, dict):
+                raise SceneCompileError(f"invalid {role} reflectivity")
+            try:
+                wavelength = float(entry["wavelength_nm"])
+                value = float(entry["response"])
+            except (KeyError, TypeError, ValueError) as error:
+                raise SceneCompileError(f"invalid {role} reflectivity") from error
+            if (
+                not math.isfinite(wavelength)
+                or not math.isfinite(value)
+                or wavelength <= 0
+                or not 0 <= value <= 1
+            ):
+                raise SceneCompileError(f"invalid {role} reflectivity")
+            lines.append(f"{role}_reflectivity,{wavelength:.17g},{value:.17g}")
     output.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 

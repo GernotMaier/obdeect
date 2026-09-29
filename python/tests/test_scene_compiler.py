@@ -12,6 +12,8 @@ from obdeect.scene_compiler import (
     _dual_reflector_surfaces,
     compile_scene,
     derive_nominal_single_reflector,
+    native_surface_rows,
+    parse_obscuration_cylinders,
     parse_simtel_mirror_list,
     parse_simtel_segmentation,
     require_trace_ready,
@@ -20,6 +22,39 @@ from obdeect.scene_compiler import (
 
 
 class TestSceneCompiler(unittest.TestCase):
+    def test_parses_model_obscuration_cylinders_in_metres(self):
+        cylinders = parse_obscuration_cylinders(
+            "# %ECSV 1.0\nid group x1 y1 z1 x2 y2 z2 diameter\nmast-1 mast 0 0 1 0 0 4 0.2\n"
+        )
+        self.assertEqual(cylinders[0]["id"], "mast-1")
+        self.assertEqual(cylinders[0]["first_endpoint_m"], [0.0, 0.0, 1.0])
+        self.assertEqual(cylinders[0]["diameter_m"], 0.2)
+
+    def test_native_detector_bound_includes_outer_pixel_entrance(self):
+        scene = {
+            "report": {"facet_geometry_evidence": {"normal_status": "nominal_unperturbed"}},
+            "primary": {
+                "facets": [
+                    {
+                        "id": 0,
+                        "shape": "circle",
+                        "diameter_m": 1.0,
+                        "focal_length_m": 16.0,
+                        "nominal_centre_m": [0.0, 0.0, 0.0],
+                        "nominal_normal": [0.0, 0.0, 1.0],
+                    }
+                ]
+            },
+            "camera": {
+                "pixel_types": [{"id": 2, "funnel_diameter_m": 0.12}],
+                "pixels": [{"type_id": 2, "centre_xy_m": [1.0, 0.0]}],
+            },
+            "focal_length_m": 16.0,
+        }
+        rows, _, _ = native_surface_rows(scene)
+        detector = rows[-1]
+        self.assertAlmostEqual(detector["diameter_m"], 2.12)
+
     def test_dual_reflector_surfaces_preserve_si_aspheres_and_holes(self):
         coefficient = {"value": [0.0, 0.01], "unit": ["cm", "cm"]}
         parameters = {

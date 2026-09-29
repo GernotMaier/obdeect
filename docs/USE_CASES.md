@@ -9,7 +9,10 @@ MODEL_VERSION=7.0.0
 
 ## Select and compile a telescope
 
-This creates auditable geometry from the selected production. LST/MST export finite panels; SST/SCT export their exact model-defined rotationally symmetric M1, M2, and curved focal-surface prescriptions.
+This creates auditable geometry from the selected production. LST/MST export
+finite planar panels; SST/SCT export their model-defined rotationally symmetric
+M1, M2, and curved focal-surface prescriptions. These nominal surfaces still
+need the production acceptance comparisons described below.
 
 ```sh
 obdeect-import-simulation-models \
@@ -20,7 +23,10 @@ obdeect-compile-scene \
   --output lst.geometry.json --native-output lst.surfaces.csv
 ```
 
-For an MST, replace `LSTN-design` with `MSTx-FlashCam` or `MSTx-NectarCam`. For a dual-mirror run, use `SSTS-design` or `SCTS-design`; their export is accepted directly by `obdeect-simtools-raytrace`.
+For an MST, replace `LSTN-design` with `MSTx-FlashCam` or `MSTx-NectarCam`.
+For a dual-mirror run, use `SSTS-design`. `SCTS-design` also exports, but its
+current native on-axis smoke trace misses the focal surface; do not use it for
+a PSF until its prescription and frame conventions are resolved.
 
 ## Runnable native studies
 

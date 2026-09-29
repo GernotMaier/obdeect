@@ -1,6 +1,7 @@
 #include "obdeect/scene_file.hpp"
 
 #include <cassert>
+#include <cmath>
 #include <cstdio>
 #include <fstream>
 
@@ -10,12 +11,17 @@ int main() {
     std::ofstream output(path);
     output << "obdeect-scene-v1\n"
               "provenance,LSTN-design,7.0.0,aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n"
-              "surface_id,role,shape,cx_m,cy_m,cz_m,nx,ny,nz,tx,ty,tz,diameter_m\n"
-              "0,mirror,circle,0,0,0,0,0,1,1,0,0,1\n"
-              "1,detector,circle,0,0,10,0,0,1,1,0,0,1\n";
+              "surface_id,role,shape,cx_m,cy_m,cz_m,nx,ny,nz,tx,ty,tz,diameter_m,focal_length_m\n"
+              "0,mirror,circle,0,0,0,0,0,1,1,0,0,1,10\n"
+              "1,detector,circle,0,0,10,0,0,1,1,0,0,1,0\n"
+              "obscurer_cylinder,2,0,0,2,0,0,3,0.1\n"
+              "primary_reflectivity,300,0.8\n"
+              "primary_reflectivity,500,0.9\n";
   }
   const auto scene = obdeect::read_native_scene(path);
-  if (!scene || scene->primary_facets.size() != 1 || scene->detector_surfaces.size() != 1) {
+  if (!scene || scene->primary_facets.size() != 1 || scene->detector_surfaces.size() != 1 ||
+      scene->cylinder_obscurers.size() != 1 || !scene->primary_reflectivity ||
+      std::abs(*scene->primary_reflectivity->at(400) - 0.85) > 1.e-12) {
     std::remove(path);
     return 1;
   }

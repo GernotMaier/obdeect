@@ -63,7 +63,14 @@ struct TraceResult {
       continue;
     }
     const Ray ray{input.position_m[index], *direction};
+    const auto incoming_obscurer = intersect_cylinder_obscurers_unchecked(ray, scene);
     const auto hit = intersect_segmented_primary_unchecked(ray, scene);
+    if (incoming_obscurer && (!hit || incoming_obscurer->distance_m < hit->distance_m)) {
+      result.photons.status[index] = PhotonStatus::blocked_obscurer;
+      result.photons.surface_id[index] = incoming_obscurer->surface_id;
+      result.summary.add(PhotonStatus::blocked_obscurer, input.weight[index]);
+      continue;
+    }
     if (!hit) {
       result.photons.status[index] = PhotonStatus::missed_primary;
       result.summary.add(PhotonStatus::missed_primary, input.weight[index]);
@@ -80,7 +87,18 @@ struct TraceResult {
     result.photons.optical_path_m[index] = hit->distance_m;
     result.photons.time_ns[index] += hit->distance_m / kSpeedOfLightMPerNs;
     const Ray reflected_ray{hit->point_m, *reflected};
+    const auto outgoing_obscurer = intersect_cylinder_obscurers_unchecked(reflected_ray, scene);
     const auto detector_hit = intersect_detector_surfaces_unchecked(reflected_ray, scene);
+    if (outgoing_obscurer && (!detector_hit || outgoing_obscurer->distance_m < detector_hit->distance_m)) {
+      result.photons.position_m[index] =
+          reflected_ray.position_m + reflected_ray.direction * outgoing_obscurer->distance_m;
+      result.photons.optical_path_m[index] += outgoing_obscurer->distance_m;
+      result.photons.time_ns[index] += outgoing_obscurer->distance_m / kSpeedOfLightMPerNs;
+      result.photons.surface_id[index] = outgoing_obscurer->surface_id;
+      result.photons.status[index] = PhotonStatus::blocked_obscurer;
+      result.summary.add(PhotonStatus::blocked_obscurer, input.weight[index]);
+      continue;
+    }
     if (!detector_hit) {
       result.photons.status[index] = PhotonStatus::no_detector;
       result.summary.add(PhotonStatus::no_detector, input.weight[index]);
@@ -89,7 +107,15 @@ struct TraceResult {
     result.photons.position_m[index] = detector_hit->point_m;
     result.photons.optical_path_m[index] += detector_hit->distance_m;
     result.photons.time_ns[index] += detector_hit->distance_m / kSpeedOfLightMPerNs;
-    result.photons.weight[index] = input.weight[index];
+    const auto reflectivity = scene.primary_reflectivity
+                                  ? scene.primary_reflectivity->at(input.wavelength_nm[index])
+                                  : std::optional<double>{1.0};
+    if (!reflectivity) {
+      result.photons.status[index] = PhotonStatus::invalid_input;
+      result.summary.add(PhotonStatus::invalid_input, input.weight[index]);
+      continue;
+    }
+    result.photons.weight[index] = input.weight[index] * *reflectivity;
     result.photons.surface_id[index] = detector_hit->surface_id;
     result.photons.status[index] = PhotonStatus::detected;
     result.summary.add(PhotonStatus::detected, input.weight[index]);
