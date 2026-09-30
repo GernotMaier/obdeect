@@ -40,7 +40,7 @@ workflow runs; it is not a physical comparison against `sim_telarray`.
 | MSTx-FlashCam | Succeeded | 686 | Succeeded |
 | MSTx-NectarCam | Succeeded | 684 | Succeeded |
 | SSTS-design | Succeeded | 123 | Succeeded |
-| SCTS-design | Succeeded | 0 | Failed with no detected optical weight |
+| SCTS-design | Succeeded | 0 | Failed with no detected focal-plane photons |
 
 An additional SCT hit count found 794 M1 hits and 794 M2 hits, but no focal
 hits. Sampled post-M2 rays crossed the focal vertex plane outside the exported
@@ -58,7 +58,7 @@ and nonempty `trace_blockers`; the production gate rejects them as designed.
 | `ctao_main.cpp`, `ctao_trace.hpp`, `ctao_models.hpp` | Analytic developer command; also the no-optical model branch of the simtools tracer | Duplicate analytic route. Consolidate when the public command no longer needs that branch. |
 | `optical model.hpp` and its `trace.hpp` overload | Generic nonsequential kernel and tests | No model importer or public command currently supplies it. Do not advertise its material/obscurer capabilities as active CTAO support. |
 | `materials.hpp`, `atmosphere.hpp`, EventIO readers | Primitive tests and optional adapters | Not bound into the model-derived native CLI. Their presence does not imply coating, atmosphere, or EventIO support in that workflow. |
-| `analysis.py`, `result_contract.py`, `plotting.py` | Three separate CSV consumers | Keep one versioned arrival contract and migrate consumers to it before changing the output schema. PSF analysis now rejects missing or impossible optical weights. |
+| `analysis.py`, `result_contract.py`, `plotting.py` | Three separate CSV consumers | Keep one versioned arrival contract and migrate consumers to it before changing the output schema. PSF analysis now rejects missing or impossible photon optical responses. |
 
 The segmented primary and detector had duplicate aperture-containment code.
 They now use one primitive; circular containment uses squared distance. The

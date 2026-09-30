@@ -60,7 +60,7 @@ phase.
 - The versioned `obdeect-arrival-v1` contract validates CSV records before
   analysis: finite SI scalars, non-negative weights, bounded throughput,
   terminal status, path length and interaction points. It exposes detected
-  focal coordinates and optical weights.
+  focal coordinates and per-photon optical responses.
 - A native `obdeect-simtools-raytrace` CLI now emits that contract for star,
   finite-distance illuminator and laser inputs, with telescope, field,
   distance, wavelength, source-position and divergence options. Its records
