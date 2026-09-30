@@ -3,6 +3,24 @@
 Example use cases for the `obdeect` ray tracing package.
 
 Requires a simulation models as defined in the [CTAO simulation models repository](https://gitlab.cta-observatory.org/cta-science/simulations/simulation-model/simulation-models).
+All examples use named arguments; run `--help` before adapting a recipe.
+
+## Developer demo
+
+This is a runnable kernel demonstration, not a CTAO telescope model. It traces
+artificial photons through a simple MST-inspired spherical mirror, camera
+shadow, and four mast supports. Use it to inspect the basic ray-tracing output
+without downloading a production model.
+
+```sh
+obdeect-demo-mst --source star --field-x-deg 0.5 --field-y-deg -0.2 \
+  --wavelength-nm 400 --photons 10000 --output demo-mst.csv
+obdeect-plot-reference --input demo-mst.csv --view focal-plane \
+  --output demo-mst-focal-plane.png
+```
+
+`obdeect-analytic-optics` is likewise a developer diagnostic. For imported
+CTAO production geometry, use the compiled optical-model recipes below.
 
 The following two environment variables might be useful:
 

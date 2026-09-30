@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <iostream>
+#include <numbers>
 
 namespace {
 
@@ -53,12 +54,25 @@ int main() {
   // A plane perpendicular to the propagation direction is one wavefront.
   // Propagating every launch sample to it must give the same arrival time.
   const Vec3 direction = tilted_star.front().ray.direction;
-  const Vec3 reference{0.0, 0.0, 50.0};
+  const Vec3 reference{50.0 * direction.x / direction.z, 50.0 * direction.y / direction.z, 50.0};
   const double reference_plane = dot(direction, reference);
   for (const auto& photon : tilted_star) {
     const double distance = reference_plane - dot(direction, photon.ray.position_m);
     const double arrival_ns = photon.time_ns + distance / kSpeedOfLightMPerNs;
     require(std::abs(arrival_ns) < 1e-12, "off-axis star samples share one wavefront");
+  }
+
+  // T-SRC-011c: field angle changes the direction, not the telescope that
+  // receives the bundle.  Even a distant source must keep its pupil samples
+  // on the primary aperture rather than shifting them by distance*tan(angle).
+  const auto distant_star = star_photons(128, 6.0, {0.5 * std::numbers::pi / 180.0, -0.2 * std::numbers::pi / 180.0,
+                                                     10000.0, 400.0});
+  require(distant_star.size() == 128, "distant off-axis star count");
+  for (const auto& photon : distant_star) {
+    const double distance = -photon.ray.position_m.z / photon.ray.direction.z;
+    const Vec3 primary_plane_hit = photon.ray.position_m + photon.ray.direction * distance;
+    require(std::hypot(primary_plane_hit.x, primary_plane_hit.y) <= 6.1,
+            "distant off-axis star remains on telescope pupil");
   }
 
   // T-SRC-012: a finite illuminator has pupil-dependent direction and 1/r^2 weight.

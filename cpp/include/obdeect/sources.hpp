@@ -88,12 +88,24 @@ inline std::vector<OpticalPhoton> star_photons(std::size_t count, double pupil_r
   const auto direction = normalised_checked(
       {std::tan(source.field_x_rad), std::tan(source.field_y_rad), -1.0});
   if (!direction) return photons;
-  const auto positions = fibonacci_pupil_points(count, pupil_radius_m, source.source_plane_z_m);
+  if (!std::isfinite(source.source_plane_z_m) || std::abs(direction->z) <= kEpsilon) return photons;
+  // Aim the centre of the parallel bundle at the telescope optical axis.  A
+  // horizontal launch plane at z alone would displace an off-axis star by
+  // z*tan(field angle) at the primary; at astronomical source distances that
+  // misses the telescope completely.
+  const Vec3 launch_centre{source.source_plane_z_m * direction->x / direction->z,
+                           source.source_plane_z_m * direction->y / direction->z,
+                           source.source_plane_z_m};
+  auto positions = fibonacci_pupil_points(count, pupil_radius_m, source.source_plane_z_m);
+  for (auto& position : positions) {
+    position.x += launch_centre.x;
+    position.y += launch_centre.y;
+  }
   photons.reserve(positions.size());
   // Samples on a horizontal launch plane have different phases for an
   // off-axis plane wave. Points farther along the propagation direction
   // cross a common wavefront later: t(r) = d dot (r - reference) / c.
-  const Vec3 reference{0.0, 0.0, source.source_plane_z_m};
+  const Vec3 reference = launch_centre;
   for (std::size_t index = 0; index < positions.size(); ++index) {
     photons.push_back({{positions[index], *direction}, static_cast<std::uint64_t>(index),
                        source.wavelength_nm, dot(*direction, positions[index] - reference) /
