@@ -1,6 +1,8 @@
 """Dependency-free checks for the optional path-visualization data reader."""
 
 import importlib.util
+import json
+import math
 import os
 import subprocess
 import sys
@@ -55,6 +57,22 @@ class TestTracePathReader(unittest.TestCase):
             path.write_text(csv_text)
             hits = list(PLOT.focal_plane_hits(path))
         self.assertEqual(hits, [(0.3, 0.4, 1.0)])
+
+    def test_compiled_model_sets_full_focal_plane_extent(self):
+        model = {
+            "trace_model": {
+                "kind": "segmented",
+                "detector_surfaces": [
+                    {"centre_m": [0.2, -0.3, 28.0], "diameter_m": 2.0},
+                    {"centre_m": [0.0, 0.0, 28.0], "diameter_m": 1.0},
+                ],
+            }
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "model.json"
+            path.write_text(json.dumps(model))
+            extent = PLOT.compiled_focal_plane_extent(path)
+        self.assertAlmostEqual(extent, math.hypot(0.2, -0.3) + 1.0)
 
     def test_rejects_invalid_detected_focal_plane_data(self):
         csv_text = "status,point_count,x0_m,y0_m\ndetected,1,nan,0\n"

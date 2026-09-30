@@ -22,6 +22,8 @@ obdeect-plot-reference --input demo-mst.csv --view focal-plane \
 `obdeect-analytic-optics` is likewise a developer diagnostic. For imported
 CTAO production geometry, use the compiled optical-model recipes below.
 
+## Realistic CTAO telescope studies
+
 The following two environment variables might be useful:
 
 ```sh
@@ -29,7 +31,7 @@ export OBDEECT_SIMULATION_MODELS_PATH=../simulation-models
 export OBDEECT_SIMULATION_MODELS_VERSION=7.0.0
 ```
 
-## Define the optical model
+### Define the optical model
 
 The following command reads the simulation model and
 compiles the optical model required by `obdeect` for the ray tracing.
@@ -47,7 +49,17 @@ obdeect-compile-optical-model \
   --output lst.optical-model.json
 ```
 
-## Runnable native studies
+### Plot the compiled optical model
+
+This renders the explicit primary-panel centres and the compiled focal
+boundary from the JSON optical model. It does not add camera supports,
+windows, or other structure absent from the selected model.
+
+```sh
+obdeect-plot-reference --view compiled-structure \
+  --optical-model-json lst.optical-model.json \
+  --output lst-optical-model-structure.png
+```
 
 ### Single-panel 2F test stand
 
@@ -73,7 +85,8 @@ obdeect-simtools-raytrace --optical-model lst.optical-model.json --source star \
   --field-x-deg 0.5 --field-y-deg -0.2 --wavelength-nm 300,400,500 \
   --photons 100000 --output lst-star.csv
 obdeect-psf derive --input lst-star.csv --output lst-star-psf.json
-obdeect-plot-reference --input lst-star.csv --view focal-plane --output lst-star-psf.png
+obdeect-plot-reference --input lst-star.csv --view focal-plane \
+  --optical-model-json lst.optical-model.json --output lst-star-psf.png
 ```
 
 ### Nearby illuminator, laser, and arrival time
@@ -152,4 +165,4 @@ These requests need geometry or response data that the current compiled optical 
 | Full structure-and-ray rendering | Compiled 3D component geometry and per-component interaction records. |
 | Segmented SST/SCT structure, shadowing, and throughput | Segment placement/alignment, masts, camera housing, baffles, material binding, and validation fixtures. The M1/M2/focal aspheres are exported and traced. |
 
-The existing native structure plot shows only compiled panel centres and the focal boundary. It intentionally does not draw unmodelled hardware.
+The existing native structure plot shows only compiled panel centres and the focal boundary. It intentionally does not draw unmodeled hardware.

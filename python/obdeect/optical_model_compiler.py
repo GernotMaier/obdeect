@@ -338,14 +338,25 @@ def derive_nominal_single_reflector(
             z = file_z - offset
         else:
             z = focal_length - math.sqrt(distance * distance - radius * radius) - offset
-        inclination = 0.5 * math.asin(radius / distance)
-        if radius:
-            nx = -math.sin(inclination) * x / radius
-            ny = -math.sin(inclination) * y / radius
-        else:
-            nx = ny = 0.0
+        # A nominal facet normal is the bisector of the reverse incident
+        # direction (+z for a star) and the direction from the facet centre
+        # to the focal point.  Derive it from the final placement, including
+        # mirror_offset, so every chief ray reaches the compiled focal plane.
+        focal_distance = math.hypot(radius, focal_length - z)
+        if not math.isfinite(focal_distance) or focal_distance <= 0.0:
+            raise OpticalModelCompileError("facet has no finite focal-point direction")
+        outgoing_x = -x / focal_distance
+        outgoing_y = -y / focal_distance
+        outgoing_z = (focal_length - z) / focal_distance
+        normal_length = math.sqrt(
+            outgoing_x * outgoing_x + outgoing_y * outgoing_y + (outgoing_z + 1.0) ** 2
+        )
+        if not math.isfinite(normal_length) or normal_length <= 0.0:
+            raise OpticalModelCompileError("facet has no finite nominal normal")
+        nx = outgoing_x / normal_length
+        ny = outgoing_y / normal_length
         facet["nominal_centre_m"] = [x, y, z]
-        facet["nominal_normal"] = [nx, ny, math.cos(inclination)]
+        facet["nominal_normal"] = [nx, ny, (outgoing_z + 1.0) / normal_length]
 
 
 def _even_polynomial_surface(parameter: dict[str, Any], name: str) -> list[float]:

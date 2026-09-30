@@ -126,9 +126,9 @@ class TestOpticalModelCompiler(unittest.TestCase):
         with self.assertRaisesRegex(OpticalModelCompileError, "trace-model binding is unavailable"):
             require_trace_ready({"report": {"trace_blockers": []}})
 
-    def test_nominal_panel_normal_and_dish_position_follow_simtel_formula(self):
-        # A panel at r=2 m on a 16 m DC dish has a positive sag and
-        # an inward-tilted normal; the signed mirror offset is retained.
+    def test_nominal_panel_normal_points_chief_ray_at_focal_plane(self):
+        # A panel at r=2 m on a 16 m DC dish retains its signed placement and
+        # its nominal normal bisects the incident ray and focal-point ray.
         parameters = {
             "focal_length": {"value": 1600, "unit": "cm"},
             "dish_shape_length": {"value": 1600, "unit": "cm"},
@@ -138,10 +138,13 @@ class TestOpticalModelCompiler(unittest.TestCase):
         facets = [{"centre_m": [2.0, 0.0, 0.0]}]
         derive_nominal_single_reflector(facets, parameters)
         sag = 16 - math.sqrt(16**2 - 2**2)
-        inclination = 0.5 * math.atan2(2, 16 - sag)
-        self.assertAlmostEqual(facets[0]["nominal_centre_m"][2], sag + 1)
-        self.assertAlmostEqual(facets[0]["nominal_normal"][0], -math.sin(inclination))
-        self.assertAlmostEqual(facets[0]["nominal_normal"][2], math.cos(inclination))
+        centre_z = sag + 1
+        self.assertAlmostEqual(facets[0]["nominal_centre_m"][2], centre_z)
+        focal_distance = math.hypot(2, 16 - centre_z)
+        outgoing = [-2 / focal_distance, 0.0, (16 - centre_z) / focal_distance]
+        normal_length = math.hypot(outgoing[0], outgoing[2] + 1)
+        self.assertAlmostEqual(facets[0]["nominal_normal"][0], outgoing[0] / normal_length)
+        self.assertAlmostEqual(facets[0]["nominal_normal"][2], (outgoing[2] + 1) / normal_length)
 
     def make_ir(self, root: Path, *, mirror_contents: str | None = None, focal_cm=1600.0) -> dict:
         asset = root / "model_parameters/Files/mirrors.dat"

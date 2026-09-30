@@ -75,6 +75,29 @@ def focal_plane_hits(path: Path):
             )
 
 
+def compiled_focal_plane_extent(path: Path) -> float:
+    """Return the active focal-plane radius carried by a compiled model."""
+    try:
+        optical_model = json.loads(path.read_text(encoding="utf-8"))
+        trace_model = optical_model["trace_model"]
+        if trace_model["kind"] == "segmented":
+            surfaces = trace_model["detector_surfaces"]
+            extent = max(
+                math.hypot(float(surface["centre_m"][0]), float(surface["centre_m"][1]))
+                + float(surface["diameter_m"]) * 0.5
+                for surface in surfaces
+            )
+        elif trace_model["kind"] == "axisymmetric":
+            extent = float(trace_model["detector"]["outer_radius_m"])
+        else:
+            raise ValueError("unsupported trace-model kind")
+    except (KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
+        raise ValueError(f"{path}: invalid compiled focal-plane geometry") from error
+    if not math.isfinite(extent) or extent <= 0.0:
+        raise ValueError(f"{path}: invalid compiled focal-plane extent")
+    return extent
+
+
 TELESCOPE_NAMES = ("reference-mst", "LST", "MST", "SST", "SCT")
 
 
@@ -237,7 +260,9 @@ def draw_rays(plt, path: Path, telescope: str, output: Path, max_paths: int):
     plt.close(figure)
 
 
-def draw_focal_plane(plt, path: Path, output: Path, bins: int, telescope: str):
+def draw_focal_plane(
+    plt, path: Path, output: Path, bins: int, telescope: str, optical_model_path: Path | None = None
+):
     """Render surviving-photon intensity and its Cartesian projections."""
     import numpy as np
 
@@ -246,8 +271,11 @@ def draw_focal_plane(plt, path: Path, output: Path, bins: int, telescope: str):
         raise SystemExit("No surviving photons reached the focal plane in this CSV")
     values = np.asarray(samples, dtype=float)
     x, y, weights = values.T
-    extent = max(float(np.max(np.abs(x))), float(np.max(np.abs(y))), 1.0e-6)
-    extent *= 1.05
+    extent = (
+        compiled_focal_plane_extent(optical_model_path)
+        if optical_model_path is not None
+        else max(float(np.max(np.abs(x))), float(np.max(np.abs(y))), 1.0e-6) * 1.05
+    )
 
     figure = plt.figure(figsize=(9, 8))
     grid = figure.add_gridspec(
@@ -282,13 +310,19 @@ def draw_focal_plane(plt, path: Path, output: Path, bins: int, telescope: str):
     plt.close(figure)
 
 
-def draw_focal_plane_svg(path: Path, output: Path, bins: int, telescope: str):
+def draw_focal_plane_svg(
+    path: Path, output: Path, bins: int, telescope: str, optical_model_path: Path | None = None
+):
     """Write a weighted PSF map and measured summary without plotting dependencies."""
     from obdeect.analysis import analyse_trace_csv
 
     samples = list(focal_plane_hits(path))
     result = analyse_trace_csv(path)
-    extent = max(max(abs(x), abs(y)) for x, y, _ in samples) * 1.05
+    extent = (
+        compiled_focal_plane_extent(optical_model_path)
+        if optical_model_path is not None
+        else max(max(abs(x), abs(y)) for x, y, _ in samples) * 1.05
+    )
     extent = max(extent, 1e-6)
     histogram = [[0.0] * bins for _ in range(bins)]
     for x, y, weight in samples:
@@ -362,7 +396,7 @@ def main():
     parser.add_argument(
         "--optical-model-json",
         type=Path,
-        help="compiled optical model JSON for --view compiled-structure",
+        help="compiled optical model JSON for compiled-structure or focal-plane views",
     )
     parser.add_argument(
         "--telescope",
@@ -381,7 +415,9 @@ def main():
         parser.error("--optical-model-json is required for --view compiled-structure")
 
     if args.focal_plane and args.output.suffix.lower() == ".svg":
-        draw_focal_plane_svg(args.input, args.output, args.bins, args.telescope)
+        draw_focal_plane_svg(
+            args.input, args.output, args.bins, args.telescope, args.optical_model_json
+        )
         return
 
     try:
@@ -401,7 +437,9 @@ def main():
         draw_compiled_structure(plt, args.optical_model_json, args.output)
         return
     if args.focal_plane or args.view == "focal-plane":
-        draw_focal_plane(plt, args.input, args.output, args.bins, args.telescope)
+        draw_focal_plane(
+            plt, args.input, args.output, args.bins, args.telescope, args.optical_model_json
+        )
         return
     draw_rays(plt, args.input, args.telescope, args.output, args.max_paths)
 
