@@ -18,7 +18,7 @@ from typing import Any
 
 
 class ProductionValidationError(ValueError):
-    """A production scene or comparison input does not meet the validation contract."""
+    """A production optical model or comparison input does not meet the validation contract."""
 
 
 _REQUIRED_COLUMNS = (
@@ -94,28 +94,30 @@ def _maximum(values: list[float]) -> float:
     return max(values) if values else 0.0
 
 
-def validate_scene(scene: dict[str, Any], telescope_family: str) -> None:
-    """Require the compiled scene to contain the physical model for its family."""
-    report = scene.get("report")
+def validate_optical_model(optical_model: dict[str, Any], telescope_family: str) -> None:
+    """Require the compiled optical model to contain the physical model for its family."""
+    report = optical_model.get("report")
     if not isinstance(report, dict):
-        raise ProductionValidationError("compiled scene lacks report")
+        raise ProductionValidationError("compiled optical model lacks report")
     if report.get("trace_blockers"):
         raise ProductionValidationError(
-            "compiled scene is not production ready: " + "; ".join(report["trace_blockers"])
+            "compiled optical model is not production ready: " + "; ".join(report["trace_blockers"])
         )
     if report.get("native_trace_ready") is not True:
-        raise ProductionValidationError("compiled scene has no production native binding")
-    primary = scene.get("primary", {})
+        raise ProductionValidationError("compiled optical model has no production native binding")
+    primary = optical_model.get("primary", {})
     if not isinstance(primary, dict) or not primary.get("facets"):
-        raise ProductionValidationError("compiled scene lacks finite primary facets")
+        raise ProductionValidationError("compiled optical model lacks finite primary facets")
     if telescope_family == "SST":
-        secondary = scene.get("secondary", {})
+        secondary = optical_model.get("secondary", {})
         if not isinstance(secondary, dict) or not secondary.get("facets"):
-            raise ProductionValidationError("SST production scene lacks finite secondary facets")
-    if not isinstance(scene.get("detector"), dict):
-        raise ProductionValidationError("compiled scene lacks a physical detector surface")
-    if not isinstance(scene.get("materials"), dict):
-        raise ProductionValidationError("compiled scene lacks material bindings")
+            raise ProductionValidationError(
+                "SST production optical model lacks finite secondary facets"
+            )
+    if not isinstance(optical_model.get("detector"), dict):
+        raise ProductionValidationError("compiled optical model lacks a physical detector surface")
+    if not isinstance(optical_model.get("materials"), dict):
+        raise ProductionValidationError("compiled optical model lacks material bindings")
 
 
 def compare(
@@ -206,9 +208,11 @@ def compare(
 
 
 def main() -> None:
-    """Validate one production scene and a normalised sim_telarray comparison."""
+    """Validate one production optical model and a normalised sim_telarray comparison."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--scene", type=Path, required=True, help="compiled obdeect scene JSON")
+    parser.add_argument(
+        "--optical-model", type=Path, required=True, help="compiled obdeect optical model JSON"
+    )
     parser.add_argument("--telescope-family", choices=("LST", "MST", "SST"), required=True)
     parser.add_argument(
         "--obdeect-arrivals", type=Path, required=True, help="normalised obdeect comparison CSV"
@@ -225,11 +229,11 @@ def main() -> None:
     parser.add_argument("--output", type=Path, required=True, help="validation summary JSON")
     args = parser.parse_args()
     try:
-        scene = json.loads(args.scene.read_text(encoding="utf-8"))
+        optical_model = json.loads(args.optical_model.read_text(encoding="utf-8"))
         tolerances = json.loads(args.tolerances.read_text(encoding="utf-8"))
-        if not isinstance(scene, dict) or not isinstance(tolerances, dict):
-            raise ProductionValidationError("scene and tolerances must be JSON objects")
-        validate_scene(scene, args.telescope_family)
+        if not isinstance(optical_model, dict) or not isinstance(tolerances, dict):
+            raise ProductionValidationError("optical model and tolerances must be JSON objects")
+        validate_optical_model(optical_model, args.telescope_family)
         summary = compare(
             read_comparison_table(args.obdeect_arrivals),
             read_comparison_table(args.simtel_arrivals),

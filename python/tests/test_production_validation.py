@@ -9,21 +9,21 @@ from obdeect.production_validation import (
     ProductionValidationError,
     compare,
     read_comparison_table,
-    validate_scene,
+    validate_optical_model,
 )
 
 
 class TestProductionValidation(unittest.TestCase):
-    def _scene(self, *, sst=False):
-        scene = {
+    def _optical_model(self, *, sst=False):
+        optical_model = {
             "report": {"native_trace_ready": True, "trace_blockers": []},
             "primary": {"facets": [{"id": 1}]},
             "detector": {"surface_id": 3},
             "materials": {"mirror": {"response": "tabulated"}},
         }
         if sst:
-            scene["secondary"] = {"facets": [{"id": 2}]}
-        return scene
+            optical_model["secondary"] = {"facets": [{"id": 2}]}
+        return optical_model
 
     def _rows(self, path: Path, *, status="detected", x=0.0):
         fields = (
@@ -52,12 +52,12 @@ class TestProductionValidation(unittest.TestCase):
                 "incidence_focal_deg": 4,
             })
 
-    def test_scene_requires_every_production_component(self):
+    def test_optical_model_requires_every_production_component(self):
         with self.assertRaisesRegex(ProductionValidationError, "production ready"):
-            validate_scene({"report": {"trace_blockers": ["missing mirrors"]}}, "LST")
+            validate_optical_model({"report": {"trace_blockers": ["missing mirrors"]}}, "LST")
         with self.assertRaisesRegex(ProductionValidationError, "secondary"):
-            validate_scene(self._scene(), "SST")
-        validate_scene(self._scene(sst=True), "SST")
+            validate_optical_model(self._optical_model(), "SST")
+        validate_optical_model(self._optical_model(sst=True), "SST")
 
     def test_comparison_accepts_identical_resolved_photons(self):
         with tempfile.TemporaryDirectory() as directory:

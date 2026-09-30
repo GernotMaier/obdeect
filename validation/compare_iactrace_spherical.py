@@ -3,7 +3,7 @@
 
 This deliberately compares only the shared analytic problem: parallel rays,
 one continuous spherical primary and a plane at the paraxial focal distance.
-Camera and mast shadows are disabled because this iactrace reference scene has
+Camera and mast shadows are disabled because this iactrace reference optical_model has
 no matching obstruction definition. It is not a validation of the CTAO MST
 configuration, whose 86 segmented facets, camera and structure the current
 obdeect prototype does not yet implement.

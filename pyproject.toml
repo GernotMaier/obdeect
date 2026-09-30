@@ -22,7 +22,7 @@ dependencies = [
 ]
 optional-dependencies.dev = [ "pre-commit", "pytest", "ruff", "towncrier" ]
 scripts.obdeect-analytic-optics = "obdeect.cli:analytic_optics_main"
-scripts.obdeect-compile-scene = "obdeect.scene_compiler:main"
+scripts.obdeect-compile-optical-model = "obdeect.optical_model_compiler:main"
 scripts.obdeect-demo-mst = "obdeect.cli:demo_mst_main"
 scripts.obdeect-import-simulation-models = "obdeect.model_import:main"
 scripts.obdeect-normalize-arrivals = "obdeect.arrival_normalizer:main"

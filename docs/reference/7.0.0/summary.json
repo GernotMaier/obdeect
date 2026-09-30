@@ -1,6 +1,6 @@
 {
   "format": "obdeect.simtel-reference-summary.v1",
-  "scope": "sim_telarray reference only; obdeect production scenes are pending",
+  "scope": "sim_telarray reference only; obdeect production optical_models are pending",
   "model_version": "7.0.0",
   "simtools_source_commit": "7547f17c540cda4acf3869897da9fbb602fc17b8",
   "simulation_models_commit": "9ddb4768ce5079202f503e37773a88c3344a7bdb",

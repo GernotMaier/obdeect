@@ -23,7 +23,7 @@ enum class SlabTransportStatus : unsigned char {
 struct SlabMaterial {
   // Phase refractive index and Beer--Lambert absorption coefficient, both as
   // a function of vacuum wavelength in nm.  The response is intentionally
-  // data-only: a scene importer may supply any observatory's material table.
+  // data-only: a optical model importer may supply any observatory's material table.
   Table1DView refractive_index;
   Table1DView absorption_per_m;
 

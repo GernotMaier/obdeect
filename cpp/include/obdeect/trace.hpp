@@ -2,9 +2,9 @@
 
 #include "obdeect/abi.hpp"
 #include "obdeect/diagnostics.hpp"
-#include "obdeect/optical_scene.hpp"
-#include "obdeect/scene.hpp"
-#include "obdeect/segmented_scene.hpp"
+#include "obdeect/reference_optical_model.hpp"
+#include "obdeect/optical_model.hpp"
+#include "obdeect/segmented_optical_model.hpp"
 
 namespace obdeect {
 
@@ -16,9 +16,9 @@ struct TraceResult {
 // Scalar reference block runner. It is intentionally allocation-free inside
 // the photon loop: output is sized before tracing and each record is written by
 // index. SIMD/threaded kernels must reproduce this contract exactly.
-[[nodiscard]] inline TraceResult trace(const CompiledReferenceScene& scene, const PhotonBlockView& input) {
+[[nodiscard]] inline TraceResult trace(const CompiledReferenceOpticalModel& optical_model, const PhotonBlockView& input) {
   TraceResult result{PhotonResultBlock{input.position_m.size()}, {}};
-  if (!scene.is_valid() || !validate_photon_block(input)) {
+  if (!optical_model.is_valid() || !validate_photon_block(input)) {
     for (std::size_t index = 0; index < input.position_m.size(); ++index) {
       result.photons.status[index] = PhotonStatus::invalid_input;
       ++result.summary.status_count[static_cast<std::size_t>(PhotonStatus::invalid_input)];
@@ -27,7 +27,7 @@ struct TraceResult {
   }
   for (std::size_t index = 0; index < input.position_m.size(); ++index) {
     const PathRecord record = trace_artificial_mst({input.position_m[index], input.direction[index]}, input.photon_id[index],
-                                            scene.configuration);
+                                            optical_model.configuration);
     const std::size_t final_index = record.point_count == 0 ? 0 : record.point_count - 1;
     result.photons.position_m[index] = record.points_m[final_index];
     result.photons.direction[index] = record.final_direction;
@@ -40,12 +40,12 @@ struct TraceResult {
   return result;
 }
 
-// A segmented scene may supply finite detector surfaces. A detected photon
+// A segmented optical_model may supply finite detector surfaces. A detected photon
 // records the nearest physical post-reflection intersection; otherwise it
 // retains the explicit no-detector terminal status.
-[[nodiscard]] inline TraceResult trace(const CompiledSegmentedScene& scene, const PhotonBlockView& input) {
+[[nodiscard]] inline TraceResult trace(const CompiledSegmentedOpticalModel& optical_model, const PhotonBlockView& input) {
   TraceResult result{PhotonResultBlock{input.position_m.size()}, {}};
-  if (!is_valid(scene) || !validate_photon_block(input)) {
+  if (!is_valid(optical_model) || !validate_photon_block(input)) {
     for (std::size_t index = 0; index < input.position_m.size(); ++index) {
       result.photons.status[index] = PhotonStatus::invalid_input;
       ++result.summary.status_count[static_cast<std::size_t>(PhotonStatus::invalid_input)];
@@ -63,8 +63,8 @@ struct TraceResult {
       continue;
     }
     const Ray ray{input.position_m[index], *direction};
-    const auto incoming_obscurer = intersect_cylinder_obscurers_unchecked(ray, scene);
-    const auto hit = intersect_segmented_primary_unchecked(ray, scene);
+    const auto incoming_obscurer = intersect_cylinder_obscurers_unchecked(ray, optical_model);
+    const auto hit = intersect_segmented_primary_unchecked(ray, optical_model);
     if (incoming_obscurer && (!hit || incoming_obscurer->distance_m < hit->distance_m)) {
       result.photons.status[index] = PhotonStatus::blocked_obscurer;
       result.photons.surface_id[index] = incoming_obscurer->surface_id;
@@ -87,8 +87,8 @@ struct TraceResult {
     result.photons.optical_path_m[index] = hit->distance_m;
     result.photons.time_ns[index] += hit->distance_m / kSpeedOfLightMPerNs;
     const Ray reflected_ray{hit->point_m, *reflected};
-    const auto outgoing_obscurer = intersect_cylinder_obscurers_unchecked(reflected_ray, scene);
-    const auto detector_hit = intersect_detector_surfaces_unchecked(reflected_ray, scene);
+    const auto outgoing_obscurer = intersect_cylinder_obscurers_unchecked(reflected_ray, optical_model);
+    const auto detector_hit = intersect_detector_surfaces_unchecked(reflected_ray, optical_model);
     if (outgoing_obscurer && (!detector_hit || outgoing_obscurer->distance_m < detector_hit->distance_m)) {
       result.photons.position_m[index] =
           reflected_ray.position_m + reflected_ray.direction * outgoing_obscurer->distance_m;
@@ -107,8 +107,8 @@ struct TraceResult {
     result.photons.position_m[index] = detector_hit->point_m;
     result.photons.optical_path_m[index] += detector_hit->distance_m;
     result.photons.time_ns[index] += detector_hit->distance_m / kSpeedOfLightMPerNs;
-    const auto reflectivity = scene.primary_reflectivity
-                                  ? scene.primary_reflectivity->at(input.wavelength_nm[index])
+    const auto reflectivity = optical_model.primary_reflectivity
+                                  ? optical_model.primary_reflectivity->at(input.wavelength_nm[index])
                                   : std::optional<double>{1.0};
     if (!reflectivity) {
       result.photons.status[index] = PhotonStatus::invalid_input;
@@ -125,7 +125,7 @@ struct TraceResult {
 
 // Geometry-only non-sequential reference. Every segment considers every
 // surface; material_id is retained for later response binding.
-[[nodiscard]] inline TraceResult trace(const CompiledOpticalScene& scene, const PhotonBlockView& input) {
+[[nodiscard]] inline TraceResult trace(const CompiledOpticalModel& optical_model, const PhotonBlockView& input) {
   TraceResult result{PhotonResultBlock{input.position_m.size()}, {}};
   if (!validate_photon_block(input)) {
     for (std::size_t index = 0; index < input.position_m.size(); ++index) {
@@ -140,10 +140,10 @@ struct TraceResult {
     result.photons.direction[index] = ray.direction;
     result.photons.time_ns[index] = input.time_ns[index];
     PhotonStatus status = PhotonStatus::interaction_limit;
-    for (std::uint32_t interaction = 0; interaction < scene.max_interactions(); ++interaction) {
-      const auto hit = intersect_nearest_surface(ray, scene);
+    for (std::uint32_t interaction = 0; interaction < optical_model.max_interactions(); ++interaction) {
+      const auto hit = intersect_nearest_surface(ray, optical_model);
       if (!hit) {
-        status = PhotonStatus::escaped_scene;
+        status = PhotonStatus::escaped_optical_model;
         break;
       }
       result.photons.optical_path_m[index] += hit->distance_m;
@@ -166,7 +166,7 @@ struct TraceResult {
       }
       result.photons.direction[index] = *reflected;
       ray = {hit->point_m, *reflected};
-      if (interaction + 1 == scene.max_interactions())
+      if (interaction + 1 == optical_model.max_interactions())
         result.photons.surface_id[index] = hit->surface_id;
     }
     result.photons.status[index] = status;

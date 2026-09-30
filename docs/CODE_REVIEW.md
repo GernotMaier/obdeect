@@ -1,6 +1,6 @@
 # Code review notes
 
-Review scope: C++ trace/source/scene interfaces, Python import/analysis/plot
+Review scope: C++ trace/source/optical model interfaces, Python import/analysis/plot
 commands, tests, examples, and documentation at this worktree's base commit.
 
 ## Fixed here
@@ -15,20 +15,20 @@ commands, tests, examples, and documentation at this worktree's base commit.
 
 ## Open design work
 
-- The  reference, segmented, and general optical scenes each have separate trace
+- The  reference, segmented, and general optical optical models each have separate trace
   loops. They cannot be deduplicated safely until they share one interaction
   record and terminal-status contract.
 - Both native executables repeat CLI parsing and CSV writing. A common I/O
   layer would help when the trace output schema is stabilized.
 - CTAO reference plots have no physical structure data. Full structure plots
-  need a trace-ready compiled scene with supports, camera, and mirror panels.
-- The general optical scene lacks curved surfaces, material bindings, and
+  need a trace-ready compiled optical model with supports, camera, and mirror panels.
+- The general optical optical model lacks curved surfaces, material bindings, and
   complete interaction diagnostics. See [STATUS.md](STATUS.md) for the
   validation plan and production blockers.
 
 ## September 2026 audit
 
-This audit traced the installed commands through their C++ entry points, scene
+This audit traced the installed commands through their C++ entry points, optical model
 compiler, arrival readers, PSF analysis, tests, and the available
 `simulation-models` 7.0.0 production tables. The five-model smoke test below
 uses 1,000 deterministic on-axis star samples per model. It checks that the
@@ -46,17 +46,17 @@ An additional SCT hit count found 794 M1 hits and 794 M2 hits, but no focal
 hits. Sampled post-M2 rays crossed the focal vertex plane outside the exported
 0.422 m focal radius. The next step is to verify the SCT prescription and
 coordinate conventions against a frozen `sim_telarray` photon block. No SCT
-acceptance claim follows from the successful export. All five compiled scenes have `native_trace_ready=false`
+acceptance claim follows from the successful export. All five compiled optical models have `native_trace_ready=false`
 and nonempty `trace_blockers`; the production gate rejects them as designed.
 
 ### Execution and duplication map
 
 | Path | Current use | Review conclusion |
 | --- | --- | --- |
-| `simtools_raytrace_main.cpp` with `scene_file.hpp` | Model-derived command used by the README | Active nominal path. It has a separate segmented and dual-asphere trace loop. |
+| `simtools_raytrace_main.cpp` with `optical_model_file.hpp` | Model-derived command used by the README | Active nominal path. It has a separate segmented and dual-asphere trace loop. |
 | `reference_main.cpp` and `artificial_mst.hpp` | Developer demo and analytic tests | Retain as a diagnostic; keep it out of production claims. |
-| `ctao_main.cpp`, `ctao_trace.hpp`, `ctao_models.hpp` | Analytic developer command; also the no-scene branch of the simtools tracer | Duplicate analytic route. Consolidate when the public command no longer needs that branch. |
-| `optical_scene.hpp` and its `trace.hpp` overload | Generic nonsequential kernel and tests | No model importer or public command currently supplies it. Do not advertise its material/obscurer capabilities as active CTAO support. |
+| `ctao_main.cpp`, `ctao_trace.hpp`, `ctao_models.hpp` | Analytic developer command; also the no-optical model branch of the simtools tracer | Duplicate analytic route. Consolidate when the public command no longer needs that branch. |
+| `optical model.hpp` and its `trace.hpp` overload | Generic nonsequential kernel and tests | No model importer or public command currently supplies it. Do not advertise its material/obscurer capabilities as active CTAO support. |
 | `materials.hpp`, `atmosphere.hpp`, EventIO readers | Primitive tests and optional adapters | Not bound into the model-derived native CLI. Their presence does not imply coating, atmosphere, or EventIO support in that workflow. |
 | `analysis.py`, `result_contract.py`, `plotting.py` | Three separate CSV consumers | Keep one versioned arrival contract and migrate consumers to it before changing the output schema. PSF analysis now rejects missing or impossible optical weights. |
 
@@ -92,4 +92,4 @@ unknown.
    source class.
 4. Only after those contracts are stable, consolidate the CLI parsers and CSV
    writers, remove the duplicate analytic branch from the public tracer, and
-   benchmark photons/s and peak memory on the same scene and photon block.
+   benchmark photons/s and peak memory on the same optical model and photon block.

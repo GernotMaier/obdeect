@@ -21,7 +21,7 @@ enum class PhotonStatus : std::uint8_t {
   no_detector,
   invalid_input,
   blocked_obscurer,
-  escaped_scene,
+  escaped_optical_model,
   interaction_limit,
   count,
 };
@@ -38,7 +38,7 @@ inline std::string_view to_string(PhotonStatus status) {
     case PhotonStatus::no_detector: return "no_detector";
     case PhotonStatus::invalid_input: return "invalid_input";
     case PhotonStatus::blocked_obscurer: return "blocked_obscurer";
-    case PhotonStatus::escaped_scene: return "escaped_scene";
+    case PhotonStatus::escaped_optical_model: return "escaped_optical_model";
     case PhotonStatus::interaction_limit: return "interaction_limit";
     case PhotonStatus::count: break;
   }

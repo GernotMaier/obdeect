@@ -2,8 +2,8 @@
 #include "obdeect/ctao_models.hpp"
 #include "obdeect/ctao_trace.hpp"
 #include "obdeect/interactions.hpp"
-#include "obdeect/scene_file.hpp"
-#include "obdeect/segmented_scene.hpp"
+#include "obdeect/optical_model_file.hpp"
+#include "obdeect/segmented_optical_model.hpp"
 #include "obdeect/sources.hpp"
 
 #include <fstream>
@@ -20,7 +20,7 @@
 namespace {
 void usage() {
   std::cout << "Usage: obdeect-simtools-raytrace [--telescope LST|MST|SST|SCT] [options]\n"
-            << "  --scene-file FILE  model-derived obdeect-scene-v1 surface table\n"
+            << "  --optical-model-file FILE  model-derived obdeect-optical-model-v1 surface table\n"
             << "  --source star|illuminator|laser  (default: star)\n"
             << "  --photons N --output FILE --field-x-deg D --field-y-deg D\n"
             << "  --distance-m D --wavelength-nm N[,N...] --divergence-deg D --panel-id N\n"
@@ -28,7 +28,7 @@ void usage() {
             << "  --screen-x-m D --screen-y-m D --screen-z-m D --screen-radius-m D\n"
             << "  --direction-x D --direction-y D --direction-z D  (laser axis)\n"
             << "  --emission-time-ns D --pulse-width-ns D  (deterministic top-hat pulse)\n"
-            << "  --scene-file is required for model-derived CTAO simulations; it accepts general panel geometry.\n"
+            << "  --optical-model-file is required for model-derived CTAO simulations; it accepts general panel geometry.\n"
             << "  Without it, this runs an analytic diagnostic prescription only.\n";
 }
 
@@ -43,7 +43,7 @@ int main(int argc, char** argv) {
   using obdeect::parse_finite_double;
   using obdeect::parse_positive_size;
   std::string telescope;
-  std::string scene_file;
+  std::string optical_model_file;
   std::string source{"star"};
   std::string output_path{"obdeect_paths.csv"};
   std::size_t photons_count = 10000;
@@ -59,8 +59,8 @@ int main(int argc, char** argv) {
   for (int index = 1; index < argc; ++index) {
     std::string value_string;
     if (value(index, argc, argv, "--telescope", telescope) ||
-        value(index, argc, argv, "--scene-file", scene_file) ||
-        value(index, argc, argv, "--scene", scene_file) ||
+        value(index, argc, argv, "--optical-model-file", optical_model_file) ||
+        value(index, argc, argv, "--optical-model", optical_model_file) ||
         value(index, argc, argv, "--source", source) ||
         value(index, argc, argv, "--output", output_path)) {
       continue;
@@ -105,15 +105,15 @@ int main(int argc, char** argv) {
     usage();
     return 2;
   }
-  const auto model = scene_file.empty() ? obdeect::ctao_reference_model(telescope) : std::nullopt;
-  auto imported_scene = scene_file.empty() ? std::optional<obdeect::CompiledSegmentedScene>{}
-                                           : obdeect::read_native_scene(scene_file);
-  const auto axisymmetric_scene = scene_file.empty() ? std::optional<obdeect::AxisymmetricScene>{}
-                                                      : obdeect::read_native_axisymmetric_scene(scene_file);
-  if ((!model && !imported_scene && !axisymmetric_scene) ||
+  const auto model = optical_model_file.empty() ? obdeect::ctao_reference_model(telescope) : std::nullopt;
+  auto imported_optical_model = optical_model_file.empty() ? std::optional<obdeect::CompiledSegmentedOpticalModel>{}
+                                           : obdeect::read_native_optical_model(optical_model_file);
+  const auto axisymmetric_optical_model = optical_model_file.empty() ? std::optional<obdeect::AxisymmetricOpticalModel>{}
+                                                      : obdeect::read_native_axisymmetric_optical_model(optical_model_file);
+  if ((!model && !imported_optical_model && !axisymmetric_optical_model) ||
       (source != "star" && source != "illuminator" && source != "laser") ||
       distance_m <= 0.0 || divergence_deg < 0.0 || divergence_deg >= 90.0 || pulse_width_ns < 0.0 ||
-      (panel_id && !imported_scene) ||
+      (panel_id && !imported_optical_model) ||
       ((screen_x_set || screen_y_set || screen_z_set || screen_radius_set) &&
        !(screen_x_set && screen_y_set && screen_z_set && screen_radius_set)) ||
       (screen_radius_set && screen_radius_m <= 0.0)) {
@@ -121,29 +121,29 @@ int main(int argc, char** argv) {
     return 2;
   }
   if (panel_id) {
-    auto& facets = imported_scene->primary_facets;
+    auto& facets = imported_optical_model->primary_facets;
     facets.erase(std::remove_if(facets.begin(), facets.end(), [&](const auto& facet) {
       return facet.id != *panel_id;
     }), facets.end());
     if (facets.empty()) {
-      std::cerr << "panel " << *panel_id << " is not present in " << scene_file << '\n';
+      std::cerr << "panel " << *panel_id << " is not present in " << optical_model_file << '\n';
       return 2;
     }
   }
   if (screen_x_set) {
-    if (!imported_scene) {
-      std::cerr << "a custom screen requires --scene-file\n";
+    if (!imported_optical_model) {
+      std::cerr << "a custom screen requires --optical-model-file\n";
       return 2;
     }
     std::uint32_t maximum_id = 0;
-    for (const auto& facet : imported_scene->primary_facets) maximum_id = std::max(maximum_id, facet.id);
-    for (const auto& detector : imported_scene->detector_surfaces)
+    for (const auto& facet : imported_optical_model->primary_facets) maximum_id = std::max(maximum_id, facet.id);
+    for (const auto& detector : imported_optical_model->detector_surfaces)
       maximum_id = std::max(maximum_id, detector.id);
     if (maximum_id == std::numeric_limits<std::uint32_t>::max()) {
       std::cerr << "cannot allocate a custom screen ID\n";
       return 2;
     }
-    imported_scene->detector_surfaces = {{maximum_id + 1,
+    imported_optical_model->detector_surfaces = {{maximum_id + 1,
                                           {screen_x_m, screen_y_m, screen_z_m},
                                           {0.0, 0.0, 1.0},
                                           2.0 * screen_radius_m,
@@ -151,15 +151,15 @@ int main(int argc, char** argv) {
                                           {1.0, 0.0, 0.0}}};
   }
   const double radians_per_degree = std::numbers::pi / 180.0;
-  const double pupil_radius = imported_scene
+  const double pupil_radius = imported_optical_model
                                   ? [&] {
                                       double radius = 0.0;
-                                      for (const auto& facet : imported_scene->primary_facets)
+                                      for (const auto& facet : imported_optical_model->primary_facets)
                                         radius = std::max(radius, std::hypot(facet.centre_m.x, facet.centre_m.y) +
                                                                   facet.diameter_m * 0.5);
                                       return radius;
                                     }()
-                                  : axisymmetric_scene ? axisymmetric_scene->primary.outer_radius_m
+                                  : axisymmetric_optical_model ? axisymmetric_optical_model->primary.outer_radius_m
                                                        : model->primary_outer_radius_m;
   if (!std::isfinite(pupil_radius) || pupil_radius <= 0.0) return 1;
   std::vector<obdeect::OpticalPhoton> input;
@@ -204,14 +204,14 @@ int main(int argc, char** argv) {
     path.wavelength_nm = photon.wavelength_nm;
     path.points_m[0] = photon.ray.position_m;
     path.point_count = 1;
-    if (imported_scene) {
+    if (imported_optical_model) {
       const auto direction = obdeect::normalised_checked(photon.ray.direction);
       if (!direction) {
         path.status = obdeect::PhotonStatus::invalid_input;
       } else {
         const obdeect::Ray ray{photon.ray.position_m, *direction};
-        const auto incoming_obscurer = obdeect::intersect_cylinder_obscurers_unchecked(ray, *imported_scene);
-        const auto primary_hit = obdeect::intersect_segmented_primary_unchecked(ray, *imported_scene);
+        const auto incoming_obscurer = obdeect::intersect_cylinder_obscurers_unchecked(ray, *imported_optical_model);
+        const auto primary_hit = obdeect::intersect_segmented_primary_unchecked(ray, *imported_optical_model);
         if (incoming_obscurer && (!primary_hit || incoming_obscurer->distance_m < primary_hit->distance_m)) {
           path.status = obdeect::PhotonStatus::blocked_obscurer;
           path.final_direction = *direction;
@@ -229,10 +229,10 @@ int main(int argc, char** argv) {
             path.status = obdeect::PhotonStatus::invalid_input;
           } else {
             const auto detector_hit = obdeect::intersect_detector_surfaces_unchecked(
-                obdeect::Ray{primary_hit->point_m, *reflected}, *imported_scene);
+                obdeect::Ray{primary_hit->point_m, *reflected}, *imported_optical_model);
             const obdeect::Ray reflected_ray{primary_hit->point_m, *reflected};
             const auto outgoing_obscurer =
-                obdeect::intersect_cylinder_obscurers_unchecked(reflected_ray, *imported_scene);
+                obdeect::intersect_cylinder_obscurers_unchecked(reflected_ray, *imported_optical_model);
             if (outgoing_obscurer && (!detector_hit || outgoing_obscurer->distance_m < detector_hit->distance_m)) {
               path.status = obdeect::PhotonStatus::blocked_obscurer;
               path.path_length_m += outgoing_obscurer->distance_m;
@@ -252,16 +252,16 @@ int main(int argc, char** argv) {
           }
         }
       }
-    } else if (axisymmetric_scene) {
-      path = obdeect::trace_axisymmetric_scene(photon.ray, photon.photon_id, *axisymmetric_scene);
+    } else if (axisymmetric_optical_model) {
+      path = obdeect::trace_axisymmetric_optical_model(photon.ray, photon.photon_id, *axisymmetric_optical_model);
       path.wavelength_nm = photon.wavelength_nm;
     } else {
       path = obdeect::trace_ctao_reference(photon.ray, photon.photon_id, *model);
       path.wavelength_nm = photon.wavelength_nm;
     }
     double throughput = path.status == obdeect::PhotonStatus::detected ? 1.0 : 0.0;
-    if (path.status == obdeect::PhotonStatus::detected && imported_scene && imported_scene->primary_reflectivity) {
-      const auto response = imported_scene->primary_reflectivity->at(photon.wavelength_nm);
+    if (path.status == obdeect::PhotonStatus::detected && imported_optical_model && imported_optical_model->primary_reflectivity) {
+      const auto response = imported_optical_model->primary_reflectivity->at(photon.wavelength_nm);
       if (!response) {
         path.status = obdeect::PhotonStatus::invalid_input;
         throughput = 0.0;
@@ -269,9 +269,9 @@ int main(int argc, char** argv) {
         throughput = *response;
       }
     }
-    if (path.status == obdeect::PhotonStatus::detected && axisymmetric_scene) {
-      for (const auto* response : {axisymmetric_scene->primary_reflectivity ? &*axisymmetric_scene->primary_reflectivity : nullptr,
-                                   axisymmetric_scene->secondary_reflectivity ? &*axisymmetric_scene->secondary_reflectivity : nullptr}) {
+    if (path.status == obdeect::PhotonStatus::detected && axisymmetric_optical_model) {
+      for (const auto* response : {axisymmetric_optical_model->primary_reflectivity ? &*axisymmetric_optical_model->primary_reflectivity : nullptr,
+                                   axisymmetric_optical_model->secondary_reflectivity ? &*axisymmetric_optical_model->secondary_reflectivity : nullptr}) {
         if (!response) continue;
         const auto value = response->at(photon.wavelength_nm);
         if (!value) {
@@ -290,8 +290,8 @@ int main(int argc, char** argv) {
     for (const auto& point : path.points_m) output << ',' << point.x << ',' << point.y << ',' << point.z;
     output << '\n';
   }
-  if (imported_scene || axisymmetric_scene) {
-    std::cout << "native scene " << scene_file << ": " << photons_count << " " << source
+  if (imported_optical_model || axisymmetric_optical_model) {
+    std::cout << "native optical_model " << optical_model_file << ": " << photons_count << " " << source
               << " photons, detected " << detected;
     if (panel_id) std::cout << ", panel " << *panel_id;
     std::cout << "\n";

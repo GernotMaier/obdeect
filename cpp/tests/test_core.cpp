@@ -74,8 +74,8 @@ int main() {
   require(zero_direction.status == PhotonStatus::invalid_input, "zero direction must be rejected");
   ArtificialMstConfig invalid = bare;
   invalid.mirror_aperture_radius_m = invalid.mirror_radius_m + 1.0;
-  const auto invalid_scene = trace_artificial_mst({{0.0, 0.0, 20.0}, {0.0, 0.0, -1.0}}, 5, invalid);
-  require(invalid_scene.status == PhotonStatus::invalid_input, "impossible spherical cap must be rejected");
+  const auto invalid_optical_model = trace_artificial_mst({{0.0, 0.0, 20.0}, {0.0, 0.0, -1.0}}, 5, invalid);
+  require(invalid_optical_model.status == PhotonStatus::invalid_input, "impossible spherical cap must be rejected");
   invalid = bare;
   invalid.camera_half_depth_m = invalid.focal_length_m;
   const auto inverted_camera = trace_artificial_mst({{0.0, 0.0, 20.0}, {0.0, 0.0, -1.0}}, 6, invalid);
