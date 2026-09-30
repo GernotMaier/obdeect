@@ -10,14 +10,14 @@ from obdeect.model_import import resolve_model
 from obdeect.optical_model_compiler import (
     OpticalModelCompileError,
     _dual_reflector_surfaces,
+    build_trace_model,
     compile_optical_model,
     derive_nominal_single_reflector,
-    native_surface_rows,
     parse_obscuration_cylinders,
     parse_simtel_mirror_list,
     parse_simtel_segmentation,
     require_trace_ready,
-    write_native_optical_model,
+    trace_surface_rows,
 )
 
 
@@ -30,7 +30,7 @@ class TestOpticalModelCompiler(unittest.TestCase):
         self.assertEqual(cylinders[0]["first_endpoint_m"], [0.0, 0.0, 1.0])
         self.assertEqual(cylinders[0]["diameter_m"], 0.2)
 
-    def test_native_detector_bound_includes_outer_pixel_entrance(self):
+    def test_trace_model_detector_bound_includes_outer_pixel_entrance(self):
         optical_model = {
             "report": {"facet_geometry_evidence": {"normal_status": "nominal_unperturbed"}},
             "primary": {
@@ -51,7 +51,7 @@ class TestOpticalModelCompiler(unittest.TestCase):
             },
             "focal_length_m": 16.0,
         }
-        rows, _, _ = native_surface_rows(optical_model)
+        rows, _, _ = trace_surface_rows(optical_model)
         detector = rows[-1]
         self.assertAlmostEqual(detector["diameter_m"], 2.12)
 
@@ -92,7 +92,7 @@ class TestOpticalModelCompiler(unittest.TestCase):
         self.assertEqual(surfaces["primary"]["coefficient_m"][:2], [0.0, 0.5])
         self.assertEqual(surfaces["focal_surface"]["coefficient_m"][0], 10.0)
 
-    def test_native_optical_model_export_contains_provenance_and_detector_surface(self):
+    def test_trace_model_contains_provenance_bound_surface(self):
         optical_model = {
             "provenance": {"model": "GENERIC", "model_version": "1.0.0", "input_records": {}},
             "optical_model_sha256": "a" * 64,
@@ -112,24 +112,18 @@ class TestOpticalModelCompiler(unittest.TestCase):
             "camera": {"pixels": [{"centre_xy_m": [0.0, 0.1]}]},
             "focal_length_m": 16.0,
         }
-        with TemporaryDirectory() as directory:
-            output = Path(directory) / "optical model.csv"
-            write_native_optical_model(optical_model, output)
-            lines = output.read_text().splitlines()
-        self.assertEqual(lines[0], "obdeect-optical-model-v1")
-        self.assertEqual(lines[1], "provenance,GENERIC,1.0.0," + "a" * 64)
-        self.assertIn("0,mirror,hexagon_flat_y", lines[3])
-        self.assertIn("1,detector,circle", lines[4])
+        trace_model = build_trace_model(optical_model)
+        self.assertEqual(trace_model["kind"], "segmented")
+        self.assertEqual(trace_model["primary_facets"][0]["shape"], "hexagon_flat_y")
+        self.assertEqual(trace_model["detector_surfaces"][0]["shape"], "circle")
 
     def test_trace_readiness_requires_resolved_optical_model(self):
-        require_trace_ready({"report": {"trace_blockers": [], "native_trace_ready": True}})
+        require_trace_ready({"report": {"trace_blockers": [], "trace_ready": True}})
         with self.assertRaisesRegex(OpticalModelCompileError, "detector surfaces"):
             require_trace_ready({
                 "report": {"trace_blockers": ["physical detector surfaces are unresolved"]}
             })
-        with self.assertRaisesRegex(
-            OpticalModelCompileError, "native production optical model binding"
-        ):
+        with self.assertRaisesRegex(OpticalModelCompileError, "trace-model binding is unavailable"):
             require_trace_ready({"report": {"trace_blockers": []}})
 
     def test_nominal_panel_normal_and_dish_position_follow_simtel_formula(self):
@@ -219,10 +213,10 @@ class TestOpticalModelCompiler(unittest.TestCase):
         )
         self.assertEqual(len(optical_model["optical_model_sha256"]), 64)
 
-    def test_native_export_contains_provenance_and_detector_surface(self):
+    def test_trace_model_preserves_complete_segmented_geometry(self):
         with TemporaryDirectory() as directory:
             root = Path(directory)
-            # Keep this focused on the strict writer contract; the production
+            # Keep this focused on the trace-model contract; the production
             # compiler's camera parser is tested separately.
             optical_model = compile_optical_model(self.make_ir(root), root)
             optical_model["camera"] = {"pixels": [{"centre_xy_m": [0.1, 0.0]}]}
@@ -233,13 +227,10 @@ class TestOpticalModelCompiler(unittest.TestCase):
             for facet in optical_model["primary"]["facets"]:
                 facet["nominal_centre_m"] = [*facet["centre_m"][:2], 0.0]
                 facet["nominal_normal"] = [0.0, 0.0, 1.0]
-            output = root / "optical model.csv"
-            write_native_optical_model(optical_model, output)
-            lines = output.read_text().splitlines()
-        assert lines[0] == "obdeect-optical-model-v1"
-        assert lines[1].startswith("provenance,GENERIC,1.0.0,")
-        assert lines[2].startswith("surface_id,role,shape,")
-        assert any(",detector,circle," in line for line in lines[3:])
+            trace_model = build_trace_model(optical_model)
+        self.assertEqual(trace_model["kind"], "segmented")
+        self.assertEqual(trace_model["primary_facets"][0]["id"], 0)
+        self.assertEqual(trace_model["detector_surfaces"][0]["shape"], "circle")
 
     def test_parses_real_simtel_comment_suffix_without_turning_it_into_alignment(self):
         # T-IR-006: LST mirror-list rows carry an optional z followed by a
@@ -413,18 +404,6 @@ class TestOpticalModelCompiler(unittest.TestCase):
             self.assertEqual(optical_model["report"]["camera_layout_evidence"]["pixel_count"], 2)
             self.assertIn("response.dat", optical_model["provenance"]["nested_assets"])
             (files / "response.dat").unlink()
-            simtel_root = root / "sim_telarray"
-            fallback = simtel_root / "cfg" / "CTA" / "response.dat"
-            fallback.parent.mkdir(parents=True)
-            fallback.write_text("300 0.7\n")
-            optical_model = compile_optical_model(ir, root, simtel_root=simtel_root)
-            self.assertEqual(
-                optical_model["provenance"]["nested_assets"]["response.dat"]["source_root"],
-                "sim_telarray",
-            )
-            self.assertEqual(
-                optical_model["report"]["camera_layout_evidence"]["unresolved_response_files"], []
-            )
             self.assertEqual(
                 compile_optical_model(ir, root)["report"]["camera_layout_evidence"][
                     "unresolved_response_files"

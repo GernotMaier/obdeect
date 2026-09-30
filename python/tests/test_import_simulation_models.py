@@ -1,16 +1,11 @@
-"""Tests for the standard-library simulation-models optical-model IR importer."""
+"""Tests for simulation-models production resolution."""
 
-import importlib.util
 import json
 import tempfile
 import unittest
 from pathlib import Path
 
-SCRIPT = Path(__file__).parents[2] / "tools" / "import_simulation_models.py"
-SPEC = importlib.util.spec_from_file_location("import_simulation_models", SCRIPT)
-IMPORTER = importlib.util.module_from_spec(SPEC)
-assert SPEC.loader is not None
-SPEC.loader.exec_module(IMPORTER)
+from obdeect import model_import as IMPORTER
 
 
 class TestSimulationModelsImport(unittest.TestCase):

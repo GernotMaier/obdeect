@@ -39,16 +39,12 @@ make a failed comparison pass.
 
 ```sh
 export OBDEECT_SIMULATION_MODELS_PATH=/path/to/simulation-models
-SIMTEL_ROOT=/path/to/sim_telarray
 MODEL=LSTN-design
 
-obdeect-import-simulation-models \
-  --source-root "$OBDEECT_SIMULATION_MODELS_PATH" --model "$MODEL" --version 7.0.0 \
-  --output "$MODEL.ir.json"
 obdeect-compile-optical-model \
-  --input "$MODEL.ir.json" --source-root "$OBDEECT_SIMULATION_MODELS_PATH" \
-  --simtel-root "$SIMTEL_ROOT" --require-trace-ready \
-  --output "$MODEL.optical-model.json" --native-output "$MODEL.optical-model.csv"
+  --source-root "$OBDEECT_SIMULATION_MODELS_PATH" --model "$MODEL" --version 7.0.0 \
+  --require-trace-ready \
+  --output "$MODEL.optical-model.json"
 
 # Generate the two normalised comparison tables from the frozen common source block.
 obdeect-normalize-arrivals --input obdeect-arrivals.csv --output obdeect.normalized.csv

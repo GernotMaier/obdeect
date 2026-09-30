@@ -34,7 +34,7 @@ compiler, arrival readers, PSF analysis, tests, and the available
 uses 1,000 deterministic on-axis star samples per model. It checks that the
 workflow runs; it is not a physical comparison against `sim_telarray`.
 
-| Model | Import and native export | Detected / 1,000 | PSF derivation |
+| Model | Import and compiled optical model | Detected / 1,000 | PSF derivation |
 | --- | --- | ---: | --- |
 | LSTN-design | Succeeded | 767 | Succeeded |
 | MSTx-FlashCam | Succeeded | 686 | Succeeded |

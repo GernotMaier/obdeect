@@ -20,7 +20,7 @@
 namespace {
 void usage() {
   std::cout << "Usage: obdeect-simtools-raytrace [--telescope LST|MST|SST|SCT] [options]\n"
-            << "  --optical-model-file FILE  model-derived obdeect-optical-model-v1 surface table\n"
+            << "  --optical-model FILE  compiled obdeect optical-model JSON\n"
             << "  --source star|illuminator|laser  (default: star)\n"
             << "  --photons N --output FILE --field-x-deg D --field-y-deg D\n"
             << "  --distance-m D --wavelength-nm N[,N...] --divergence-deg D --panel-id N\n"
@@ -28,7 +28,7 @@ void usage() {
             << "  --screen-x-m D --screen-y-m D --screen-z-m D --screen-radius-m D\n"
             << "  --direction-x D --direction-y D --direction-z D  (laser axis)\n"
             << "  --emission-time-ns D --pulse-width-ns D  (deterministic top-hat pulse)\n"
-            << "  --optical-model-file is required for model-derived CTAO simulations; it accepts general panel geometry.\n"
+            << "  --optical-model is required for model-derived CTAO simulations; it accepts general panel geometry.\n"
             << "  Without it, this runs an analytic diagnostic prescription only.\n";
 }
 
@@ -43,7 +43,7 @@ int main(int argc, char** argv) {
   using obdeect::parse_finite_double;
   using obdeect::parse_positive_size;
   std::string telescope;
-  std::string optical_model_file;
+  std::string optical_model_path;
   std::string source{"star"};
   std::string output_path{"obdeect_paths.csv"};
   std::size_t photons_count = 10000;
@@ -59,8 +59,7 @@ int main(int argc, char** argv) {
   for (int index = 1; index < argc; ++index) {
     std::string value_string;
     if (value(index, argc, argv, "--telescope", telescope) ||
-        value(index, argc, argv, "--optical-model-file", optical_model_file) ||
-        value(index, argc, argv, "--optical-model", optical_model_file) ||
+        value(index, argc, argv, "--optical-model", optical_model_path) ||
         value(index, argc, argv, "--source", source) ||
         value(index, argc, argv, "--output", output_path)) {
       continue;
@@ -105,11 +104,11 @@ int main(int argc, char** argv) {
     usage();
     return 2;
   }
-  const auto model = optical_model_file.empty() ? obdeect::ctao_reference_model(telescope) : std::nullopt;
-  auto imported_optical_model = optical_model_file.empty() ? std::optional<obdeect::CompiledSegmentedOpticalModel>{}
-                                           : obdeect::read_native_optical_model(optical_model_file);
-  const auto axisymmetric_optical_model = optical_model_file.empty() ? std::optional<obdeect::AxisymmetricOpticalModel>{}
-                                                      : obdeect::read_native_axisymmetric_optical_model(optical_model_file);
+  const auto model = optical_model_path.empty() ? obdeect::ctao_reference_model(telescope) : std::nullopt;
+  auto imported_optical_model = optical_model_path.empty() ? std::optional<obdeect::CompiledSegmentedOpticalModel>{}
+                                           : obdeect::read_segmented_optical_model(optical_model_path);
+  const auto axisymmetric_optical_model = optical_model_path.empty() ? std::optional<obdeect::AxisymmetricOpticalModel>{}
+                                                      : obdeect::read_axisymmetric_optical_model(optical_model_path);
   if ((!model && !imported_optical_model && !axisymmetric_optical_model) ||
       (source != "star" && source != "illuminator" && source != "laser") ||
       distance_m <= 0.0 || divergence_deg < 0.0 || divergence_deg >= 90.0 || pulse_width_ns < 0.0 ||
@@ -126,13 +125,13 @@ int main(int argc, char** argv) {
       return facet.id != *panel_id;
     }), facets.end());
     if (facets.empty()) {
-      std::cerr << "panel " << *panel_id << " is not present in " << optical_model_file << '\n';
+      std::cerr << "panel " << *panel_id << " is not present in " << optical_model_path << '\n';
       return 2;
     }
   }
   if (screen_x_set) {
     if (!imported_optical_model) {
-      std::cerr << "a custom screen requires --optical-model-file\n";
+      std::cerr << "a custom screen requires --optical-model\n";
       return 2;
     }
     std::uint32_t maximum_id = 0;
@@ -291,7 +290,7 @@ int main(int argc, char** argv) {
     output << '\n';
   }
   if (imported_optical_model || axisymmetric_optical_model) {
-    std::cout << "native optical_model " << optical_model_file << ": " << photons_count << " " << source
+    std::cout << "optical model " << optical_model_path << ": " << photons_count << " " << source
               << " photons, detected " << detected;
     if (panel_id) std::cout << ", panel " << *panel_id;
     std::cout << "\n";
