@@ -1,0 +1,449 @@
+"""Tests for the generic simulation-models optical model compiler."""
+
+import json
+import math
+import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
+
+from obdeect.model_import import resolve_model
+from obdeect.optical_model_compiler import (
+    OpticalModelCompileError,
+    _dual_reflector_surfaces,
+    compile_optical_model,
+    derive_nominal_single_reflector,
+    native_surface_rows,
+    parse_obscuration_cylinders,
+    parse_simtel_mirror_list,
+    parse_simtel_segmentation,
+    require_trace_ready,
+    write_native_optical_model,
+)
+
+
+class TestOpticalModelCompiler(unittest.TestCase):
+    def test_parses_model_obscuration_cylinders_in_metres(self):
+        cylinders = parse_obscuration_cylinders(
+            "# %ECSV 1.0\nid group x1 y1 z1 x2 y2 z2 diameter\nmast-1 mast 0 0 1 0 0 4 0.2\n"
+        )
+        self.assertEqual(cylinders[0]["id"], "mast-1")
+        self.assertEqual(cylinders[0]["first_endpoint_m"], [0.0, 0.0, 1.0])
+        self.assertEqual(cylinders[0]["diameter_m"], 0.2)
+
+    def test_native_detector_bound_includes_outer_pixel_entrance(self):
+        optical_model = {
+            "report": {"facet_geometry_evidence": {"normal_status": "nominal_unperturbed"}},
+            "primary": {
+                "facets": [
+                    {
+                        "id": 0,
+                        "shape": "circle",
+                        "diameter_m": 1.0,
+                        "focal_length_m": 16.0,
+                        "nominal_centre_m": [0.0, 0.0, 0.0],
+                        "nominal_normal": [0.0, 0.0, 1.0],
+                    }
+                ]
+            },
+            "camera": {
+                "pixel_types": [{"id": 2, "funnel_diameter_m": 0.12}],
+                "pixels": [{"type_id": 2, "centre_xy_m": [1.0, 0.0]}],
+            },
+            "focal_length_m": 16.0,
+        }
+        rows, _, _ = native_surface_rows(optical_model)
+        detector = rows[-1]
+        self.assertAlmostEqual(detector["diameter_m"], 2.12)
+
+    def test_dual_reflector_surfaces_preserve_si_aspheres_and_holes(self):
+        coefficient = {"value": [0.0, 0.01], "unit": ["cm", "cm"]}
+        parameters = {
+            "primary_mirror_parameters": coefficient,
+            "primary_mirror_diameter": {"value": 400.0, "unit": "cm"},
+            "primary_mirror_hole_diameter": {"value": 20.0, "unit": "cm"},
+            "secondary_mirror_parameters": {"value": [300.0, 0.02], "unit": ["cm", "cm"]},
+            "secondary_mirror_diameter": {"value": 180.0, "unit": "cm"},
+            "secondary_mirror_hole_diameter": {"value": 0.0, "unit": "cm"},
+            "focal_surface_parameters": {"value": [200.0], "unit": ["cm"]},
+        }
+        surfaces = _dual_reflector_surfaces(parameters)
+        self.assertIsNotNone(surfaces)
+        self.assertEqual(surfaces["primary"]["inner_radius_m"], 0.1)
+        self.assertEqual(surfaces["primary"]["outer_radius_m"], 2.0)
+        self.assertAlmostEqual(surfaces["primary"]["coefficient_m"][1], 1.0)
+        self.assertAlmostEqual(surfaces["secondary"]["coefficient_m"][0], 3.0)
+
+    def test_dual_reflector_preserves_simtel_reference_radius_convention(self):
+        parameters = {
+            "primary_mirror_parameters": {"value": [0.0, 0.1], "unit": ["cm", "cm"]},
+            "primary_mirror_ref_radius": {"value": 500.0, "unit": "cm"},
+            "primary_mirror_diameter": {"value": 800.0, "unit": "cm"},
+            "primary_mirror_hole_diameter": {"value": 0.0, "unit": "cm"},
+            "secondary_mirror_parameters": {"value": [1.0], "unit": ["cm"]},
+            "secondary_mirror_ref_radius": {"value": 500.0, "unit": "cm"},
+            "secondary_mirror_diameter": {"value": 400.0, "unit": "cm"},
+            "secondary_mirror_hole_diameter": {"value": 0.0, "unit": "cm"},
+            "focal_surface_parameters": {"value": [2.0], "unit": ["cm"]},
+            "focal_surface_ref_radius": {"value": 500.0, "unit": "cm"},
+        }
+        surfaces = _dual_reflector_surfaces(parameters)
+        self.assertIsNotNone(surfaces)
+        self.assertEqual(surfaces["primary"]["radial_scale_m"], 5.0)
+        self.assertEqual(surfaces["primary"]["coefficient_m"][:2], [0.0, 0.5])
+        self.assertEqual(surfaces["focal_surface"]["coefficient_m"][0], 10.0)
+
+    def test_native_optical_model_export_contains_provenance_and_detector_surface(self):
+        optical_model = {
+            "provenance": {"model": "GENERIC", "model_version": "1.0.0", "input_records": {}},
+            "optical_model_sha256": "a" * 64,
+            "report": {"facet_geometry_evidence": {"normal_status": "nominal_unperturbed"}},
+            "primary": {
+                "facets": [
+                    {
+                        "id": 0,
+                        "shape": "hexagon_flat_y",
+                        "diameter_m": 1.2,
+                        "focal_length_m": 16.0,
+                        "nominal_centre_m": [0.0, 0.0, 0.0],
+                        "nominal_normal": [0.0, 0.0, 1.0],
+                    }
+                ]
+            },
+            "camera": {"pixels": [{"centre_xy_m": [0.0, 0.1]}]},
+            "focal_length_m": 16.0,
+        }
+        with TemporaryDirectory() as directory:
+            output = Path(directory) / "optical model.csv"
+            write_native_optical_model(optical_model, output)
+            lines = output.read_text().splitlines()
+        self.assertEqual(lines[0], "obdeect-optical-model-v1")
+        self.assertEqual(lines[1], "provenance,GENERIC,1.0.0," + "a" * 64)
+        self.assertIn("0,mirror,hexagon_flat_y", lines[3])
+        self.assertIn("1,detector,circle", lines[4])
+
+    def test_trace_readiness_requires_resolved_optical_model(self):
+        require_trace_ready({"report": {"trace_blockers": [], "native_trace_ready": True}})
+        with self.assertRaisesRegex(OpticalModelCompileError, "detector surfaces"):
+            require_trace_ready({
+                "report": {"trace_blockers": ["physical detector surfaces are unresolved"]}
+            })
+        with self.assertRaisesRegex(
+            OpticalModelCompileError, "native production optical model binding"
+        ):
+            require_trace_ready({"report": {"trace_blockers": []}})
+
+    def test_nominal_panel_normal_and_dish_position_follow_simtel_formula(self):
+        # A panel at r=2 m on a 16 m DC dish has a positive sag and
+        # an inward-tilted normal; the signed mirror offset is retained.
+        parameters = {
+            "focal_length": {"value": 1600, "unit": "cm"},
+            "dish_shape_length": {"value": 1600, "unit": "cm"},
+            "mirror_offset": {"value": -100, "unit": "cm"},
+            "parabolic_dish": {"value": False},
+        }
+        facets = [{"centre_m": [2.0, 0.0, 0.0]}]
+        derive_nominal_single_reflector(facets, parameters)
+        sag = 16 - math.sqrt(16**2 - 2**2)
+        inclination = 0.5 * math.atan2(2, 16 - sag)
+        self.assertAlmostEqual(facets[0]["nominal_centre_m"][2], sag + 1)
+        self.assertAlmostEqual(facets[0]["nominal_normal"][0], -math.sin(inclination))
+        self.assertAlmostEqual(facets[0]["nominal_normal"][2], math.cos(inclination))
+
+    def make_ir(self, root: Path, *, mirror_contents: str | None = None, focal_cm=1600.0) -> dict:
+        asset = root / "model_parameters/Files/mirrors.dat"
+        asset.parent.mkdir(parents=True)
+        asset.write_text(
+            mirror_contents
+            or "# x y diameter focal shape z source metadata\n0 100 120 0 1 20 # id=M01\n"
+        )
+        (asset.parent / "filter.dat").write_text("300 0.8\n400 0.9\n")
+        production = root / "productions/1.0.0/GENERIC.json"
+        production.parent.mkdir(parents=True)
+        versions = {
+            name: "1.0.0"
+            for name in (
+                "mirror_list",
+                "mirror_focal_length",
+                "camera_body_diameter",
+                "camera_filter",
+            )
+        }
+        production.write_text(
+            json.dumps({
+                "model_version": "1.0.0",
+                "production_table_name": "GENERIC",
+                "parameters": {"GENERIC": versions},
+            })
+        )
+        values = {
+            "mirror_list": ("mirrors.dat", None, True),
+            "mirror_focal_length": (focal_cm, "cm", False),
+            "camera_body_diameter": (200.0, "cm", False),
+            "camera_filter": ("filter.dat", None, True),
+        }
+        for name, (value, unit, is_file) in values.items():
+            parameter = root / f"model_parameters/GENERIC/{name}/{name}-1.0.0.json"
+            parameter.parent.mkdir(parents=True)
+            parameter.write_text(
+                json.dumps({
+                    "instrument": "GENERIC",
+                    "parameter": name,
+                    "parameter_version": "1.0.0",
+                    "type": "string" if is_file else "float64",
+                    "unit": unit,
+                    "value": value,
+                    "file": is_file,
+                })
+            )
+        return resolve_model(root, "GENERIC", "1.0.0")
+
+    def test_compiles_tracked_mirror_list_without_dropping_deferred_fields(self):
+        # T-IR-004: source units, shape, position and zero-focal fallback survive compilation.
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            optical_model = compile_optical_model(self.make_ir(root), root)
+        facet = optical_model["primary"]["facets"][0]
+        self.assertEqual(optical_model["format"], "obdeect.compiled-optical-model.v1")
+        self.assertEqual(facet["shape"], "hexagon_flat_y")
+        self.assertEqual(facet["centre_m"], [0.0, 1.0, 0.2])
+        self.assertEqual(facet["diameter_m"], 1.2)
+        self.assertEqual(facet["focal_length_m"], 16.0)
+        self.assertEqual(
+            optical_model["report"]["deferred"], ["camera_body_diameter", "camera_filter"]
+        )
+        self.assertEqual(
+            optical_model["report"]["facet_geometry_evidence"]["normal_status"], "unavailable"
+        )
+        self.assertIn(
+            "No normals", optical_model["report"]["facet_geometry_evidence"]["interpretation"]
+        )
+        self.assertEqual(len(optical_model["optical_model_sha256"]), 64)
+
+    def test_native_export_contains_provenance_and_detector_surface(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            # Keep this focused on the strict writer contract; the production
+            # compiler's camera parser is tested separately.
+            optical_model = compile_optical_model(self.make_ir(root), root)
+            optical_model["camera"] = {"pixels": [{"centre_xy_m": [0.1, 0.0]}]}
+            optical_model["focal_length_m"] = 16.0
+            optical_model["report"]["facet_geometry_evidence"]["normal_status"] = (
+                "nominal_unperturbed"
+            )
+            for facet in optical_model["primary"]["facets"]:
+                facet["nominal_centre_m"] = [*facet["centre_m"][:2], 0.0]
+                facet["nominal_normal"] = [0.0, 0.0, 1.0]
+            output = root / "optical model.csv"
+            write_native_optical_model(optical_model, output)
+            lines = output.read_text().splitlines()
+        assert lines[0] == "obdeect-optical-model-v1"
+        assert lines[1].startswith("provenance,GENERIC,1.0.0,")
+        assert lines[2].startswith("surface_id,role,shape,")
+        assert any(",detector,circle," in line for line in lines[3:])
+
+    def test_parses_real_simtel_comment_suffix_without_turning_it_into_alignment(self):
+        # T-IR-006: LST mirror-list rows carry an optional z followed by a
+        # sim_telarray comment/panel ID; none of that is a facet orientation.
+        facets = parse_simtel_mirror_list(
+            "  1022.49 -462.00 151.00 2912.50 3 0.0 #% id=198\n"
+            " -620.80 0.00 120.00 0.00 1 # no z supplied\n",
+            fallback_focal_length_m=16.0,
+        )
+        self.assertEqual(facets[0]["centre_m"], [10.2249, -4.62, 0.0])
+        self.assertEqual(facets[0]["shape"], "hexagon_flat_x")
+        self.assertAlmostEqual(facets[1]["centre_m"][0], -6.208)
+        self.assertEqual(facets[1]["centre_m"][1:], [0.0, 0.0])
+        self.assertEqual(facets[1]["focal_length_m"], 16.0)
+        self.assertNotIn("unit_normal", facets[0])
+        self.assertNotIn("rotation_deg", facets[0])
+
+    def test_parses_ecsv_mirror_list_with_float_shape_code(self):
+        facets = parse_simtel_mirror_list(
+            "# %ECSV 1.0\n"
+            "mirror_x mirror_y mirror_diameter focal_length shape_type mirror_z mirror_panel_id\n"
+            "0.0 100.0 120.0 1600.0 3.0 0.0 7\n",
+            fallback_focal_length_m=None,
+        )
+        self.assertEqual(facets[0]["id"], 0)
+        self.assertEqual(facets[0]["shape"], "hexagon_flat_x")
+        self.assertEqual(facets[0]["focal_length_m"], 16.0)
+
+    def test_rejects_invalid_optional_mirror_height(self):
+        with self.assertRaisesRegex(OpticalModelCompileError, "invalid numeric field"):
+            parse_simtel_mirror_list("0 0 120 1600 1 missing\n", fallback_focal_length_m=16.0)
+
+    def test_zero_catalogue_fallback_allows_real_lst_rows_with_panel_focal_lengths(self):
+        # T-IR-007: the LST catalogue sets mirror_focal_length to zero while
+        # its mirror-list provides each panel's focal length.
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            ir = self.make_ir(
+                root,
+                mirror_contents="1022.49 -462.00 151.00 2912.50 3 0.0 #% id=198\n",
+                focal_cm=0.0,
+            )
+            optical_model = compile_optical_model(ir, root)
+        self.assertEqual(optical_model["primary"]["facets"][0]["focal_length_m"], 29.125)
+
+    def test_accepts_repository_root_containing_simulation_models_data_package(self):
+        # T-IR-008: importer and compiler accept the same released-checkout layout.
+        with TemporaryDirectory() as directory:
+            checkout = Path(directory) / "simulation-models-repository"
+            data_root = checkout / "simulation-models"
+            optical_model = compile_optical_model(self.make_ir(data_root), checkout)
+        self.assertEqual(len(optical_model["primary"]["facets"]), 1)
+
+    def test_hash_mismatch_and_malformed_records_fail_closed(self):
+        # T-IR-005: asset provenance and input syntax are validated before use.
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            ir = self.make_ir(root)
+            (root / "model_parameters/Files/mirrors.dat").write_text("0 0 120 0 1\n")
+            with self.assertRaisesRegex(OpticalModelCompileError, "IR assets differs"):
+                compile_optical_model(ir, root)
+        with self.assertRaisesRegex(OpticalModelCompileError, "unsupported shape"):
+            parse_simtel_mirror_list("0 0 120 1600 9\n", fallback_focal_length_m=16.0)
+
+    def test_deferred_asset_and_parameter_records_are_verified(self):
+        # T-IR-009: deferred input cannot change without invalidating provenance.
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            ir = self.make_ir(root)
+            (root / "model_parameters/Files/filter.dat").write_text("300 0.1\n")
+            with self.assertRaisesRegex(OpticalModelCompileError, "IR assets differs"):
+                compile_optical_model(ir, root)
+            (root / "model_parameters/Files/filter.dat").write_text("300 0.8\n400 0.9\n")
+            ir["parameters"]["camera_body_diameter"]["value"] = 999.0
+            with self.assertRaisesRegex(OpticalModelCompileError, "IR parameters differs"):
+                compile_optical_model(ir, root)
+
+    def test_parses_explicit_hex_and_ring_footprints(self):
+        # T-IR-010: ring groups expand to stable IDs; geometry remains 2D.
+        segments = parse_simtel_segmentation(
+            "hex 1 -85.6 0 84.6 0\nRING 2 100 200 180 -90 1.4 # cm and degrees\n"
+        )
+        self.assertEqual([segment["id"] for segment in segments], [0, 1, 2])
+        self.assertEqual(segments[0]["centre_xy_m"], [-0.856, 0.0])
+        self.assertEqual(segments[1]["inner_radius_m"], 1.0)
+        self.assertEqual(segments[2]["start_deg"], 90.0)
+        self.assertAlmostEqual(segments[1]["gap_m"], 0.014)
+        with self.assertRaisesRegex(OpticalModelCompileError, "unsupported type"):
+            parse_simtel_segmentation("polygon 1 0 0 1 0\n")
+
+    def test_defaults_omitted_segmentation_rotation_start_and_gap_to_zero(self):
+        segments = parse_simtel_segmentation("hex 1 -85.6 0 84.6\nring 2 100 200 180\n")
+        self.assertEqual(segments[0]["rotation_deg"], 0.0)
+        self.assertEqual(segments[1]["start_deg"], 0.0)
+        self.assertEqual(segments[2]["start_deg"], 180.0)
+        self.assertEqual(segments[1]["gap_m"], 0.0)
+
+    def test_compiles_dual_mirror_segmentation_without_invented_normals(self):
+        # T-IR-011: nullable mirror_list uses explicit segmentation assets.
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.make_ir(root)
+            parameter = root / "model_parameters/GENERIC/mirror_list/mirror_list-1.0.0.json"
+            data = json.loads(parameter.read_text())
+            data["value"] = None
+            parameter.write_text(json.dumps(data))
+            production = root / "productions/1.0.0/GENERIC.json"
+            data = json.loads(production.read_text())
+            for name, contents in (
+                ("primary_mirror_segmentation", "hex 1 0 0 80 0\n"),
+                ("secondary_mirror_segmentation", "RING 2 10 20 180 0 0\n"),
+            ):
+                (root / f"model_parameters/Files/{name}.dat").write_text(contents)
+                record = root / f"model_parameters/GENERIC/{name}/{name}-1.0.0.json"
+                record.parent.mkdir(parents=True)
+                record.write_text(
+                    json.dumps({
+                        "instrument": "GENERIC",
+                        "parameter": name,
+                        "parameter_version": "1.0.0",
+                        "type": "string",
+                        "unit": None,
+                        "value": f"{name}.dat",
+                        "file": True,
+                    })
+                )
+                data["parameters"]["GENERIC"][name] = "1.0.0"
+            production.write_text(json.dumps(data))
+            ir = resolve_model(root, "GENERIC", "1.0.0")
+            optical_model = compile_optical_model(ir, root)
+        self.assertEqual(optical_model["primary"]["kind"], "segmented_footprints")
+        self.assertEqual(len(optical_model["primary"]["segments"]), 1)
+        self.assertEqual(len(optical_model["secondary"]["segments"]), 2)
+        self.assertEqual(
+            optical_model["report"]["facet_geometry_evidence"]["normal_status"], "unavailable"
+        )
+
+    def test_camera_layout_count_and_nested_response_provenance(self):
+        # T-IR-012: camera channels are counted from the file, not only the record.
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.make_ir(root)
+            files = root / "model_parameters/Files"
+            (files / "response.dat").write_text("300 0.8\n")
+            (files / "camera.dat").write_text(
+                'PixType 1 0 2 0.6 2 0.7 0.1 "response.dat"\nPixel 0 1 0 0\nPixel 1 1 1 0\n'
+            )
+            production = root / "productions/1.0.0/GENERIC.json"
+            data = json.loads(production.read_text())
+            for name, value, is_file in (
+                ("camera_config_file", "camera.dat", True),
+                ("camera_pixels", 2, False),
+            ):
+                record = root / f"model_parameters/GENERIC/{name}/{name}-1.0.0.json"
+                record.parent.mkdir(parents=True)
+                record.write_text(
+                    json.dumps({
+                        "instrument": "GENERIC",
+                        "parameter": name,
+                        "parameter_version": "1.0.0",
+                        "type": "string" if is_file else "int64",
+                        "unit": None,
+                        "value": value,
+                        "file": is_file,
+                    })
+                )
+                data["parameters"]["GENERIC"][name] = "1.0.0"
+            production.write_text(json.dumps(data))
+            ir = resolve_model(root, "GENERIC", "1.0.0")
+            optical_model = compile_optical_model(ir, root)
+            self.assertEqual(optical_model["report"]["camera_layout_evidence"]["pixel_count"], 2)
+            self.assertIn("response.dat", optical_model["provenance"]["nested_assets"])
+            (files / "response.dat").unlink()
+            simtel_root = root / "sim_telarray"
+            fallback = simtel_root / "cfg" / "CTA" / "response.dat"
+            fallback.parent.mkdir(parents=True)
+            fallback.write_text("300 0.7\n")
+            optical_model = compile_optical_model(ir, root, simtel_root=simtel_root)
+            self.assertEqual(
+                optical_model["provenance"]["nested_assets"]["response.dat"]["source_root"],
+                "sim_telarray",
+            )
+            self.assertEqual(
+                optical_model["report"]["camera_layout_evidence"]["unresolved_response_files"], []
+            )
+            self.assertEqual(
+                compile_optical_model(ir, root)["report"]["camera_layout_evidence"][
+                    "unresolved_response_files"
+                ],
+                ["response.dat"],
+            )
+            count_record = root / "model_parameters/GENERIC/camera_pixels/camera_pixels-1.0.0.json"
+            data = json.loads(count_record.read_text())
+            data["value"] = 3
+            count_record.write_text(json.dumps(data))
+            with self.assertRaisesRegex(
+                OpticalModelCompileError, "focal-plane element count differs"
+            ):
+                compile_optical_model(resolve_model(root, "GENERIC", "1.0.0"), root)
+
+    def test_rejects_nonfinite_fallback_focal_length(self):
+        with self.assertRaisesRegex(OpticalModelCompileError, "finite and positive"):
+            parse_simtel_mirror_list("0 0 120 0 1\n", fallback_focal_length_m=float("nan"))
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -11,7 +11,7 @@ export OBDEECT_SIMULATION_MODELS_PATH=../simulation-models
 export OBDEECT_SIMULATION_MODELS_VERSION=7.0.0
 ```
 
-## Define and compile a telescope
+## Define an optical model
 
 The following commands demonstrate how to read the simulation model and
 compile the geometry required by `obdeect` for the ray tracing.

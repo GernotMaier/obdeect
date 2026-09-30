@@ -33,7 +33,7 @@ obdeect-simtools-raytrace --telescope MST --photons 10000 --output trace.csv
 python -m venv .venv
 source .venv/bin/activate
 python -m pip install -e '.[dev]'
-cmake --preset debug
+cmake --preset debug   # add '--target clean' if you want to clean the build directory before building
 cmake --build --preset debug
 ```
 
