@@ -10,6 +10,7 @@ validation matrix for architectural or scientific changes.
 
 ## Design rules
 
+- Never ever modify the main README.md. Suggest instead changes, don't apply them.
 - Keep it simple, efficient, deterministic, and portable. Prefer small,
   explicit data structures and testable physical kernels over frameworks,
   global state, hidden defaults, or abstraction in the hot path.

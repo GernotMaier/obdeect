@@ -1,22 +1,49 @@
 # obdeect
 
-`obdeect` traces optical photons through model-derived telescope geometry and
-writes photon paths and detector arrivals. It currently supports **nominal
-geometry studies**, not full CTAO production simulations.
+`obdeect` is a C++20 optical ray tracing prototype for imaging atmospheric
+Cherenkov telescopes. The C++ core uses only the standard library. Python
+provides plotting, PSF analysis, and model import tools.
+
+It currently supports **nominal geometry studies**, not full CTAO production simulations.
 
 For panel tests and more plots, see [optical-study recipes](docs/USE_CASES.md).
 
-## Install from this checkout
+## User Installation
+
+Install from PyPI with:
 
 ```sh
-python3 -m pip install -e .
+python -m venv .venv
+source .venv/bin/activate
+pip install -e .
 ```
 
-The package installs Python commands and the native tracer. For C++ development,
-run `cmake --preset debug && cmake --build --preset debug`. Executables are in
-`build/debug/` and tests in `build/debug/tests/`.
+Run a simple test to verify the installation:
 
-## Trace a star with a CTAO model
+```sh
+obdeect-simtools-raytrace --telescope MST --photons 10000 --output trace.csv
+```
+
+## Developer Installation
+
+```sh
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install -e '.[dev]'
+cmake --preset debug
+cmake --build --preset debug
+```
+
+Executables are in `build/debug/` and tests in `build/debug/tests/`.
+
+Test your installation with:
+
+```sh
+ctest --test-dir build/debug --output-on-failure
+python -m unittest discover -s python/tests
+```
+
+## Trace a star with a CTAO model *REQUIRES UPDATE*
 
 Set `MODEL_ROOT` to a `simulation-models` checkout. The example uses production
 7.0.0; select the version of your own model checkout. Run from the directory
@@ -55,7 +82,7 @@ the small versioned surface table (`*.surfaces.csv`) consumed by the C++
 tracer. These are generated from the selected model. `--scene-file` selects
 that table.
 
-## Nearby light sources
+## Nearby light sources *REQUIRES UPDATE*
 
 The illuminator samples rays from a finite position toward the dish with
 inverse-square and projected-area weights. The laser samples a beam around its
@@ -91,7 +118,7 @@ attenuation, and atmospheric scattering. `--emission-time-ns` and
 
 Use `--help` on every command for its complete input/output contract.
 
-## Results and limits
+## Results and limits *REQUIRES UPDATE*
 
 `obdeect-simtools-raytrace` writes `obdeect-arrival-v1` CSV. Each row records
 source kind, wavelength, emission time, input weight, terminal status, optical
@@ -106,3 +133,14 @@ supports, alignment perturbations, or detector response. The production validati
 rejects these scenes. Use the standard `simtools`/`sim_telarray` backend for
 CTAO production observables. See [status](docs/STATUS.md) and
 [production validation](docs/PRODUCTION_VALIDATION.md) for the completion gate.
+
+## License and Citation
+
+BSD-3-Clause license. Citation metadata is in [CITATION.cff](CITATION.cff).
+
+## Generative AI disclosure
+
+Generative AI tools were used to write much of this project; outputs were
+reviewed and validated by the authors.
+
+Generative AI tools (mostly ChatGPT 5.6) were used to write the entire code of this project. All AI-assisted outputs were reviewed, validated, and, where necessary, modified by the authors to ensure accuracy and reliability.
