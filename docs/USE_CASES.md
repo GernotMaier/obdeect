@@ -61,9 +61,29 @@ obdeect-plot-reference --view compiled-structure \
   --output lst-optical-model-structure.png
 ```
 
+For the panel layout as seen from the mirror, use the face-on view.  Each
+finite panel face is drawn and its colour gives its centre's z position.
+
+```sh
+obdeect-plot-reference --view compiled-mirror \
+  --optical-model-json lst.optical-model.json \
+  --output lst-primary-face.png
+```
+
+For a CAD-like, orthographic 3-D view, use the recorded optical surfaces.
+It renders the primary panels and focal detector surfaces available in the
+JSON; it does not invent masts, camera housings, or other mechanical parts
+that are not in the model.
+
+```sh
+obdeect-plot-reference --view compiled-3d \
+  --optical-model-json lst.optical-model.json \
+  --output lst-optical-model-3d.png
+```
+
 ### Single-panel 2F test stand
 
-Find the panel ID in `lst.geometry.json` under `primary.facets`. Place the source at the panel centre plus twice its `focal_length_m` along `nominal_normal`, and place a planar test screen at that point. Select the panel, then derive and plot the screen distribution.
+Find the panel ID in `lst.optical-model.json` under `primary.facets`. Place the source at the panel centre plus twice its `focal_length_m` along `nominal_normal`, and place a planar test screen at that point. Select the panel, then derive and plot the screen distribution.
 
 ```sh
 obdeect-simtools-raytrace --optical-model lst.optical-model.json \

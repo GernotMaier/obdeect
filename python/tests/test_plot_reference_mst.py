@@ -74,6 +74,39 @@ class TestTracePathReader(unittest.TestCase):
             extent = PLOT.compiled_focal_plane_extent(path)
         self.assertAlmostEqual(extent, math.hypot(0.2, -0.3) + 1.0)
 
+    def test_compiled_mirror_polygons_follow_serialised_facet_frame(self):
+        model = {
+            "trace_model": {
+                "kind": "segmented",
+                "primary_facets": [
+                    {
+                        "centre_m": [1.0, 2.0, 3.0],
+                        "normal": [0.0, 0.0, 1.0],
+                        "tangent": [1.0, 0.0, 0.0],
+                        "diameter_m": 2.0,
+                        "shape": "square",
+                    }
+                ],
+            }
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "model.json"
+            path.write_text(json.dumps(model))
+            facets = PLOT.compiled_facet_polygons(path)
+        vertices, height = facets[0]
+        self.assertEqual(height, 3.0)
+        self.assertEqual(len(vertices), 4)
+        self.assertEqual(vertices[0], (0.0, 1.0, 3.0))
+        self.assertEqual(vertices[2], (2.0, 3.0, 3.0))
+
+    def test_compiled_mirror_rejects_non_segmented_model(self):
+        model = {"trace_model": {"kind": "axisymmetric"}}
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "model.json"
+            path.write_text(json.dumps(model))
+            with self.assertRaisesRegex(ValueError, "segmented"):
+                PLOT.compiled_facet_polygons(path)
+
     def test_rejects_invalid_detected_focal_plane_data(self):
         csv_text = "status,point_count,x0_m,y0_m\ndetected,1,nan,0\n"
         with tempfile.TemporaryDirectory() as directory:

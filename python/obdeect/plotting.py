@@ -101,6 +101,101 @@ def compiled_focal_plane_extent(path: Path) -> float:
 TELESCOPE_NAMES = ("reference-mst", "LST", "MST", "SST", "SCT")
 
 
+def _vector3(value, description: str) -> tuple[float, float, float]:
+    """Return a finite three-vector from compiled-model JSON."""
+    if not isinstance(value, list) or len(value) != 3:
+        raise ValueError(f"{description} must be a three-vector")
+    result = tuple(float(component) for component in value)
+    if not all(math.isfinite(component) for component in result):
+        raise ValueError(f"{description} must be finite")
+    return result
+
+
+def _cross(left: tuple[float, float, float], right: tuple[float, float, float]):
+    return (
+        left[1] * right[2] - left[2] * right[1],
+        left[2] * right[0] - left[0] * right[2],
+        left[0] * right[1] - left[1] * right[0],
+    )
+
+
+def _normalised(vector: tuple[float, float, float], description: str):
+    length = math.sqrt(sum(component * component for component in vector))
+    if not math.isfinite(length) or length <= 0.0:
+        raise ValueError(f"{description} must have non-zero length")
+    return tuple(component / length for component in vector)
+
+
+def _aperture_local_vertices(shape: str, diameter_m: float):
+    """Return aperture-boundary points in a facet's tangent plane.
+
+    The model's diameter is the circle diameter, square side length, or regular
+    hexagon flat-to-flat distance, respectively.
+    """
+    if not math.isfinite(diameter_m) or diameter_m <= 0.0:
+        raise ValueError("facet diameter_m must be finite and positive")
+    if shape == "square":
+        half = diameter_m * 0.5
+        return ((-half, -half), (half, -half), (half, half), (-half, half))
+    if shape in {"hexagon_flat_x", "hexagon_flat_y"}:
+        radius = diameter_m / math.sqrt(3.0)
+        offset_deg = 30.0 if shape == "hexagon_flat_x" else 0.0
+        return tuple(
+            (
+                radius * math.cos(math.radians(offset_deg + 60.0 * index)),
+                radius * math.sin(math.radians(offset_deg + 60.0 * index)),
+            )
+            for index in range(6)
+        )
+    if shape == "circle":
+        return tuple(
+            (
+                diameter_m * 0.5 * math.cos(2.0 * math.pi * index / 32.0),
+                diameter_m * 0.5 * math.sin(2.0 * math.pi * index / 32.0),
+            )
+            for index in range(32)
+        )
+    raise ValueError(f"unsupported facet shape {shape!r}")
+
+
+def compiled_facet_polygons(path: Path):
+    """Return exact primary-aperture polygons from a segmented trace model.
+
+    Each result is ``(vertices, centre_z)`` where vertices are global 3-D
+    positions.  The function deliberately uses the serialised trace geometry,
+    so the face-on and 3-D views show what the tracer actually consumes.
+    """
+    try:
+        optical_model = json.loads(path.read_text(encoding="utf-8"))
+        trace_model = optical_model["trace_model"]
+        if trace_model["kind"] != "segmented":
+            raise ValueError("mirror-face views require a segmented trace model")
+        facets = trace_model["primary_facets"]
+        if not isinstance(facets, list) or not facets:
+            raise ValueError("compiled optical model contains no primary facets")
+        result = []
+        for index, facet in enumerate(facets):
+            centre = _vector3(facet["centre_m"], f"facet {index} centre_m")
+            normal = _normalised(_vector3(facet["normal"], f"facet {index} normal"), "facet normal")
+            tangent = _normalised(
+                _vector3(facet["tangent"], f"facet {index} tangent"), "facet tangent"
+            )
+            binormal = _normalised(_cross(normal, tangent), "facet tangent and normal")
+            diameter = float(facet["diameter_m"])
+            shape = str(facet["shape"])
+            vertices = tuple(
+                tuple(
+                    centre[axis] + tangent[axis] * local_x + binormal[axis] * local_y
+                    for axis in range(3)
+                )
+                for local_x, local_y in _aperture_local_vertices(shape, diameter)
+            )
+            result.append((vertices, centre[2]))
+        return result
+    except (KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
+        raise ValueError(f"{path}: invalid compiled primary-facet geometry: {error}") from error
+
+
 def draw_reference_telescope(axis, telescope: str):
     """Draw a side projection; reference models show optical surfaces only."""
     from matplotlib.patches import Rectangle
@@ -214,6 +309,127 @@ def draw_compiled_structure(plt, optical_model_path: Path, output: Path):
     figure.suptitle(subtitle)
     figure.tight_layout()
     figure.savefig(output, dpi=160, bbox_inches="tight")
+    plt.close(figure)
+
+
+def draw_compiled_mirror(plt, optical_model_path: Path, output: Path):
+    """Render the primary as seen from above, coloured by facet-centre height."""
+    from matplotlib.collections import PolyCollection
+
+    facets = compiled_facet_polygons(optical_model_path)
+    polygons = [[(vertex[0], vertex[1]) for vertex in vertices] for vertices, _ in facets]
+    heights = [height for _, height in facets]
+    figure, axis = plt.subplots(figsize=(9, 8))
+    collection = PolyCollection(
+        polygons,
+        array=heights,
+        cmap="viridis",
+        edgecolors="0.15",
+        linewidths=0.32,
+    )
+    axis.add_collection(collection)
+    axis.autoscale_view()
+    axis.set_aspect("equal", adjustable="box")
+    axis.set(xlabel="telescope x [m]", ylabel="telescope y [m]", title="Primary mirror face")
+    colourbar = figure.colorbar(collection, ax=axis, pad=0.02)
+    colourbar.set_label("facet-centre z [m]")
+    figure.suptitle("Compiled mirror panels, viewed along the optical axis")
+    figure.tight_layout()
+    figure.savefig(output, dpi=180, bbox_inches="tight")
+    plt.close(figure)
+
+
+def _detector_polygons(optical_model_path: Path):
+    """Return detector-surface boundary polygons available in a segmented model."""
+    try:
+        trace_model = json.loads(optical_model_path.read_text(encoding="utf-8"))["trace_model"]
+        detectors = trace_model["detector_surfaces"]
+        result = []
+        for index, detector in enumerate(detectors):
+            centre = _vector3(detector["centre_m"], f"detector {index} centre_m")
+            normal = _normalised(
+                _vector3(detector["normal"], f"detector {index} normal"), "detector normal"
+            )
+            tangent = _normalised(
+                _vector3(detector["tangent"], f"detector {index} tangent"), "detector tangent"
+            )
+            binormal = _normalised(_cross(normal, tangent), "detector tangent and normal")
+            vertices = tuple(
+                tuple(
+                    centre[axis] + tangent[axis] * local_x + binormal[axis] * local_y
+                    for axis in range(3)
+                )
+                for local_x, local_y in _aperture_local_vertices(
+                    str(detector["shape"]), float(detector["diameter_m"])
+                )
+            )
+            result.append(vertices)
+        return result
+    except (KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
+        raise ValueError(
+            f"{optical_model_path}: invalid compiled detector geometry: {error}"
+        ) from error
+
+
+def draw_compiled_3d(plt, optical_model_path: Path, output: Path):
+    """Render recorded optical surfaces in a CAD-like orthographic 3-D view."""
+    from matplotlib import colors
+    from mpl_toolkits.mplot3d.art3d import Poly3DCollection
+
+    facets = compiled_facet_polygons(optical_model_path)
+    detectors = _detector_polygons(optical_model_path)
+    heights = [height for _, height in facets]
+    colour_map = plt.get_cmap("viridis")
+    normaliser = colors.Normalize(vmin=min(heights), vmax=max(heights) or 1.0)
+    figure = plt.figure(figsize=(11, 8), layout="constrained")
+    axis = figure.add_subplot(projection="3d")
+    mirror = Poly3DCollection(
+        [vertices for vertices, _ in facets],
+        facecolors=[colour_map(normaliser(height)) for height in heights],
+        edgecolors="0.12",
+        linewidths=0.18,
+        alpha=0.98,
+    )
+    axis.add_collection3d(mirror)
+    if detectors:
+        camera = Poly3DCollection(
+            detectors,
+            facecolors="tab:orange",
+            edgecolors="0.15",
+            linewidths=0.4,
+            alpha=0.72,
+        )
+        axis.add_collection3d(camera)
+
+    all_vertices = [vertex for vertices, _ in facets for vertex in vertices]
+    all_vertices.extend(vertex for vertices in detectors for vertex in vertices)
+    limits = []
+    for coordinate in range(3):
+        values = [vertex[coordinate] for vertex in all_vertices]
+        centre = (min(values) + max(values)) * 0.5
+        limits.append((centre, max(max(values) - min(values), 1.0)))
+    largest_span = max(span for _, span in limits)
+    for coordinate, (centre, _) in enumerate(limits):
+        getattr(axis, f"set_{'xyz'[coordinate]}lim")(
+            centre - largest_span * 0.55, centre + largest_span * 0.55
+        )
+    axis.set_box_aspect((1, 1, max(limits[2][1] / largest_span, 0.25)))
+    axis.set_proj_type("ortho")
+    axis.view_init(elev=23, azim=-57)
+    axis.set(xlabel="x [m]", ylabel="y [m]", zlabel="z [m]")
+    axis.set_title("Compiled optical geometry")
+    colourbar = figure.colorbar(
+        plt.cm.ScalarMappable(norm=normaliser, cmap=colour_map), ax=axis, shrink=0.62, pad=0.08
+    )
+    colourbar.set_label("primary facet-centre z [m]")
+    figure.text(
+        0.5,
+        0.02,
+        "Primary panels and focal detector surfaces present in the optical-model JSON",
+        ha="center",
+        fontsize=9,
+    )
+    figure.savefig(output, dpi=180, bbox_inches="tight")
     plt.close(figure)
 
 
@@ -380,9 +596,16 @@ def main():
     parser.add_argument("--max-paths", type=int, default=300)
     parser.add_argument(
         "--view",
-        choices=("structure", "compiled-structure", "rays", "focal-plane"),
+        choices=(
+            "structure",
+            "compiled-structure",
+            "compiled-mirror",
+            "compiled-3d",
+            "rays",
+            "focal-plane",
+        ),
         default="rays",
-        help="structure outline, recorded ray paths, or weighted focal-plane image",
+        help="telescope outline, compiled-model geometry, recorded ray paths, or focal-plane image",
     )
     parser.add_argument(
         "--focal-plane",
@@ -396,7 +619,7 @@ def main():
     parser.add_argument(
         "--optical-model-json",
         type=Path,
-        help="compiled optical model JSON for compiled-structure or focal-plane views",
+        help="compiled optical model JSON for compiled views or focal-plane extent",
     )
     parser.add_argument(
         "--telescope",
@@ -407,12 +630,13 @@ def main():
     args = parser.parse_args()
     if args.max_paths < 1 or args.bins < 1:
         parser.error("--max-paths and --bins must be positive")
-    if args.input is None and args.view not in {"structure", "compiled-structure"}:
+    compiled_views = {"compiled-structure", "compiled-mirror", "compiled-3d"}
+    if args.input is None and args.view not in {"structure", *compiled_views}:
         parser.error("--input is required for rays and focal plane")
     if args.focal_plane and args.view != "rays":
         parser.error("--focal-plane cannot be combined with --view")
-    if args.view == "compiled-structure" and args.optical_model_json is None:
-        parser.error("--optical-model-json is required for --view compiled-structure")
+    if args.view in compiled_views and args.optical_model_json is None:
+        parser.error(f"--optical-model-json is required for --view {args.view}")
 
     if args.focal_plane and args.output.suffix.lower() == ".svg":
         draw_focal_plane_svg(
@@ -435,6 +659,12 @@ def main():
         return
     if args.view == "compiled-structure":
         draw_compiled_structure(plt, args.optical_model_json, args.output)
+        return
+    if args.view == "compiled-mirror":
+        draw_compiled_mirror(plt, args.optical_model_json, args.output)
+        return
+    if args.view == "compiled-3d":
+        draw_compiled_3d(plt, args.optical_model_json, args.output)
         return
     if args.focal_plane or args.view == "focal-plane":
         draw_focal_plane(
