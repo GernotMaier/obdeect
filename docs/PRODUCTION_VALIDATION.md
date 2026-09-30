@@ -38,15 +38,15 @@ make a failed comparison pass.
 ## Reproducible command sequence
 
 ```sh
-MODEL_ROOT=/path/to/simulation-models
+export OBDEECT_SIMULATION_MODELS_PATH=/path/to/simulation-models
 SIMTEL_ROOT=/path/to/sim_telarray
 MODEL=LSTN-design
 
 obdeect-import-simulation-models \
-  --source-root "$MODEL_ROOT" --model "$MODEL" --version 7.0.0 \
+  --source-root "$OBDEECT_SIMULATION_MODELS_PATH" --model "$MODEL" --version 7.0.0 \
   --output "$MODEL.ir.json"
 obdeect-compile-scene \
-  --input "$MODEL.ir.json" --source-root "$MODEL_ROOT" \
+  --input "$MODEL.ir.json" --source-root "$OBDEECT_SIMULATION_MODELS_PATH" \
   --simtel-root "$SIMTEL_ROOT" --require-trace-ready \
   --output "$MODEL.scene.json" --native-output "$MODEL.scene.csv"
 

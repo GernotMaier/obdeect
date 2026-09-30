@@ -32,6 +32,7 @@ validation matrix for architectural or scientific changes.
 - CTAO support is an explicit importer/adapter or versioned fixture only. It
   must not be required to build, test, or run the generic engine, and it must
   never be an implicit fallback.
+- Use python >3.14. Do not fall back to earlier versions.
 
 ## Changes and validation
 

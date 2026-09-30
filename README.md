@@ -43,6 +43,8 @@ ctest --test-dir build/debug --output-on-failure
 python -m unittest discover -s python/tests
 ```
 
+
+
 ## Trace a star with a CTAO model *REQUIRES UPDATE*
 
 Set `MODEL_ROOT` to a `simulation-models` checkout. The example uses production

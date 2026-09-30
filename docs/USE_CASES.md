@@ -1,25 +1,33 @@
 # Optical-study recipes
 
-Run commands from the `obdeect` checkout after installing the package. Set `MODEL_ROOT` to a checked-out `simulation-models` repository. The importer accepts either the repository root or its nested `simulation-models/` data directory.
+Example use cases for the `obdeect` ray tracing package.
+
+Requires a simulation models as defined in the [CTAO simulation models repository](https://gitlab.cta-observatory.org/cta-science/simulations/simulation-model/simulation-models).
+
+The following two environment variables might be useful:
 
 ```sh
-MODEL_ROOT=../simulation-models
-MODEL_VERSION=7.0.0
+export OBDEECT_SIMULATION_MODELS_PATH=../simulation-models
+export OBDEECT_SIMULATION_MODELS_VERSION=7.0.0
 ```
 
-## Select and compile a telescope
+## Define and compile a telescope
 
-This creates auditable geometry from the selected production. LST/MST export
+The following commands demonstrate how to read the simulation model and
+compile the geometry required by `obdeect` for the ray tracing.
+
+This creates geometry from the selected production. LST/MST export
 finite planar panels; SST/SCT export their model-defined rotationally symmetric
 M1, M2, and curved focal-surface prescriptions. These nominal surfaces still
 need the production acceptance comparisons described below.
 
 ```sh
 obdeect-import-simulation-models \
-  --source-root "$MODEL_ROOT" --model LSTN-design --version "$MODEL_VERSION" \
+  --source-root "$OBDEECT_SIMULATION_MODELS_PATH" --model LSTN-design \
+  --version "$OBDEECT_SIMULATION_MODELS_VERSION" \
   --output lst.ir.json
 obdeect-compile-scene \
-  --input lst.ir.json --source-root "$MODEL_ROOT" \
+  --input lst.ir.json --source-root "$OBDEECT_SIMULATION_MODELS_PATH" \
   --output lst.geometry.json --native-output lst.surfaces.csv
 ```
 
