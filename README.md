@@ -6,7 +6,7 @@ provides plotting, PSF analysis, and model import tools.
 
 It currently supports **nominal geometry studies**, not full CTAO production simulations.
 
-For panel tests and more plots, see [optical-study recipes](docs/USE_CASES.md).
+For example use cases, see [optical-study recipes](docs/USE_CASES.md).
 
 ## User Installation
 
@@ -15,10 +15,13 @@ Install from PyPI with:
 ```sh
 python -m venv .venv
 source .venv/bin/activate
-pip install -e .
+python -m pip install obdeect-dev
 ```
 
-Run a simple test to verify the installation:
+(requires python 3.14 or higher)
+
+Run a simple test to verify the installation.
+The following command simulate a simple ray tracing scenario of a mid-size telescope:
 
 ```sh
 obdeect-simtools-raytrace --telescope MST --photons 10000 --output trace.csv
@@ -43,17 +46,10 @@ ctest --test-dir build/debug --output-on-failure
 python -m unittest discover -s python/tests
 ```
 
-## Recipes
-
-See [optical-study recipes](docs/USE_CASES.md).
-
 ## License and Citation
 
 BSD-3-Clause license. Citation metadata is in [CITATION.cff](CITATION.cff).
 
 ## Generative AI disclosure
-
-Generative AI tools were used to write much of this project; outputs were
-reviewed and validated by the authors.
 
 Generative AI tools (mostly ChatGPT 5.6) were used to write the entire code of this project. All AI-assisted outputs were reviewed, validated, and, where necessary, modified by the authors to ensure accuracy and reliability.
