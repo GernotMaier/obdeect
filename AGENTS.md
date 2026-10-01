@@ -43,6 +43,12 @@ validation matrix for architectural or scientific changes.
   provenance for fixtures and cross-tool comparisons.
 - Do not weaken tolerances or replace golden data to hide a discrepancy. Keep
   examples and fixtures clearly labelled and configuration-driven.
+- When renaming a public concept, update implementation symbols, imports,
+  exception types, serialized keys, fixture variables, and test call sites
+  together. For scene-to-optical-model renames, do not leave stale references
+  such as `write_native_scene`, `SceneCompileError`, `scene_sha256`, or local
+  variables named `scene` in optical-model tests unless they intentionally test
+  backward compatibility.
 
 ## Build, test, and lint
 
@@ -63,6 +69,11 @@ xargs -0 clang-format --dry-run --Werror
 Ruff is configured with a 100-character line limit. Run `ruff format` before
 `ruff check`, and manually wrap long strings or boolean expressions that the
 formatter leaves unchanged.
+
+After renames, search the affected Python files for removed symbols and run
+the focused tests before the full suite. A clean handoff requires both
+`ruff format --check python` and `ruff check python`; do not rely on a passing
+test run alone because stale test references can fail collection or linting.
 
 Run `clang-tidy -p build/debug cpp/src/<changed-file>.cpp` for changed C++
 translation units when available, and `pre-commit run --all-files` before
