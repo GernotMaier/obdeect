@@ -341,9 +341,7 @@ def main():
     parser = argparse.ArgumentParser(
         description="Plot an obdeect telescope reference outline and traced paths."
     )
-    parser.add_argument(
-        "paths", type=Path, nargs="?", help="trace CSV (required for rays and focal plane)"
-    )
+    parser.add_argument("--input", type=Path, help="trace CSV (required for rays and focal plane)")
     parser.add_argument("--output", type=Path, default=Path("artificial_mst_paths.png"))
     parser.add_argument("--max-paths", type=int, default=300)
     parser.add_argument(
@@ -375,15 +373,15 @@ def main():
     args = parser.parse_args()
     if args.max_paths < 1 or args.bins < 1:
         parser.error("--max-paths and --bins must be positive")
-    if args.paths is None and args.view not in {"structure", "compiled-structure"}:
-        parser.error("paths CSV is required for rays and focal plane")
+    if args.input is None and args.view not in {"structure", "compiled-structure"}:
+        parser.error("--input is required for rays and focal plane")
     if args.focal_plane and args.view != "rays":
         parser.error("--focal-plane cannot be combined with --view")
     if args.view == "compiled-structure" and args.scene_json is None:
         parser.error("--scene-json is required for --view compiled-structure")
 
     if args.focal_plane and args.output.suffix.lower() == ".svg":
-        draw_focal_plane_svg(args.paths, args.output, args.bins, args.telescope)
+        draw_focal_plane_svg(args.input, args.output, args.bins, args.telescope)
         return
 
     try:
@@ -403,9 +401,9 @@ def main():
         draw_compiled_structure(plt, args.scene_json, args.output)
         return
     if args.focal_plane or args.view == "focal-plane":
-        draw_focal_plane(plt, args.paths, args.output, args.bins, args.telescope)
+        draw_focal_plane(plt, args.input, args.output, args.bins, args.telescope)
         return
-    draw_rays(plt, args.paths, args.telescope, args.output, args.max_paths)
+    draw_rays(plt, args.input, args.telescope, args.output, args.max_paths)
 
 
 if __name__ == "__main__":

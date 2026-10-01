@@ -81,6 +81,7 @@ class TestTracePathReader(unittest.TestCase):
                     sys.executable,
                     "-m",
                     "obdeect.plotting",
+                    "--input",
                     str(path),
                     "--focal-plane",
                     "--telescope",

@@ -11,9 +11,9 @@ A comparison begins with a JSON configuration containing these required keys:
 The `obdeect-reference-manifest` tool freezes the selected model records and assets, the model checkout revision, and SHA-256 hashes for all listed files and command executables. Verification resolves the selected production again and fails if a file or revision changed. The caller supplies version identifiers; the tool does not claim to detect an installed sim_telarray or hessio release.
 
 ```sh
-obdeect-reference-manifest freeze reference.json \
+obdeect-reference-manifest --action freeze --input reference.json \
   --model-root /path/to/simulation-models --output frozen.json
-obdeect-reference-manifest verify frozen.json \
+obdeect-reference-manifest --action verify --input frozen.json \
   --model-root /path/to/simulation-models
 ```
 

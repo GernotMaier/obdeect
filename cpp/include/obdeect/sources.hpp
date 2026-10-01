@@ -91,8 +91,8 @@ inline std::vector<OpticalPhoton> star_photons(std::size_t count, double pupil_r
   const auto positions = fibonacci_pupil_points(count, pupil_radius_m, source.source_plane_z_m);
   photons.reserve(positions.size());
   // Samples on a horizontal launch plane have different phases for an
-  // off-axis plane wave.  Carry that phase as an emission time so translating
-  // the launch plane cannot change arrival-time differences at the pupil.
+  // off-axis plane wave. Points farther along the propagation direction
+  // cross a common wavefront later: t(r) = d dot (r - reference) / c.
   const Vec3 reference{0.0, 0.0, source.source_plane_z_m};
   for (std::size_t index = 0; index < positions.size(); ++index) {
     photons.push_back({{positions[index], *direction}, static_cast<std::uint64_t>(index),
@@ -179,6 +179,21 @@ inline std::vector<OpticalPhoton> laser_photons(std::size_t count, double pupil_
                        0.0, 1.0});
   }
   return photons;
+}
+
+// Apply a deterministic top-hat emission profile without changing the source
+// geometry or the plane-wave phase already carried by star photons.  The
+// profile is useful for optical arrival-time studies; source-specific spectra
+// and pulse shapes remain an adapter responsibility.
+inline bool apply_top_hat_emission_times(std::vector<OpticalPhoton>& photons, double start_ns,
+                                         double width_ns) {
+  if (!std::isfinite(start_ns) || !std::isfinite(width_ns) || width_ns < 0.0) return false;
+  if (photons.empty()) return true;
+  const double count = static_cast<double>(photons.size());
+  for (std::size_t index = 0; index < photons.size(); ++index) {
+    photons[index].time_ns += start_ns + width_ns * (static_cast<double>(index) + 0.5) / count;
+  }
+  return true;
 }
 
 }  // namespace obdeect

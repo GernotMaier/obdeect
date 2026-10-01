@@ -2,9 +2,11 @@
 
 #include "obdeect/math.hpp"
 #include "obdeect/model_import.hpp"
+#include "obdeect/intersections.hpp"
 
 #include <cstdint>
 #include <cmath>
+#include <algorithm>
 #include <optional>
 #include <unordered_set>
 #include <utility>
@@ -28,6 +30,9 @@ struct ImportedFacet {
   // It is supplied by the model adapter; tracing must not manufacture a
   // telescope-specific panel rotation from a dish prescription.
   Vec3 unit_tangent_u{};
+  // Positive radius of the panel's spherical optical surface. A zero value
+  // represents a planar panel and is retained for generic plane scenes.
+  double curvature_radius_m{};
 };
 
 // A generic finite planar optical-arrival surface. Its placement and aperture
@@ -42,26 +47,73 @@ struct ImportedDetectorSurface {
   Vec3 unit_tangent_u{};
 };
 
+// An opaque finite cylinder supplied by a model adapter.  It is deliberately
+// separate from optical surfaces because it has no reflective or transmissive
+// branch: the first intersection terminates the photon as a component loss.
+struct ImportedCylinderObscurer {
+  std::uint32_t id{};
+  Vec3 first_endpoint_m{};
+  Vec3 second_endpoint_m{};
+  double diameter_m{};
+};
+
+struct SpectralResponse {
+  std::vector<double> wavelength_nm;
+  std::vector<double> response;
+
+  [[nodiscard]] bool is_valid() const {
+    if (wavelength_nm.size() < 2 || wavelength_nm.size() != response.size()) return false;
+    for (std::size_t index = 0; index < wavelength_nm.size(); ++index) {
+      if (!std::isfinite(wavelength_nm[index]) || !std::isfinite(response[index]) ||
+          wavelength_nm[index] <= 0.0 || response[index] < 0.0 || response[index] > 1.0 ||
+          (index > 0 && wavelength_nm[index] <= wavelength_nm[index - 1])) return false;
+    }
+    return true;
+  }
+
+  [[nodiscard]] std::optional<double> at(double wavelength) const {
+    if (!is_valid() || wavelength < wavelength_nm.front() || wavelength > wavelength_nm.back()) return std::nullopt;
+    const auto upper = std::lower_bound(wavelength_nm.begin(), wavelength_nm.end(), wavelength);
+    if (upper == wavelength_nm.begin()) return response.front();
+    if (upper == wavelength_nm.end()) return response.back();
+    if (*upper == wavelength) return response[upper - wavelength_nm.begin()];
+    const auto index = static_cast<std::size_t>(upper - wavelength_nm.begin());
+    const double fraction = (wavelength - wavelength_nm[index - 1]) /
+                            (wavelength_nm[index] - wavelength_nm[index - 1]);
+    return response[index - 1] + fraction * (response[index] - response[index - 1]);
+  }
+};
+
 struct ImportedSegmentedScene {
   ModelProvenance provenance;
   std::vector<ImportedFacet> primary_facets;
   std::vector<ImportedDetectorSurface> detector_surfaces;
+  std::vector<ImportedCylinderObscurer> cylinder_obscurers;
+  std::optional<SpectralResponse> primary_reflectivity;
 
   ImportedSegmentedScene(ModelProvenance imported_provenance, std::vector<ImportedFacet> imported_facets,
-                         std::vector<ImportedDetectorSurface> imported_detectors = {})
+                         std::vector<ImportedDetectorSurface> imported_detectors = {},
+                         std::vector<ImportedCylinderObscurer> imported_obscurers = {},
+                         std::optional<SpectralResponse> imported_reflectivity = std::nullopt)
       : provenance(std::move(imported_provenance)), primary_facets(std::move(imported_facets)),
-        detector_surfaces(std::move(imported_detectors)) {}
+        detector_surfaces(std::move(imported_detectors)), cylinder_obscurers(std::move(imported_obscurers)),
+        primary_reflectivity(std::move(imported_reflectivity)) {}
 };
 
 struct CompiledSegmentedScene {
   ModelProvenance provenance;
   std::vector<ImportedFacet> primary_facets;
   std::vector<ImportedDetectorSurface> detector_surfaces;
+  std::vector<ImportedCylinderObscurer> cylinder_obscurers;
+  std::optional<SpectralResponse> primary_reflectivity;
 
   CompiledSegmentedScene(ModelProvenance compiled_provenance, std::vector<ImportedFacet> compiled_facets,
-                         std::vector<ImportedDetectorSurface> compiled_detectors = {})
+                         std::vector<ImportedDetectorSurface> compiled_detectors = {},
+                         std::vector<ImportedCylinderObscurer> compiled_obscurers = {},
+                         std::optional<SpectralResponse> compiled_reflectivity = std::nullopt)
       : provenance(std::move(compiled_provenance)), primary_facets(std::move(compiled_facets)),
-        detector_surfaces(std::move(compiled_detectors)) {}
+        detector_surfaces(std::move(compiled_detectors)), cylinder_obscurers(std::move(compiled_obscurers)),
+        primary_reflectivity(std::move(compiled_reflectivity)) {}
 };
 
 [[nodiscard]] inline bool has_valid_provenance(const ModelProvenance& provenance) {
@@ -84,7 +136,8 @@ struct CompiledSegmentedScene {
          std::isfinite(facet.centre_m.y) &&
          std::isfinite(facet.centre_m.z) && std::isfinite(facet.diameter_m) &&
          std::isfinite(facet.focal_length_m) && facet.diameter_m > kEpsilon &&
-         facet.focal_length_m > kEpsilon;
+         facet.focal_length_m > kEpsilon && std::isfinite(facet.curvature_radius_m) &&
+         facet.curvature_radius_m >= 0.0;
 }
 
 [[nodiscard]] inline bool is_valid(const ImportedDetectorSurface& surface) {
@@ -96,6 +149,14 @@ struct CompiledSegmentedScene {
   return normal.has_value() && orientation_is_valid && std::isfinite(surface.centre_m.x) &&
          std::isfinite(surface.centre_m.y) && std::isfinite(surface.centre_m.z) &&
          std::isfinite(surface.diameter_m) && surface.diameter_m > kEpsilon;
+}
+
+[[nodiscard]] inline bool is_valid(const ImportedCylinderObscurer& obscurer) {
+  return std::isfinite(obscurer.first_endpoint_m.x) && std::isfinite(obscurer.first_endpoint_m.y) &&
+         std::isfinite(obscurer.first_endpoint_m.z) && std::isfinite(obscurer.second_endpoint_m.x) &&
+         std::isfinite(obscurer.second_endpoint_m.y) && std::isfinite(obscurer.second_endpoint_m.z) &&
+         std::isfinite(obscurer.diameter_m) && obscurer.diameter_m > kEpsilon &&
+         norm(obscurer.second_endpoint_m - obscurer.first_endpoint_m) > kEpsilon;
 }
 
 [[nodiscard]] inline bool is_valid(const CompiledSegmentedScene& scene) {
@@ -110,6 +171,10 @@ struct CompiledSegmentedScene {
   for (const auto& detector : scene.detector_surfaces) {
     if (!is_valid(detector) || !ids.insert(detector.id).second) return false;
   }
+  for (const auto& obscurer : scene.cylinder_obscurers) {
+    if (!is_valid(obscurer) || !ids.insert(obscurer.id).second) return false;
+  }
+  if (scene.primary_reflectivity && !scene.primary_reflectivity->is_valid()) return false;
   return true;
 }
 
@@ -129,7 +194,12 @@ struct CompiledSegmentedScene {
   for (const auto& detector : input.detector_surfaces) {
     if (!is_valid(detector) || !ids.insert(detector.id).second) return std::nullopt;
   }
-  return CompiledSegmentedScene{input.provenance, input.primary_facets, input.detector_surfaces};
+  for (const auto& obscurer : input.cylinder_obscurers) {
+    if (!is_valid(obscurer) || !ids.insert(obscurer.id).second) return std::nullopt;
+  }
+  if (input.primary_reflectivity && !input.primary_reflectivity->is_valid()) return std::nullopt;
+  return CompiledSegmentedScene{input.provenance, input.primary_facets, input.detector_surfaces,
+                                input.cylinder_obscurers, input.primary_reflectivity};
 }
 
 // A planar, finite panel hit.  The mirror-list diameter convention is kept
@@ -142,22 +212,27 @@ struct SegmentedFacetHit {
   Vec3 unit_normal{};
 };
 
-[[nodiscard]] inline bool contains_facet_point(const ImportedFacet& facet, const Vec3& point_m) {
-  const auto normal = normalised_checked(facet.unit_normal);
+[[nodiscard]] inline bool contains_planar_aperture_point(const Vec3& centre_m, const Vec3& unit_normal,
+                                                         const Vec3& unit_tangent_u, double diameter_m,
+                                                         FacetShape shape, const Vec3& point_m) {
+  const auto normal = normalised_checked(unit_normal);
   if (!normal) return false;
-  const Vec3 displacement = point_m - facet.centre_m;
+  const Vec3 displacement = point_m - centre_m;
   if (std::abs(dot(displacement, *normal)) > kEpsilon) return false;
-  if (facet.shape == FacetShape::circle) return norm(displacement) <= facet.diameter_m * 0.5 + kEpsilon;
+  if (shape == FacetShape::circle) {
+    const double radius_m = diameter_m * 0.5 + kEpsilon;
+    return dot(displacement, displacement) <= radius_m * radius_m;
+  }
 
-  const auto tangent_u = normalised_checked(facet.unit_tangent_u);
+  const auto tangent_u = normalised_checked(unit_tangent_u);
   if (!tangent_u || std::abs(dot(*normal, *tangent_u)) > kEpsilon) return false;
   const auto tangent_v = normalised_checked(cross(*normal, *tangent_u));
   if (!tangent_v) return false;
   const double u = dot(displacement, *tangent_u);
   const double v = dot(displacement, *tangent_v);
-  const double apothem = facet.diameter_m * 0.5;
+  const double apothem = diameter_m * 0.5;
   constexpr double sqrt_three = 1.7320508075688772935;
-  switch (facet.shape) {
+  switch (shape) {
     case FacetShape::square:
       return std::abs(u) <= apothem + kEpsilon && std::abs(v) <= apothem + kEpsilon;
     case FacetShape::hexagon_flat_y:
@@ -173,35 +248,14 @@ struct SegmentedFacetHit {
   return false;
 }
 
-[[nodiscard]] inline bool contains_detector_point(const ImportedDetectorSurface& surface, const Vec3& point_m) {
-  const auto normal = normalised_checked(surface.unit_normal);
-  if (!normal) return false;
-  const Vec3 displacement = point_m - surface.centre_m;
-  if (std::abs(dot(displacement, *normal)) > kEpsilon) return false;
-  if (surface.shape == FacetShape::circle) return norm(displacement) <= surface.diameter_m * 0.5 + kEpsilon;
+[[nodiscard]] inline bool contains_facet_point(const ImportedFacet& facet, const Vec3& point_m) {
+  return contains_planar_aperture_point(facet.centre_m, facet.unit_normal, facet.unit_tangent_u,
+                                       facet.diameter_m, facet.shape, point_m);
+}
 
-  const auto tangent_u = normalised_checked(surface.unit_tangent_u);
-  if (!tangent_u || std::abs(dot(*normal, *tangent_u)) > kEpsilon) return false;
-  const auto tangent_v = normalised_checked(cross(*normal, *tangent_u));
-  if (!tangent_v) return false;
-  const double u = dot(displacement, *tangent_u);
-  const double v = dot(displacement, *tangent_v);
-  const double apothem = surface.diameter_m * 0.5;
-  constexpr double sqrt_three = 1.7320508075688772935;
-  switch (surface.shape) {
-    case FacetShape::square:
-      return std::abs(u) <= apothem + kEpsilon && std::abs(v) <= apothem + kEpsilon;
-    case FacetShape::hexagon_flat_y:
-      return std::abs(v) <= apothem + kEpsilon &&
-             std::abs(sqrt_three * u + v) <= 2.0 * apothem + kEpsilon &&
-             std::abs(sqrt_three * u - v) <= 2.0 * apothem + kEpsilon;
-    case FacetShape::hexagon_flat_x:
-      return std::abs(u) <= apothem + kEpsilon &&
-             std::abs(u + sqrt_three * v) <= 2.0 * apothem + kEpsilon &&
-             std::abs(u - sqrt_three * v) <= 2.0 * apothem + kEpsilon;
-    case FacetShape::circle: break;
-  }
-  return false;
+[[nodiscard]] inline bool contains_detector_point(const ImportedDetectorSurface& surface, const Vec3& point_m) {
+  return contains_planar_aperture_point(surface.centre_m, surface.unit_normal, surface.unit_tangent_u,
+                                       surface.diameter_m, surface.shape, point_m);
 }
 
 [[nodiscard]] inline std::optional<SegmentedFacetHit> intersect_segmented_facet_unchecked(
@@ -210,13 +264,34 @@ struct SegmentedFacetHit {
   const auto direction = normalised_checked(ray.direction);
   const auto normal = normalised_checked(facet.unit_normal);
   if (!direction || !normal) return std::nullopt;
-  const double denominator = dot(*direction, *normal);
-  if (std::abs(denominator) <= kEpsilon) return std::nullopt;
-  const double distance_m = dot(facet.centre_m - ray.position_m, *normal) / denominator;
-  if (!std::isfinite(distance_m) || distance_m <= minimum_t_m) return std::nullopt;
-  const Vec3 point_m = ray.position_m + *direction * distance_m;
-  if (!contains_facet_point(facet, point_m)) return std::nullopt;
-  return SegmentedFacetHit{facet.id, distance_m, point_m, *normal};
+  if (facet.curvature_radius_m == 0.0) {
+    const double denominator = dot(*direction, *normal);
+    if (std::abs(denominator) <= kEpsilon) return std::nullopt;
+    const double distance_m = dot(facet.centre_m - ray.position_m, *normal) / denominator;
+    if (!std::isfinite(distance_m) || distance_m <= minimum_t_m) return std::nullopt;
+    const Vec3 point_m = ray.position_m + *direction * distance_m;
+    if (!contains_facet_point(facet, point_m)) return std::nullopt;
+    return SegmentedFacetHit{facet.id, distance_m, point_m, *normal};
+  }
+  const Vec3 sphere_centre = facet.centre_m - *normal * facet.curvature_radius_m;
+  const Vec3 offset = ray.position_m - sphere_centre;
+  const double projection = dot(offset, *direction);
+  const double discriminant = projection * projection -
+                              (dot(offset, offset) - facet.curvature_radius_m * facet.curvature_radius_m);
+  if (!std::isfinite(discriminant) || discriminant < 0.0) return std::nullopt;
+  const double root = std::sqrt(std::max(0.0, discriminant));
+  for (const double distance_m : {-projection - root, -projection + root}) {
+    if (!std::isfinite(distance_m) || distance_m <= minimum_t_m) continue;
+    const Vec3 point_m = ray.position_m + *direction * distance_m;
+    const auto surface_normal = normalised_checked(point_m - sphere_centre);
+    if (!surface_normal || dot(*surface_normal, *normal) <= 0.0) continue;
+    const Vec3 tangent_displacement = point_m - facet.centre_m -
+                                      *normal * dot(point_m - facet.centre_m, *normal);
+    const Vec3 aperture_point = facet.centre_m + tangent_displacement;
+    if (contains_facet_point(facet, aperture_point))
+      return SegmentedFacetHit{facet.id, distance_m, point_m, *surface_normal};
+  }
+  return std::nullopt;
 }
 
 [[nodiscard]] inline std::optional<SegmentedFacetHit> intersect_segmented_facet(
@@ -247,6 +322,23 @@ struct DetectorSurfaceHit {
   Vec3 point_m{};
   Vec3 unit_normal{};
 };
+
+struct CylinderObscurerHit {
+  std::uint32_t surface_id{};
+  double distance_m{};
+};
+
+[[nodiscard]] inline std::optional<CylinderObscurerHit> intersect_cylinder_obscurers_unchecked(
+    const Ray& ray, const CompiledSegmentedScene& scene) {
+  std::optional<CylinderObscurerHit> nearest;
+  for (const auto& obscurer : scene.cylinder_obscurers) {
+    const auto distance_m = intersect_closed_finite_cylinder(
+        ray, obscurer.first_endpoint_m, obscurer.second_endpoint_m, obscurer.diameter_m * 0.5);
+    if (distance_m && (!nearest || *distance_m < nearest->distance_m))
+      nearest = CylinderObscurerHit{obscurer.id, *distance_m};
+  }
+  return nearest;
+}
 
 [[nodiscard]] inline std::optional<DetectorSurfaceHit> intersect_detector_surface_unchecked(
     const Ray& ray, const ImportedDetectorSurface& surface, double minimum_t_m = kEpsilon) {

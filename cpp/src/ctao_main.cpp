@@ -8,12 +8,14 @@
 #include <iostream>
 #include <numbers>
 #include <string>
+#include <vector>
 
 namespace {
 void usage() {
-  std::cout << "Usage: obdeect_ctao --telescope LST|MST|SST|SCT [--photons N] [--output paths.csv]\n"
-            << "                     [--field-x-deg D] [--field-y-deg D] [--wavelength-nm D]\n"
-            << "Trace monochromatic parallel reference photons through an axisymmetric CTAO optical prescription.\n";
+  std::cout << "Usage: obdeect-analytic-optics --telescope LST|MST|SST|SCT [--photons N] [--output paths.csv]\n"
+            << "                                [--field-x-deg D] [--field-y-deg D] [--wavelength-nm N[,N...]]\n"
+            << "Developer diagnostic: trace a discrete spectrum of parallel photons through an analytic prescription.\n"
+            << "Use obdeect-simtools-raytrace --scene-file for model-derived CTAO geometry.\n";
 }
 }  // namespace
 
@@ -25,16 +27,17 @@ int main(int argc, char** argv) {
   std::string output_path{"ctao_paths.csv"};
   double field_x_deg = 0.0;
   double field_y_deg = 0.0;
-  double wavelength_nm = 400.0;
+  std::vector<double> wavelengths_nm{400.0};
   for (int index = 1; index < argc; ++index) {
     const std::string argument{argv[index]};
+    if (argument == "-h" || argument == "--help") { usage(); return 0; }
     if (argument == "--telescope" && index + 1 < argc) { telescope_name = argv[++index]; continue; }
     if (argument == "--photons" && index + 1 < argc && parse_positive_size(argv[++index], photon_count)) continue;
     if (argument == "--output" && index + 1 < argc) { output_path = argv[++index]; continue; }
     if (argument == "--field-x-deg" && index + 1 < argc && parse_finite_double(argv[++index], field_x_deg)) continue;
     if (argument == "--field-y-deg" && index + 1 < argc && parse_finite_double(argv[++index], field_y_deg)) continue;
-    if (argument == "--wavelength-nm" && index + 1 < argc && parse_finite_double(argv[++index], wavelength_nm) &&
-        wavelength_nm > 0.0) {
+    if (argument == "--wavelength-nm" && index + 1 < argc &&
+        obdeect::parse_wavelengths_nm(argv[++index], wavelengths_nm)) {
       continue;
     }
     usage();
@@ -48,7 +51,7 @@ int main(int argc, char** argv) {
   const double radians_per_degree = std::numbers::pi / 180.0;
   const auto photons = obdeect::star_photons(
       photon_count, model->primary_outer_radius_m,
-      {field_x_deg * radians_per_degree, field_y_deg * radians_per_degree, 60.0, wavelength_nm});
+      {field_x_deg * radians_per_degree, field_y_deg * radians_per_degree, 60.0, wavelengths_nm.front()});
   std::ofstream output{output_path};
   if (!output) {
     std::cerr << "Cannot write " << output_path << '\n';
@@ -59,7 +62,9 @@ int main(int argc, char** argv) {
             "x0_m,y0_m,z0_m,x1_m,y1_m,z1_m,"
             "x2_m,y2_m,z2_m,x3_m,y3_m,z3_m\n";
   std::size_t detected = 0;
-  for (const auto& photon : photons) {
+  for (std::size_t index = 0; index < photons.size(); ++index) {
+    auto photon = photons[index];
+    photon.wavelength_nm = wavelengths_nm[index % wavelengths_nm.size()];
     auto path = obdeect::trace_ctao_reference(photon.ray, photon.photon_id, *model);
     path.wavelength_nm = photon.wavelength_nm;
     detected += path.status == obdeect::PhotonStatus::detected;
@@ -70,8 +75,8 @@ int main(int argc, char** argv) {
     for (const auto& point : path.points_m) output << ',' << point.x << ',' << point.y << ',' << point.z;
     output << '\n';
   }
-  std::cout << model->identifier << " reference optical trace: " << photon_count << ' ' << wavelength_nm
-            << "-nm photons\n"
+  std::cout << "Tracing analytic " << model->identifier << " diagnostic: " << photon_count << " photons across "
+            << wavelengths_nm.size() << " wavelength sample(s)\n"
             << "  detected: " << detected << " (" << 100.0 * detected / photon_count << "%)\n"
             << "  paths: " << output_path << '\n';
   return 0;

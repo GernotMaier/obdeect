@@ -93,6 +93,7 @@ class TestPsfAnalysis(unittest.TestCase):
                 [
                     "obdeect-psf",
                     "derive",
+                    "--input",
                     str(trace),
                     "--field-x-deg",
                     "0.5",
@@ -128,7 +129,7 @@ class TestPsfAnalysis(unittest.TestCase):
                     "field_x_deg": [0.0000001, 0.0000002],
                     "field_y_deg": 0.0,
                     "photons": 4,
-                    "executable": root / "obdeect_reference",
+                    "executable": root / "obdeect-demo-mst",
                     "extra_argument": [],
                     "plot": None,
                 },
@@ -153,6 +154,29 @@ class TestPsfAnalysis(unittest.TestCase):
             )
             with self.assertRaisesRegex(ValueError, "missing final focal-plane vertex"):
                 analyse_trace_csv(path)
+
+    def test_missing_or_invalid_weights_fail_closed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = self._trace(Path(directory))
+            contents = path.read_text()
+            for corrupted, message in (
+                (contents.replace("detected,2,0.2,1,", "detected,2,,1,"), "missing source_weight"),
+                (
+                    contents.replace("blocked_camera,1,1,0,", "unknown,1,1,0,"),
+                    "invalid terminal status",
+                ),
+                (
+                    contents.replace("detected,2,0.2,1,", "detected,2,0.2,1.1,"),
+                    "throughput must not exceed 1",
+                ),
+                (
+                    contents.replace("blocked_camera,1,1,0,", "blocked_camera,1,1,0.5,"),
+                    "lost photon has nonzero throughput",
+                ),
+            ):
+                path.write_text(corrupted)
+                with self.assertRaisesRegex(ValueError, message):
+                    analyse_trace_csv(path)
 
 
 if __name__ == "__main__":

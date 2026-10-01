@@ -8,16 +8,12 @@ description = "Ray tracing for imaging atmospheric Cherenkov telescopes"
 readme = "README.md"
 license = { file = "LICENSE" }
 authors = [ { name = "obdeect contributors" } ]
-requires-python = ">=3.10"
+requires-python = ">=3.14"
 classifiers = [
   "Development Status :: 2 - Pre-Alpha",
   "License :: OSI Approved :: BSD License",
   "Programming Language :: C++",
   "Programming Language :: Python :: 3 :: Only",
-  "Programming Language :: Python :: 3.10",
-  "Programming Language :: Python :: 3.11",
-  "Programming Language :: Python :: 3.12",
-  "Programming Language :: Python :: 3.13",
   "Programming Language :: Python :: 3.14",
 ]
 dynamic = [ "version" ]
@@ -25,14 +21,17 @@ dependencies = [
   "matplotlib>=3.8",
 ]
 optional-dependencies.dev = [ "pre-commit", "pytest", "ruff", "towncrier" ]
+scripts.obdeect-analytic-optics = "obdeect.cli:analytic_optics_main"
 scripts.obdeect-compile-scene = "obdeect.scene_compiler:main"
-scripts.obdeect-ctao = "obdeect.cli:ctao_main"
+scripts.obdeect-demo-mst = "obdeect.cli:demo_mst_main"
 scripts.obdeect-import-simulation-models = "obdeect.model_import:main"
+scripts.obdeect-normalize-arrivals = "obdeect.arrival_normalizer:main"
+scripts.obdeect-photon-distributions = "obdeect.photon_distributions:main"
 scripts.obdeect-plot-reference = "obdeect.plotting:main"
 scripts.obdeect-psf = "obdeect.analysis:main"
-scripts.obdeect-reference = "obdeect.cli:reference_main"
 scripts.obdeect-reference-manifest = "obdeect.reference_manifest:main"
 scripts.obdeect-simtools-raytrace = "obdeect.cli:simtools_raytrace_main"
+scripts.obdeect-validate-production = "obdeect.production_validation:main"
 
 [tool.setuptools_scm]
 fallback_version = "0.1.0"

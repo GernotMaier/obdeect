@@ -50,6 +50,16 @@ int main() {
   const auto tilted_star = star_photons(128, 6.0, {0.02, 0.0, 50.0, 400.0});
   require(tilted_star.front().time_ns != tilted_star.back().time_ns,
           "off-axis star has launch-plane phase times");
+  // A plane perpendicular to the propagation direction is one wavefront.
+  // Propagating every launch sample to it must give the same arrival time.
+  const Vec3 direction = tilted_star.front().ray.direction;
+  const Vec3 reference{0.0, 0.0, 50.0};
+  const double reference_plane = dot(direction, reference);
+  for (const auto& photon : tilted_star) {
+    const double distance = reference_plane - dot(direction, photon.ray.position_m);
+    const double arrival_ns = photon.time_ns + distance / kSpeedOfLightMPerNs;
+    require(std::abs(arrival_ns) < 1e-12, "off-axis star samples share one wavefront");
+  }
 
   // T-SRC-012: a finite illuminator has pupil-dependent direction and 1/r^2 weight.
   const auto illuminator = illuminator_photons(128, 6.0, {{0.0, 0.0, 30.0}, 400.0, 2.0});
@@ -80,6 +90,15 @@ int main() {
           "laser launch samples use a plane normal to the beam");
   require(std::abs(laser.front().ray.position_m.x - 1.5) < 1e-12,
           "laser launch plane retains configured transverse origin");
+
+  // T-SRC-014: a pulse preserves any source-specific phase already present
+  // and adds a deterministic emission-time distribution.
+  const auto original_star_time = tilted_star.front().time_ns;
+  auto pulsed_star = tilted_star;
+  require(apply_top_hat_emission_times(pulsed_star, 4.0, 8.0), "valid top-hat pulse");
+  require(std::abs(pulsed_star.front().time_ns - (original_star_time + 4.0 + 8.0 / 256.0)) < 1e-14,
+          "pulse adds start and deterministic width without losing star phase");
+  require(!apply_top_hat_emission_times(pulsed_star, 0.0, -1.0), "negative pulse width is rejected");
 
   std::cout << "source tests passed\n";
 }

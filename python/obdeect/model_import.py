@@ -18,6 +18,67 @@ class ImportError(ValueError):
     """An input violates the simulation-models manifest contract."""
 
 
+# Optical transport ends at the physical detector surface.  This explicit
+# allow-list prevents camera electronics, trigger, gain, and calibration
+# settings from leaking into a ray-tracing scene IR.
+RAY_TRACING_PARAMETERS = frozenset({
+    "axes_offsets",
+    "camera_body_diameter",
+    "camera_body_shape",
+    "camera_depth",
+    "camera_filter",
+    "camera_pixel_layout",
+    "camera_pixels",
+    "camera_transmission",
+    "dish_shape_length",
+    "effective_focal_length",
+    "focal_length",
+    "focus_offset",
+    "lightguide_efficiency_vs_incidence_angle",
+    "mirror_align_random_distance",
+    "mirror_align_random_horizontal",
+    "mirror_align_random_vertical",
+    "mirror_class",
+    "mirror_degraded_reflection",
+    "mirror_focal_length",
+    "mirror_list",
+    "mirror_offset",
+    "mirror_reflection_random_angle",
+    "mirror_reflectivity",
+    "optics_properties",
+    "parabolic_dish",
+    "primary_mirror_segmentation",
+    "primary_mirror_degraded_map",
+    "primary_mirror_diameter",
+    "primary_mirror_hole_diameter",
+    "primary_mirror_incidence_angle",
+    "primary_mirror_parameters",
+    "primary_mirror_ref_radius",
+    "secondary_mirror_segmentation",
+    "secondary_mirror_baffle",
+    "secondary_mirror_degraded_map",
+    "secondary_mirror_degraded_reflection",
+    "secondary_mirror_diameter",
+    "secondary_mirror_hole_diameter",
+    "secondary_mirror_incidence_angle",
+    "secondary_mirror_parameters",
+    "secondary_mirror_ref_radius",
+    "secondary_mirror_reflectivity",
+    "secondary_mirror_shadow_diameter",
+    "secondary_mirror_shadow_offset",
+    "focal_surface_parameters",
+    "focal_surface_ref_radius",
+    "camera_config_file",
+    "telescope_axis_height",
+    "telescope_obscuration_cylinders",
+    "telescope_obscuration_quadrilaterals",
+    "telescope_random_angle",
+    "telescope_random_error",
+    "telescope_sphere_radius",
+    "telescope_transmission",
+})
+
+
 def sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
@@ -87,6 +148,8 @@ def resolve_model(root: Path, model: str, version: str) -> dict[str, Any]:
     for name, parameter_version in sorted(tables[model].items()):
         if not component(name) or not component(parameter_version):
             raise ImportError("parameter names and versions must be strings")
+        if name not in RAY_TRACING_PARAMETERS:
+            continue
         parameter_path = (
             root / "model_parameters" / model / name / f"{name}-{parameter_version}.json"
         )
@@ -134,15 +197,22 @@ def resolve_model(root: Path, model: str, version: str) -> dict[str, Any]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Import a selected simulation-models production manifest."
+        description="Import ray-tracing inputs from a selected simulation-models production."
     )
-    parser.add_argument("root", type=Path, help="path to the simulation-models repository root")
-    parser.add_argument("model", help="production table, e.g. LSTN-design")
+    parser.add_argument(
+        "--source-root", type=Path, required=True, help="simulation-models repository root"
+    )
+    parser.add_argument("--model", required=True, help="production table, e.g. LSTN-design")
     parser.add_argument("--version", required=True, help="production model version")
     parser.add_argument("--output", type=Path, required=True, help="destination scene-IR JSON")
     args = parser.parse_args()
     try:
-        scene = resolve_model(args.root, args.model, args.version)
+        scene = resolve_model(args.source_root, args.model, args.version)
     except ImportError as error:
         raise SystemExit(f"import failed: {error}") from error
     args.output.write_text(json.dumps(scene, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    print(f"Imported ray-tracing inputs for {args.model} {args.version} into {args.output}")
+
+
+if __name__ == "__main__":
+    main()

@@ -14,6 +14,8 @@ from collections.abc import Iterable
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+from obdeect.result_contract import TERMINAL_STATUSES
+
 
 @dataclass(frozen=True)
 class FocalPlaneHit:
@@ -46,8 +48,10 @@ class PsfResult:
 
 
 def _finite_nonnegative(value: str | None, field: str, path: Path, row_number: int) -> float:
+    if value in (None, ""):
+        raise ValueError(f"{path}:{row_number}: missing {field}")
     try:
-        result = float(value if value not in (None, "") else "1")
+        result = float(value)
     except ValueError as error:
         raise ValueError(f"{path}:{row_number}: invalid {field}") from error
     if not math.isfinite(result) or result < 0.0:
@@ -81,22 +85,26 @@ def analyse_trace_csv(path: Path) -> PsfResult:
     hits: list[FocalPlaneHit] = []
     with path.open(newline="") as handle:
         reader = csv.DictReader(handle)
-        required = {"status", "point_count"}
+        required = {"status", "point_count", "source_weight", "throughput"}
         if reader.fieldnames is None or not required.issubset(reader.fieldnames):
-            raise ValueError(f"{path}: CSV must contain status and point_count columns")
+            raise ValueError(f"{path}: CSV must contain {', '.join(sorted(required))} columns")
         for row_number, row in enumerate(reader, start=2):
             status = row["status"]
-            if not status:
-                raise ValueError(f"{path}:{row_number}: terminal status is required")
+            if status not in TERMINAL_STATUSES:
+                raise ValueError(f"{path}:{row_number}: invalid terminal status")
             source_weight = _finite_nonnegative(
                 row.get("source_weight"), "source_weight", path, row_number
             )
+            throughput = _finite_nonnegative(row.get("throughput"), "throughput", path, row_number)
+            if throughput > 1.0:
+                raise ValueError(f"{path}:{row_number}: throughput must not exceed 1")
+            if status != "detected" and throughput != 0.0:
+                raise ValueError(f"{path}:{row_number}: lost photon has nonzero throughput")
             input_weight += source_weight
             terminal_count[status] += 1
             terminal_input_weight[status] += source_weight
             if status != "detected":
                 continue
-            throughput = _finite_nonnegative(row.get("throughput"), "throughput", path, row_number)
             x, y = _final_hit(row, path, row_number)
             weight = source_weight * throughput
             detected_weight += weight
@@ -246,7 +254,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
     derive = commands.add_parser("derive", help="analyse existing trace CSV output")
-    derive.add_argument("paths", type=Path, nargs="+")
+    derive.add_argument("--input", dest="paths", type=Path, nargs="+", required=True)
     derive.add_argument("--field-x-deg", type=float, nargs="*", default=[])
     derive.add_argument("--output", type=Path, required=True)
     derive.add_argument("--scan-csv", type=Path)

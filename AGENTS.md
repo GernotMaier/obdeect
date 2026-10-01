@@ -10,6 +10,7 @@ validation matrix for architectural or scientific changes.
 
 ## Design rules
 
+- Never ever modify the main README.md. Suggest instead changes, don't apply them.
 - Keep it simple, efficient, deterministic, and portable. Prefer small,
   explicit data structures and testable physical kernels over frameworks,
   global state, hidden defaults, or abstraction in the hot path.
@@ -31,6 +32,7 @@ validation matrix for architectural or scientific changes.
 - CTAO support is an explicit importer/adapter or versioned fixture only. It
   must not be required to build, test, or run the generic engine, and it must
   never be an implicit fallback.
+- Use python >3.14. Do not fall back to earlier versions.
 
 ## Changes and validation
 
@@ -55,8 +57,12 @@ python -m unittest discover -s python/tests
 ruff format --check python
 ruff check python
 find cpp -type f \( -name '*.cpp' -o -name '*.hpp' \) -print0 | \
-  xargs -0 clang-format --dry-run --Werror
+xargs -0 clang-format --dry-run --Werror
 ```
+
+Ruff is configured with a 100-character line limit. Run `ruff format` before
+`ruff check`, and manually wrap long strings or boolean expressions that the
+formatter leaves unchanged.
 
 Run `clang-tidy -p build/debug cpp/src/<changed-file>.cpp` for changed C++
 translation units when available, and `pre-commit run --all-files` before
