@@ -2,6 +2,16 @@
 name: build-obdeect
 
 on:
+  pull_request:
+    paths:
+      - ".dockerignore"
+      - "Dockerfile"
+      - ".github/workflows/build-obdeect.yml"
+      - "CMakeLists.txt"
+      - "CMakePresets.json"
+      - "cpp/**"
+      - "python/**"
+      - "pyproject.toml"
   release:
     types: [published]
 
@@ -27,14 +37,14 @@ jobs:
       contents: read
       packages: write
     env:
-      BASE_TAG: ${{ github.event.release.tag_name }}
+      BASE_TAG: ${{ github.event_name == 'release' && github.event.release.tag_name || format('pr-{0}', github.event.pull_request.number) }}
       RUN_TAG: ${{ github.run_id }}-${{ github.run_attempt }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
           fetch-depth: 0
-          ref: ${{ github.event.release.tag_name }}
+          ref: ${{ github.event_name == 'release' && github.event.release.tag_name || github.sha }}
 
       - name: Set build metadata
         run: |
@@ -45,6 +55,7 @@ jobs:
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069  # v4
 
       - name: Log in to the container registry
+        if: github.event_name == 'release'
         uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f  # v4
         with:
           registry: ${{ env.REGISTRY }}
@@ -71,7 +82,7 @@ jobs:
             RUNTIME_IMAGE=${{ env.RUNTIME_IMAGE }}
             OBDEECT_VERSION=${{ env.OBDEECT_VERSION }}
             OBDEECT_REVISION=${{ github.sha }}
-          push: true
+          push: ${{ github.event_name == 'release' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
@@ -97,7 +108,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
           fetch-depth: 0
-          ref: ${{ github.event.release.tag_name }}
+          ref: ${{ github.event_name == 'release' && github.event.release.tag_name || github.sha }}
 
       - name: Configure, build, and test
         run: |
@@ -119,8 +130,8 @@ jobs:
             'obdeect_build_type: "Release"' \
             'obdeect_build_testing: true' \
             'reference_executables:' \
-            '  - obdeect_toy' \
-            '  - obdeect_ctao' > "${RUNNER_TEMP}/${package}/build_opts.yml"
+            '  - obdeect-demo-mst' \
+            '  - obdeect-analytic-optics' > "${RUNNER_TEMP}/${package}/build_opts.yml"
           tar -C "$RUNNER_TEMP" -czf "${package}.tar.gz" "$package"
           shasum -a 256 "${package}.tar.gz" > "${package}.tar.gz.sha256"
 
@@ -134,6 +145,7 @@ jobs:
           if-no-files-found: error
 
   publish:
+    if: github.event_name == 'release'
     needs: [build, build-macos]
     runs-on: ubuntu-24.04
     permissions:

@@ -704,6 +704,11 @@ def compile_optical_model(ir: dict[str, Any], source_root: Path) -> dict[str, An
                 else []
             ),
             *[f"camera response asset is missing: {name}" for name in unresolved_references],
+            *(
+                ["cylinder obscurers are not supported by axisymmetric native export"]
+                if dual_surfaces is not None and primary.get("cylinder_obscurers")
+                else []
+            ),
         ],
         "facet_geometry_evidence": evidence,
     }
@@ -976,6 +981,166 @@ def build_trace_model(optical_model: dict[str, Any]) -> dict[str, Any]:
             for wavelength, response in reflectivity
         ],
     }
+
+
+def native_surface_rows(
+    optical_model: dict[str, Any],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[tuple[float, float]]]:
+    """Return the planar surfaces used by the dependency-free native writer."""
+    return trace_surface_rows(optical_model)
+
+
+def write_native_optical_model(optical_model: dict[str, Any], output: Path) -> None:
+    """Write the strict, dependency-free native optical model surface table."""
+    primary = optical_model.get("primary", {})
+    secondary = optical_model.get("secondary", {})
+    focal = optical_model.get("focal_surface", {})
+    if (
+        isinstance(primary, dict)
+        and isinstance(secondary, dict)
+        and isinstance(focal, dict)
+        and isinstance(primary.get("aspheric_surface"), dict)
+        and secondary.get("kind") == "aspheric_mirror"
+    ):
+        _write_native_axisymmetric_optical_model(optical_model, output)
+        return
+
+    rows, obscurers, reflectivity = native_surface_rows(optical_model)
+    provenance = optical_model.get("provenance", {})
+    model = provenance.get("model")
+    version = provenance.get("model_version")
+    content_hash = optical_model.get("optical_model_sha256")
+    if (
+        not isinstance(model, str)
+        or not isinstance(version, str)
+        or "," in model
+        or "," in version
+        or not isinstance(content_hash, str)
+        or len(content_hash) != 64
+    ):
+        raise OpticalModelCompileError("native export requires model provenance")
+    lines = [
+        "obdeect-optical-model-v1",
+        f"provenance,{model},{version},{content_hash}",
+        "surface_id,role,shape,cx_m,cy_m,cz_m,nx,ny,nz,tx,ty,tz,diameter_m,focal_length_m",
+    ]
+    for row in rows:
+        centre = row["centre_m"]
+        normal = row["normal"]
+        tangent = row["tangent"]
+        lines.append(
+            ",".join([
+                str(row["surface_id"]),
+                row["role"],
+                row["shape"],
+                *(f"{value:.17g}" for value in (*centre, *normal, *tangent, row["diameter_m"])),
+                f"{row.get('focal_length_m', 0.0):.17g}",
+            ])
+        )
+    for obscurer in obscurers:
+        lines.append(
+            ",".join([
+                "obscurer_cylinder",
+                str(obscurer["surface_id"]),
+                *(
+                    f"{value:.17g}"
+                    for value in (
+                        *obscurer["first"],
+                        *obscurer["second"],
+                        obscurer["diameter_m"],
+                    )
+                ),
+            ])
+        )
+    for wavelength, value in reflectivity:
+        lines.append(f"primary_reflectivity,{wavelength:.17g},{value:.17g}")
+    output.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _write_native_axisymmetric_optical_model(optical_model: dict[str, Any], output: Path) -> None:
+    """Write an exact rotationally symmetric SST/SCT optical prescription."""
+    provenance = optical_model.get("provenance", {})
+    model = provenance.get("model")
+    version = provenance.get("model_version")
+    content_hash = optical_model.get("optical_model_sha256")
+    if (
+        not isinstance(model, str)
+        or not isinstance(version, str)
+        or not isinstance(content_hash, str)
+        or len(content_hash) != 64
+        or "," in model
+        or "," in version
+    ):
+        raise OpticalModelCompileError("native export requires valid model provenance")
+
+    primary_source = optical_model["primary"]
+    if primary_source.get("cylinder_obscurers"):
+        raise OpticalModelCompileError(
+            "native axisymmetric export cannot represent cylinder obscurers"
+        )
+    primary = primary_source["aspheric_surface"]
+    secondary = optical_model["secondary"]
+    focal = optical_model.get("focal_surface")
+    if not isinstance(focal, dict) or focal.get("outer_radius_m") is None:
+        raise OpticalModelCompileError("native dual-mirror export requires a bounded focal surface")
+
+    def row(role: str, surface: dict[str, Any]) -> str:
+        coefficients = surface.get("coefficient_m")
+        outer = surface.get("outer_radius_m")
+        inner = surface.get("inner_radius_m", 0.0)
+        scale = surface.get("radial_scale_m", 1.0)
+        if (
+            not isinstance(coefficients, list)
+            or len(coefficients) != 13
+            or not all(
+                isinstance(value, (int, float)) and math.isfinite(value) for value in coefficients
+            )
+            or not all(
+                isinstance(value, (int, float)) and math.isfinite(value)
+                for value in (inner, outer, scale)
+            )
+            or inner < 0
+            or outer <= inner
+            or scale <= 0
+        ):
+            raise OpticalModelCompileError(f"invalid {role} aspheric surface")
+        local = [float(value) for value in coefficients]
+        vertex = local[0]
+        local[0] = 0.0
+        return ",".join([
+            role,
+            *(f"{value:.17g}" for value in (vertex, inner, outer, scale, *local)),
+        ])
+
+    lines = [
+        "obdeect-axisymmetric-optical-model-v1",
+        f"provenance,{model},{version},{content_hash}",
+        "role,vertex_z_m,inner_radius_m,outer_radius_m,radial_scale_m,c0_m,c1_m,c2_m,c3_m,c4_m,c5_m,c6_m,c7_m,c8_m,c9_m,c10_m,c11_m,c12_m",
+        row("primary", primary),
+        row("secondary", secondary),
+        row("detector", focal),
+    ]
+    for role, response_source in (("primary", primary_source), ("secondary", secondary)):
+        response = response_source.get("reflectivity", [])
+        if not isinstance(response, list):
+            raise OpticalModelCompileError(f"invalid {role} reflectivity")
+        for entry in response:
+            if not isinstance(entry, dict):
+                raise OpticalModelCompileError(f"invalid {role} reflectivity")
+            try:
+                wavelength = float(entry["wavelength_nm"])
+                value = float(entry["response"])
+            except (KeyError, TypeError, ValueError) as error:
+                raise OpticalModelCompileError(f"invalid {role} reflectivity") from error
+            if (
+                not math.isfinite(wavelength)
+                or not math.isfinite(value)
+                or wavelength <= 0
+                or not 0 <= value <= 1
+            ):
+                raise OpticalModelCompileError(f"invalid {role} reflectivity")
+            lines.append(f"{role}_reflectivity,{wavelength:.17g},{value:.17g}")
+    output.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def _axisymmetric_trace_model(optical_model: dict[str, Any]) -> dict[str, Any]:

@@ -21,7 +21,7 @@ python -m pip install obdeect-dev
 (requires python 3.14 or higher)
 
 Run a simple test to verify the installation.
-The following command simulate a simple ray tracing scenario of a mid-size telescope:
+The following command simulates a simple ray tracing scenario of a mid-size telescope:
 
 ```sh
 obdeect-simtools-raytrace --telescope MST --photons 10000 --output trace.csv

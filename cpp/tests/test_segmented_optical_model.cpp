@@ -138,8 +138,15 @@ int main() {
   require(obscured_optical_model.has_value(), "optical_model with cylinder obscurer compiles");
   const auto obscured = trace(*obscured_optical_model, input);
   require(obscured.photons.status[0] == PhotonStatus::blocked_obscurer &&
-              obscured.photons.surface_id[0] == obscurer.id,
-          "opaque cylinder blocks before primary mirror");
+              obscured.photons.surface_id[0] == obscurer.id &&
+              obscured.photons.position_m[0].z == 4.0 &&
+              std::abs(obscured.photons.optical_path_m[0] - 1.0) < 1.e-12 &&
+              std::abs(obscured.photons.time_ns[0] - (7.0 + 1.0 / speed_of_light_m_per_ns)) < 1.e-12,
+          "opaque cylinder records its incoming terminal state");
+
+  auto invalid_response = SpectralResponse{{300.0, 200.0}, {0.7, 0.9}};
+  require(!compile_segmented_optical_model({provenance, {facet}, {}, {}, invalid_response}),
+          "unordered spectral response fails during optical model compilation");
 
   const SpectralResponse reflectivity{{300.0, 500.0}, {0.7, 0.9}};
   require(reflectivity.is_valid() && std::abs(*reflectivity.at(400.0) - 0.8) < 1.e-12 &&

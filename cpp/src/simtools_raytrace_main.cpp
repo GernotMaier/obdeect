@@ -212,6 +212,9 @@ int main(int argc, char** argv) {
         const auto incoming_obscurer = obdeect::intersect_cylinder_obscurers_unchecked(ray, *imported_optical_model);
         const auto primary_hit = obdeect::intersect_segmented_primary_unchecked(ray, *imported_optical_model);
         if (incoming_obscurer && (!primary_hit || incoming_obscurer->distance_m < primary_hit->distance_m)) {
+          path.points_m[1] = ray.position_m + ray.direction * incoming_obscurer->distance_m;
+          path.point_count = 2;
+          path.path_length_m = incoming_obscurer->distance_m;
           path.status = obdeect::PhotonStatus::blocked_obscurer;
           path.final_direction = *direction;
         } else if (!primary_hit) {

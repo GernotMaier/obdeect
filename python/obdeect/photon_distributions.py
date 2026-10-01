@@ -138,12 +138,10 @@ def write_distribution_svg(distributions: PhotonDistributions, output: Path) -> 
             green = round(35 + 170 * intensity)
             blue = round(70 + 80 * (1 - intensity))
             cells.append(
-                f'width="{cell:.3f}" height="{cell:.3f}" fill="#{red:02x}{green:02x}{blue:02x}"/>'
                 f'<rect x="{map_x + x_index * cell:.3f}" '
                 f'y="{map_y + (bins - 1 - y_index) * cell:.3f}" '
                 f'width="{cell:.3f}" height="{cell:.3f}" '
                 f'fill="#{red:02x}{green:02x}{blue:02x}"/>'
-                f'width="{cell:.3f}" height="{cell:.3f}" fill="#{red:02x}{green:02x}{blue:02x}"/>'
             )
     svg = [
         '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1120 610">',
