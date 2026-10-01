@@ -101,6 +101,11 @@ def update_summary(summary_path: Path, root: Path, *, check: bool = False) -> No
     """Verify archived photon bytes and attach numerical PSF products."""
     summary = json.loads(summary_path.read_text())
     for row in summary["rows"]:
+        if "imaging_list_archive" not in row or "imaging_list_archive" not in row.get("sha256", {}):
+            raise ValueError(
+                "summary has no archived imaging list; provide a frozen reference manifest "
+                "that includes imaging_list_archive and its hash"
+            )
         archive = root / row["imaging_list_archive"]
         compressed = archive.read_bytes()
         if _sha256(compressed) != row["sha256"]["imaging_list_archive"]:
@@ -152,11 +157,22 @@ def update_summary(summary_path: Path, root: Path, *, check: bool = False) -> No
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--reference-dir", type=Path, required=True)
+    parser.add_argument(
+        "--manifest",
+        type=Path,
+        required=True,
+        help="external frozen summary.json containing archived imaging-list references",
+    )
+    parser.add_argument(
+        "--reference-dir",
+        type=Path,
+        help="directory containing the manifest archives (defaults to the manifest directory)",
+    )
     parser.add_argument("--check", action="store_true", help="verify without rewriting products")
     args = parser.parse_args()
-    update_summary(args.reference_dir / "summary.json", args.reference_dir, check=args.check)
-    print(f"Verified derived PSF products in {args.reference_dir}")
+    reference_dir = args.reference_dir or args.manifest.parent
+    update_summary(args.manifest, reference_dir, check=args.check)
+    print(f"Verified derived PSF products in {reference_dir}")
 
 
 if __name__ == "__main__":

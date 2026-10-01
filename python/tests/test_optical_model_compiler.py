@@ -241,6 +241,56 @@ class TestOpticalModelCompiler(unittest.TestCase):
         assert lines[2].startswith("surface_id,role,shape,")
         assert any(",detector,circle," in line for line in lines[3:])
 
+    def test_axisymmetric_export_preserves_outer_primary_reflectivity(self):
+        surface = {
+            "coefficient_m": [0.0] * 13,
+            "inner_radius_m": 0.0,
+            "outer_radius_m": 2.0,
+            "radial_scale_m": 1.0,
+        }
+        optical_model = {
+            "provenance": {"model": "GENERIC", "model_version": "1.0.0"},
+            "optical_model_sha256": "a" * 64,
+            "primary": {
+                "aspheric_surface": surface,
+                "reflectivity": [
+                    {"wavelength_nm": 300.0, "response": 0.8},
+                    {"wavelength_nm": 500.0, "response": 0.9},
+                ],
+            },
+            "secondary": {"kind": "aspheric_mirror", **surface},
+            "focal_surface": surface,
+        }
+        with TemporaryDirectory() as directory:
+            output = Path(directory) / "axisymmetric.csv"
+            write_native_optical_model(optical_model, output)
+            lines = output.read_text().splitlines()
+        self.assertTrue(any(line.startswith("primary_reflectivity,300,0.8") for line in lines))
+        self.assertTrue(any(line.startswith("primary_reflectivity,500,0.9") for line in lines))
+
+    def test_axisymmetric_export_rejects_unrepresented_obscurers(self):
+        surface = {
+            "coefficient_m": [0.0] * 13,
+            "inner_radius_m": 0.0,
+            "outer_radius_m": 2.0,
+            "radial_scale_m": 1.0,
+        }
+        optical_model = {
+            "provenance": {"model": "GENERIC", "model_version": "1.0.0"},
+            "optical_model_sha256": "a" * 64,
+            "primary": {
+                "aspheric_surface": surface,
+                "cylinder_obscurers": [{"id": "mast"}],
+            },
+            "secondary": {"kind": "aspheric_mirror", **surface},
+            "focal_surface": surface,
+        }
+        with TemporaryDirectory() as directory:
+            with self.assertRaisesRegex(
+                OpticalModelCompileError, "cannot represent cylinder obscurers"
+            ):
+                write_native_optical_model(optical_model, Path(directory) / "axisymmetric.csv")
+
     def test_parses_real_simtel_comment_suffix_without_turning_it_into_alignment(self):
         # T-IR-006: LST mirror-list rows carry an optional z followed by a
         # sim_telarray comment/panel ID; none of that is a facet orientation.

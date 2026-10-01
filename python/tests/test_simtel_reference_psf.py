@@ -84,6 +84,14 @@ class TestSimtelReferencePsf(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "radial PSF product differs"):
                 update_summary(summary, root, check=True)
 
+    def test_update_requires_an_external_frozen_manifest(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            summary = root / "summary.json"
+            summary.write_text(json.dumps({"rows": [{"sha256": {}}]}))
+            with self.assertRaisesRegex(ValueError, "frozen reference manifest"):
+                update_summary(summary, root)
+
 
 if __name__ == "__main__":
     unittest.main()

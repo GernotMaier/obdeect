@@ -197,6 +197,7 @@ struct CompiledSegmentedOpticalModel {
   for (const auto& obscurer : input.cylinder_obscurers) {
     if (!is_valid(obscurer) || !ids.insert(obscurer.id).second) return std::nullopt;
   }
+  if (input.primary_reflectivity && !input.primary_reflectivity->is_valid()) return std::nullopt;
   return CompiledSegmentedOpticalModel{input.provenance, input.primary_facets, input.detector_surfaces,
                                 input.cylinder_obscurers, input.primary_reflectivity};
 }

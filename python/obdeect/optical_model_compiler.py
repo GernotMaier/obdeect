@@ -713,6 +713,11 @@ def compile_optical_model(
                 else []
             ),
             *[f"camera response asset is missing: {name}" for name in unresolved_references],
+            *(
+                ["cylinder obscurers are not supported by axisymmetric native export"]
+                if dual_surfaces is not None and primary.get("cylinder_obscurers")
+                else []
+            ),
         ],
         "facet_geometry_evidence": evidence,
     }
@@ -1046,7 +1051,12 @@ def _write_native_axisymmetric_optical_model(optical_model: dict[str, Any], outp
             *(f"{value:.17g}" for value in (vertex, inner, outer, scale, *local)),
         ])
 
-    primary = optical_model["primary"]["aspheric_surface"]
+    primary_source = optical_model["primary"]
+    if primary_source.get("cylinder_obscurers"):
+        raise OpticalModelCompileError(
+            "native axisymmetric export cannot represent cylinder obscurers"
+        )
+    primary = primary_source["aspheric_surface"]
     secondary = optical_model["secondary"]
     focal = optical_model.get("focal_surface")
     if not isinstance(focal, dict) or focal.get("outer_radius_m") is None:
@@ -1059,8 +1069,11 @@ def _write_native_axisymmetric_optical_model(optical_model: dict[str, Any], outp
         row("secondary", secondary),
         row("detector", focal),
     ]
-    for role, surface in (("primary", primary), ("secondary", secondary)):
-        response = surface.get("reflectivity", [])
+    for role, surface, response_source in (
+        ("primary", primary, primary_source),
+        ("secondary", secondary, secondary),
+    ):
+        response = response_source.get("reflectivity", [])
         if not isinstance(response, list):
             raise OpticalModelCompileError(f"invalid {role} reflectivity")
         for entry in response:
