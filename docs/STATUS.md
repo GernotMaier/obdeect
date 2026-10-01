@@ -3,7 +3,7 @@
 Reviewed 30 September 2026 against obdeect commit
 `153b9e04bb0a98190b6be57093af3b145a90a733` and the local sibling simtools code.
 This is the single current status and implementation backlog. Earlier plans,
-checklists, and reviews are preserved in [the archive](archive/status-2026-09-30/).
+checklists, and reviews are not part of the active documentation.
 
 **Conclusion:** obdeect is a runnable nominal optical-geometry prototype. It
 is not yet a validated CTAO production backend. LST/MST curved panels exist;
