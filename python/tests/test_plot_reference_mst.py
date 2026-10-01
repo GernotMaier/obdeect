@@ -107,6 +107,125 @@ class TestTracePathReader(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "segmented"):
                 PLOT.compiled_facet_polygons(path)
 
+    def test_loads_finite_segmented_scene_without_invented_hardware(self):
+        model = {
+            "provenance": {"model": "mini-dish", "model_version": "1"},
+            "optical_model_sha256": "a" * 64,
+            "trace_model": {
+                "kind": "segmented",
+                "primary_facets": [
+                    {
+                        "id": 4,
+                        "shape": "square",
+                        "centre_m": [0, 0, 0],
+                        "normal": [0, 0, 1],
+                        "tangent": [1, 0, 0],
+                        "diameter_m": 2,
+                    }
+                ],
+                "detector_surfaces": [
+                    {
+                        "id": 5,
+                        "shape": "circle",
+                        "centre_m": [0, 0, 4],
+                        "normal": [0, 0, 1],
+                        "tangent": [1, 0, 0],
+                        "diameter_m": 1,
+                    }
+                ],
+                "cylinder_obscurers": [
+                    {
+                        "id": 6,
+                        "first_endpoint_m": [-1, 0, 1],
+                        "second_endpoint_m": [1, 0, 1],
+                        "diameter_m": 0.2,
+                    }
+                ],
+            },
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "model.json"
+            path.write_text(json.dumps(model))
+            scene = PLOT.load_plot_scene(path)
+        self.assertEqual(scene.kind, "segmented")
+        self.assertEqual(scene.model_label, "mini-dish/1")
+        self.assertEqual(
+            [(item.identifier, item.role) for item in scene.polygons],
+            [(4, "primary"), (5, "detector")],
+        )
+        self.assertEqual(scene.obscurers[0].identifier, 6)
+        self.assertEqual(scene.unavailable_roles, ())
+
+    def test_axisymmetric_profile_follows_compiled_polynomial(self):
+        model = {
+            "trace_model": {
+                "kind": "axisymmetric",
+                "primary": {
+                    "vertex_z_m": 2,
+                    "inner_radius_m": 0,
+                    "outer_radius_m": 3,
+                    "radial_scale_m": 2,
+                    "coefficient_m": [0, 4] + [0] * 11,
+                },
+                "secondary": {
+                    "vertex_z_m": 4,
+                    "inner_radius_m": 1,
+                    "outer_radius_m": 2,
+                    "radial_scale_m": 1,
+                    "coefficient_m": [0] * 13,
+                },
+                "detector": {
+                    "vertex_z_m": 1,
+                    "inner_radius_m": 0,
+                    "outer_radius_m": 1,
+                    "radial_scale_m": 1,
+                    "coefficient_m": [0] * 13,
+                },
+            }
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "model.json"
+            path.write_text(json.dumps(model))
+            scene = PLOT.load_plot_scene(path)
+        primary = scene.axisymmetric_surfaces[0]
+        profile = PLOT._axisymmetric_profile(primary, samples=3)
+        self.assertEqual(profile[0], (0.0, 2.0))
+        self.assertEqual(profile[-1], (3.0, 11.0))
+
+    def test_scene_loader_rejects_duplicate_component_identifiers(self):
+        surface = {
+            "id": 4,
+            "shape": "circle",
+            "centre_m": [0, 0, 0],
+            "normal": [0, 0, 1],
+            "tangent": [1, 0, 0],
+            "diameter_m": 1,
+        }
+        model = {
+            "trace_model": {
+                "kind": "segmented",
+                "primary_facets": [surface],
+                "detector_surfaces": [{**surface, "centre_m": [0, 0, 1]}],
+            }
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "model.json"
+            path.write_text(json.dumps(model))
+            with self.assertRaisesRegex(ValueError, "unique"):
+                PLOT.load_plot_scene(path)
+
+    def test_scene_bounds_include_the_full_cylinder_diameter(self):
+        scene = PLOT.PlotScene(
+            "segmented",
+            "fixture",
+            None,
+            (),
+            (),
+            (PLOT.PlotObscurer(1, (1, 2, 3), (2, 3, 4), 0.5),),
+            (),
+        )
+        self.assertEqual(PLOT._scene_bounds(scene), ((0.75, 2.25), (1.75, 3.25), (2.75, 4.25)))
+
     def test_rejects_invalid_detected_focal_plane_data(self):
         csv_text = "status,point_count,x0_m,y0_m\ndetected,1,nan,0\n"
         with tempfile.TemporaryDirectory() as directory:

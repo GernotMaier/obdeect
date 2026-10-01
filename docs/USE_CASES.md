@@ -54,32 +54,38 @@ obdeect-compile-optical-model \
 
 ### Plot the compiled optical model
 
-This renders the explicit primary-panel centres and the compiled focal
-boundary from the JSON optical model. It does not add camera supports,
-windows, or other structure absent from the selected model.
+Use the telescope plate for a model-faithful overview of the finite optical
+geometry actually consumed by the tracer. It renders an orthographic assembly,
+an axial section, the entrance pupil, and focal geometry. It does not add
+camera supports, windows, or other structure absent from the selected model;
+the footer declares the available geometry coverage.
 
 ```sh
-obdeect-plot-reference --view compiled-structure \
+obdeect-plot-reference --view telescope \
   --optical-model-json lst.optical-model.json \
-  --output lst-optical-model-structure.png
+  --output lst-telescope.png
 ```
 
 For the panel layout as seen from the mirror, use the face-on view.  Each
-finite panel face is drawn and its colour gives its centre's z position.
+finite panel face is drawn in its compiled tangent frame, so segmentation and
+gaps remain visible.
 
 ```sh
-obdeect-plot-reference --view compiled-mirror \
+obdeect-plot-reference --view pupil \
   --optical-model-json lst.optical-model.json \
   --output lst-primary-face.png
 ```
 
-For a CAD-like, orthographic 3-D view, use the recorded optical surfaces.
-It renders the primary panels and focal detector surfaces available in the
-JSON; it does not invent masts, camera housings, or other mechanical parts
-that are not in the model.
+For a paper-style optical cross-section or a full-size CAD-like orthographic
+view, select the corresponding model-derived renderer. `compiled-structure`,
+`compiled-mirror`, and `compiled-3d` remain supported aliases.
 
 ```sh
-obdeect-plot-reference --view compiled-3d \
+obdeect-plot-reference --view section --section-plane xz \
+  --optical-model-json lst.optical-model.json \
+  --output lst-optical-section.png
+
+obdeect-plot-reference --view assembly-3d \
   --optical-model-json lst.optical-model.json \
   --output lst-optical-model-3d.png
 ```
