@@ -136,6 +136,31 @@ class TestProductionValidation(unittest.TestCase):
                     },
                 )
 
+    def test_comparison_rejects_unknown_status(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "arrivals.csv"
+            self._rows(path, status="typo_status")
+            with self.assertRaisesRegex(ProductionValidationError, "invalid status"):
+                read_comparison_table(path)
+
+    def test_comparison_rejects_malformed_tolerances(self):
+        with tempfile.TemporaryDirectory() as directory:
+            first, second = Path(directory) / "first.csv", Path(directory) / "second.csv"
+            self._rows(first)
+            self._rows(second)
+            for value in ("bad", None, [], {}, True):
+                tolerances = {
+                    "focal_position_m": 1e-4,
+                    "path_length_m": 1e-4,
+                    "arrival_time_ns": 1e-4,
+                    "incidence_deg": value,
+                }
+                with (
+                    self.subTest(value=value),
+                    self.assertRaisesRegex(ProductionValidationError, "tolerances must define"),
+                ):
+                    compare(read_comparison_table(first), read_comparison_table(second), tolerances)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -66,6 +66,10 @@ struct TraceResult {
     const auto incoming_obscurer = intersect_cylinder_obscurers_unchecked(ray, scene);
     const auto hit = intersect_segmented_primary_unchecked(ray, scene);
     if (incoming_obscurer && (!hit || incoming_obscurer->distance_m < hit->distance_m)) {
+      result.photons.position_m[index] =
+          ray.position_m + ray.direction * incoming_obscurer->distance_m;
+      result.photons.optical_path_m[index] = incoming_obscurer->distance_m;
+      result.photons.time_ns[index] += incoming_obscurer->distance_m / kSpeedOfLightMPerNs;
       result.photons.status[index] = PhotonStatus::blocked_obscurer;
       result.photons.surface_id[index] = incoming_obscurer->surface_id;
       result.summary.add(PhotonStatus::blocked_obscurer, input.weight[index]);

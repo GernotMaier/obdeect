@@ -134,8 +134,8 @@ jobs:
             'obdeect_build_type: "Release"' \
             'obdeect_build_testing: true' \
             'reference_executables:' \
-            '  - obdeect_toy' \
-            '  - obdeect_ctao' > "${RUNNER_TEMP}/${package}/build_opts.yml"
+            '  - obdeect-demo-mst' \
+            '  - obdeect-analytic-optics' > "${RUNNER_TEMP}/${package}/build_opts.yml"
           tar -C "$RUNNER_TEMP" -czf "${package}.tar.gz" "$package"
           shasum -a 256 "${package}.tar.gz" > "${package}.tar.gz.sha256"
 

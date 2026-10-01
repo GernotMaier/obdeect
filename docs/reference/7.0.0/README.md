@@ -27,6 +27,13 @@ Raw sim_telarray photon lists are intentionally not retained in this repository.
 The derived PSF figures, containment radii, and cumulative profiles are the
 reference products. Regenerate them from a frozen sim_telarray manifest when a
 new reference is required.
+The regeneration helper consumes that external manifest and its archive root:
+
+```sh
+python -m obdeect.simtel_reference_psf \
+  --manifest /path/to/summary.json \
+  --reference-dir /path/to/frozen-reference --check
+```
 The summary keeps simtools' iterative D80 and also reports the exact empirical
 `exact_d80_m`. The figures draw simtools' D80 circle.
 

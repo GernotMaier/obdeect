@@ -17,7 +17,7 @@ The following commands demonstrate how to read the simulation model and
 compile the geometry required by `obdeect` for the ray tracing.
 
 This creates geometry from the selected production. LST/MST export
-finite planar panels; SST/SCT export their model-defined rotationally symmetric
+finite spherical panels using each panel's catalogue focal length; SST/SCT export their model-defined rotationally symmetric
 M1, M2, and curved focal-surface prescriptions. These nominal surfaces still
 need the production acceptance comparisons described below.
 

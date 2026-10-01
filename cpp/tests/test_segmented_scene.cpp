@@ -126,13 +126,20 @@ int main() {
 
   // T-SEG-009: model-provided opaque structure is part of the scene and wins
   // whenever it is closer than a mirror or detector intersection.
-  const ImportedCylinderObscurer obscurer{30, {0.0, 0.0, 4.0}, {0.0, 0.0, 5.0}, 0.2};
+  const ImportedCylinderObscurer obscurer{30, {0.0, 0.0, 3.0}, {0.0, 0.0, 4.0}, 0.2};
   const auto obscured_scene = compile_segmented_scene({provenance, {near, far}, {nearer_detector}, {obscurer}});
   require(obscured_scene.has_value(), "scene with cylinder obscurer compiles");
   const auto obscured = trace(*obscured_scene, input);
   require(obscured.photons.status[0] == PhotonStatus::blocked_obscurer &&
-              obscured.photons.surface_id[0] == obscurer.id,
-          "opaque cylinder blocks before primary mirror");
+              obscured.photons.surface_id[0] == obscurer.id &&
+              obscured.photons.position_m[0].z == 4.0 &&
+              std::abs(obscured.photons.optical_path_m[0] - 1.0) < 1.e-12 &&
+              std::abs(obscured.photons.time_ns[0] - (7.0 + 1.0 / speed_of_light_m_per_ns)) < 1.e-12,
+          "opaque cylinder records its incoming terminal state");
+
+  auto invalid_response = SpectralResponse{{300.0, 200.0}, {0.7, 0.9}};
+  require(!compile_segmented_scene({provenance, {facet}, {}, {}, invalid_response}),
+          "unordered spectral response fails during scene compilation");
 
   const SpectralResponse reflectivity{{300.0, 500.0}, {0.7, 0.9}};
   require(reflectivity.is_valid() && std::abs(*reflectivity.at(400.0) - 0.8) < 1.e-12 &&

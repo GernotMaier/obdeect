@@ -16,6 +16,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from obdeect.result_contract import TERMINAL_STATUSES
+
 
 class ProductionValidationError(ValueError):
     """A production scene or comparison input does not meet the validation contract."""
@@ -78,8 +80,8 @@ def read_comparison_table(path: Path) -> dict[int, ComparisonRow]:
             if photon_id < 0 or photon_id in rows:
                 raise ProductionValidationError(f"{path}:{line}: non-unique photon_id")
             status = row["status"]
-            if not status:
-                raise ProductionValidationError(f"{path}:{line}: missing status")
+            if status not in TERMINAL_STATUSES:
+                raise ProductionValidationError(f"{path}:{line}: invalid status")
             rows[photon_id] = ComparisonRow(
                 photon_id,
                 status,
@@ -133,7 +135,11 @@ def compare(
         )
     allowed = {"focal_position_m", "path_length_m", "arrival_time_ns", "incidence_deg"}
     if set(tolerances) != allowed or any(
-        not math.isfinite(value) or value < 0 for value in tolerances.values()
+        isinstance(value, bool)
+        or not isinstance(value, (int, float))
+        or not math.isfinite(value)
+        or value < 0
+        for value in tolerances.values()
     ):
         raise ProductionValidationError(
             "tolerances must define non-negative focal_position_m, path_length_m, "

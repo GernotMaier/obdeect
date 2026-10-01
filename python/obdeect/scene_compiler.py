@@ -683,6 +683,11 @@ def compile_scene(
                 else []
             ),
             *[f"camera response asset is missing: {name}" for name in unresolved_references],
+            *(
+                ["cylinder obscurers are not supported by axisymmetric native export"]
+                if dual_surfaces is not None and primary.get("cylinder_obscurers")
+                else []
+            ),
         ],
         "facet_geometry_evidence": evidence,
     }
@@ -1010,7 +1015,10 @@ def _write_native_axisymmetric_scene(scene: dict[str, Any], output: Path) -> Non
             *(f"{value:.17g}" for value in (vertex, inner, outer, scale, *local)),
         ])
 
-    primary = scene["primary"]["aspheric_surface"]
+    primary_source = scene["primary"]
+    if primary_source.get("cylinder_obscurers"):
+        raise SceneCompileError("native axisymmetric export cannot represent cylinder obscurers")
+    primary = primary_source["aspheric_surface"]
     secondary = scene["secondary"]
     focal = scene.get("focal_surface")
     if not isinstance(focal, dict) or focal.get("outer_radius_m") is None:
@@ -1023,8 +1031,11 @@ def _write_native_axisymmetric_scene(scene: dict[str, Any], output: Path) -> Non
         row("secondary", secondary),
         row("detector", focal),
     ]
-    for role, surface in (("primary", primary), ("secondary", secondary)):
-        response = surface.get("reflectivity", [])
+    for role, surface, response_source in (
+        ("primary", primary, primary_source),
+        ("secondary", secondary, secondary),
+    ):
+        response = response_source.get("reflectivity", [])
         if not isinstance(response, list):
             raise SceneCompileError(f"invalid {role} reflectivity")
         for entry in response:

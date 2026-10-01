@@ -48,6 +48,7 @@ class TestPhotonDistributions(unittest.TestCase):
         self.assertIn("weighted focal-plane distribution", contents)
         self.assertIn("vacuum geometric arrival time", contents)
         self.assertIn("<svg", contents)
+        self.assertNotIn("/>width=", contents)
 
 
 if __name__ == "__main__":
