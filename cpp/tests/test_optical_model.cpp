@@ -23,8 +23,8 @@ int main() {
                                     SurfaceRole::mirror};
   const OpticalSurfaceRecord detector{20, {{0.0, 0.0, 4.0}}, FacetShape::square, 2.0,
                                       SurfaceRole::detector};
-  const auto scene = compile_optical_scene({provenance, {detector, mirror}, 4});
-  require(scene.has_value(), "T-GEO-001: unordered finite scene compiles");
+  const auto optical_model = compile_optical_model({provenance, {detector, mirror}, 4});
+  require(optical_model.has_value(), "T-GEO-001: unordered finite optical_model compiles");
   const std::vector<Vec3> positions{{0.0, 0.0, 3.0}, {1.1, 0.0, 3.0}};
   const std::vector<Vec3> directions{{0.0, 0.0, -1.0}, {0.0, 0.0, -1.0}};
   const std::vector<double> wavelength{400.0, 400.0};
@@ -32,8 +32,8 @@ int main() {
   const std::vector<double> weight{2.0, 3.0};
   const std::vector<std::uint64_t> ids{1, 2};
   const PhotonBlockView input{positions, directions, wavelength, time, weight, ids};
-  const auto detected = trace(*scene, input);
-  require(detected.photons.status[1] == PhotonStatus::escaped_scene &&
+  const auto detected = trace(*optical_model, input);
+  require(detected.photons.status[1] == PhotonStatus::escaped_optical_model &&
               detected.photons.surface_id[1] == PhotonResultBlock::kNoSurfaceId,
           "T-GEO-003: ray through finite-mask gap escapes");
   require(detected.photons.status[0] == PhotonStatus::detected &&
@@ -52,8 +52,8 @@ int main() {
                                      SurfaceRole::obscurer};
   const OpticalSurfaceRecord angled_detector{21, {{2.0, 0.0, 2.0}}, FacetShape::circle, 0.5,
                                              SurfaceRole::detector};
-  const auto angled = compile_optical_scene({provenance, {angled_detector, tilted_mirror, blocker}, 4});
-  require(angled.has_value(), "tilted scene compiles");
+  const auto angled = compile_optical_model({provenance, {angled_detector, tilted_mirror, blocker}, 4});
+  require(angled.has_value(), "tilted optical_model compiles");
   const auto blocked = trace(*angled, input);
   require(blocked.photons.status[0] == PhotonStatus::blocked_obscurer &&
               blocked.photons.surface_id[0] == blocker.id &&
@@ -63,8 +63,8 @@ int main() {
 
   const OpticalSurfaceRecord front_blocker{31, {{0.0, 0.0, 2.0}}, FacetShape::circle, 2.0,
                                            SurfaceRole::obscurer};
-  const auto front = compile_optical_scene({provenance, {mirror, detector, front_blocker}, 4});
-  require(front.has_value(), "front blocker scene compiles");
+  const auto front = compile_optical_model({provenance, {mirror, detector, front_blocker}, 4});
+  require(front.has_value(), "front blocker optical_model compiles");
   const auto pre_mirror = trace(*front, input);
   require(pre_mirror.photons.status[0] == PhotonStatus::blocked_obscurer &&
               pre_mirror.photons.surface_id[0] == front_blocker.id &&
@@ -73,8 +73,8 @@ int main() {
 
   const OpticalSurfaceRecord upper_mirror{40, {{0.0, 0.0, 2.0}}, FacetShape::circle, 2.0,
                                           SurfaceRole::mirror};
-  const auto cavity = compile_optical_scene({provenance, {upper_mirror, mirror}, 2});
-  require(cavity.has_value(), "bounded mirror scene compiles");
+  const auto cavity = compile_optical_model({provenance, {upper_mirror, mirror}, 2});
+  require(cavity.has_value(), "bounded mirror optical_model compiles");
   const std::vector<Vec3> cavity_position{{0.0, 0.0, 1.0}};
   const std::vector<Vec3> cavity_direction{{0.0, 0.0, -1.0}};
   const std::vector<double> cavity_scalar{400.0};
@@ -89,13 +89,13 @@ int main() {
               std::abs(limited.photons.optical_path_m[0] - 3.0) < 1e-12,
           "T-GEO-006: repeated reflections stop at the declared cap");
 
-  require(!compile_optical_scene({provenance, {mirror, mirror}, 4}),
+  require(!compile_optical_model({provenance, {mirror, mirror}, 4}),
           "T-GEO-007: duplicate surface identities fail closed");
-  require(!compile_optical_scene({provenance, {mirror}, kMaximumSceneInteractions + 1}),
+  require(!compile_optical_model({provenance, {mirror}, kMaximumOpticalModelInteractions + 1}),
           "T-GEO-009: interaction cap is bounded");
   auto invalid = mirror;
   invalid.frame.z_axis = {0.0, 0.0, -1.0};
-  require(!compile_optical_scene({provenance, {invalid}, 4}),
+  require(!compile_optical_model({provenance, {invalid}, 4}),
           "T-GEO-008: non-rigid or left-handed transform fails closed");
 
   auto curved = mirror;
@@ -105,18 +105,18 @@ int main() {
   curved.inner_radius_m = 0.5;
   const OpticalSurfaceRecord beneath{51, {{0.0, 0.0, -1.0}}, FacetShape::circle, 2.0,
                                      SurfaceRole::detector};
-  const auto curved_scene = compile_optical_scene({provenance, {beneath, curved}, 4});
-  require(curved_scene.has_value(), "T-GEO-010: annular asphere compiles");
-  const auto curved_hit = intersect_nearest_surface({{1.0, 0.0, 2.0}, {0.0, 0.0, -1.0}}, *curved_scene);
+  const auto curved_optical_model = compile_optical_model({provenance, {beneath, curved}, 4});
+  require(curved_optical_model.has_value(), "T-GEO-010: annular asphere compiles");
+  const auto curved_hit = intersect_nearest_surface({{1.0, 0.0, 2.0}, {0.0, 0.0, -1.0}}, *curved_optical_model);
   require(curved_hit && curved_hit->surface_id == 50 &&
               std::abs(curved_hit->point_m.z - 1.0 / 16.0) < 1e-12 &&
               std::abs(curved_hit->normal.x + 0.125 / std::hypot(1.0, 0.125)) < 1e-12,
           "T-GEO-011: globally nearest curved hit has physical sag and normal");
-  const auto hole_hit = intersect_nearest_surface({{0.0, 0.0, 2.0}, {0.0, 0.0, -1.0}}, *curved_scene);
+  const auto hole_hit = intersect_nearest_surface({{0.0, 0.0, 2.0}, {0.0, 0.0, -1.0}}, *curved_optical_model);
   require(hole_hit && hole_hit->surface_id == beneath.id,
           "T-GEO-012: central aperture hole passes the ray to the next surface");
   curved.sag->coefficient_m[1] = std::numeric_limits<double>::quiet_NaN();
-  require(!compile_optical_scene({provenance, {curved}, 4}),
+  require(!compile_optical_model({provenance, {curved}, 4}),
           "T-GEO-013: non-finite asphere coefficients fail closed");
-  std::cout << "optical scene tests passed\n";
+  std::cout << "optical optical_model tests passed\n";
 }

@@ -16,7 +16,7 @@ namespace obdeect {
 
 // Observatory-neutral facet data after an external catalogue adapter has
 // resolved all units and coordinate transforms. Shapes are retained exactly;
-// no polygon is silently approximated as a circle by scene compilation.
+// no polygon is silently approximated as a circle by optical model compilation.
 enum class FacetShape : std::uint8_t { circle, hexagon_flat_y, square, hexagon_flat_x };
 
 struct ImportedFacet {
@@ -31,13 +31,13 @@ struct ImportedFacet {
   // telescope-specific panel rotation from a dish prescription.
   Vec3 unit_tangent_u{};
   // Positive radius of the panel's spherical optical surface. A zero value
-  // represents a planar panel and is retained for generic plane scenes.
+  // represents a planar panel and is retained for generic plane optical_models.
   double curvature_radius_m{};
 };
 
 // A generic finite planar optical-arrival surface. Its placement and aperture
-// are supplied by the adapter; scene compilation never infers a camera shape.
-// Detector IDs share the scene surface-ID namespace with facet IDs.
+// are supplied by the adapter; optical model compilation never infers a camera shape.
+// Detector IDs share the optical_model surface-ID namespace with facet IDs.
 struct ImportedDetectorSurface {
   std::uint32_t id{};
   Vec3 centre_m{};
@@ -84,14 +84,14 @@ struct SpectralResponse {
   }
 };
 
-struct ImportedSegmentedScene {
+struct ImportedSegmentedOpticalModel {
   ModelProvenance provenance;
   std::vector<ImportedFacet> primary_facets;
   std::vector<ImportedDetectorSurface> detector_surfaces;
   std::vector<ImportedCylinderObscurer> cylinder_obscurers;
   std::optional<SpectralResponse> primary_reflectivity;
 
-  ImportedSegmentedScene(ModelProvenance imported_provenance, std::vector<ImportedFacet> imported_facets,
+  ImportedSegmentedOpticalModel(ModelProvenance imported_provenance, std::vector<ImportedFacet> imported_facets,
                          std::vector<ImportedDetectorSurface> imported_detectors = {},
                          std::vector<ImportedCylinderObscurer> imported_obscurers = {},
                          std::optional<SpectralResponse> imported_reflectivity = std::nullopt)
@@ -100,14 +100,14 @@ struct ImportedSegmentedScene {
         primary_reflectivity(std::move(imported_reflectivity)) {}
 };
 
-struct CompiledSegmentedScene {
+struct CompiledSegmentedOpticalModel {
   ModelProvenance provenance;
   std::vector<ImportedFacet> primary_facets;
   std::vector<ImportedDetectorSurface> detector_surfaces;
   std::vector<ImportedCylinderObscurer> cylinder_obscurers;
   std::optional<SpectralResponse> primary_reflectivity;
 
-  CompiledSegmentedScene(ModelProvenance compiled_provenance, std::vector<ImportedFacet> compiled_facets,
+  CompiledSegmentedOpticalModel(ModelProvenance compiled_provenance, std::vector<ImportedFacet> compiled_facets,
                          std::vector<ImportedDetectorSurface> compiled_detectors = {},
                          std::vector<ImportedCylinderObscurer> compiled_obscurers = {},
                          std::optional<SpectralResponse> compiled_reflectivity = std::nullopt)
@@ -159,30 +159,30 @@ struct CompiledSegmentedScene {
          norm(obscurer.second_endpoint_m - obscurer.first_endpoint_m) > kEpsilon;
 }
 
-[[nodiscard]] inline bool is_valid(const CompiledSegmentedScene& scene) {
-  if (!has_valid_provenance(scene.provenance) || scene.primary_facets.empty()) {
+[[nodiscard]] inline bool is_valid(const CompiledSegmentedOpticalModel& optical_model) {
+  if (!has_valid_provenance(optical_model.provenance) || optical_model.primary_facets.empty()) {
     return false;
   }
   std::unordered_set<std::uint32_t> ids;
-  ids.reserve(scene.primary_facets.size());
-  for (const auto& facet : scene.primary_facets) {
+  ids.reserve(optical_model.primary_facets.size());
+  for (const auto& facet : optical_model.primary_facets) {
     if (!is_valid(facet) || !ids.insert(facet.id).second) return false;
   }
-  for (const auto& detector : scene.detector_surfaces) {
+  for (const auto& detector : optical_model.detector_surfaces) {
     if (!is_valid(detector) || !ids.insert(detector.id).second) return false;
   }
-  for (const auto& obscurer : scene.cylinder_obscurers) {
+  for (const auto& obscurer : optical_model.cylinder_obscurers) {
     if (!is_valid(obscurer) || !ids.insert(obscurer.id).second) return false;
   }
-  if (scene.primary_reflectivity && !scene.primary_reflectivity->is_valid()) return false;
+  if (optical_model.primary_reflectivity && !optical_model.primary_reflectivity->is_valid()) return false;
   return true;
 }
 
 // The native compiler is deliberately strict: an adapter must provide a
 // normal for every facet rather than allowing the tracing kernel to infer a
 // telescope-specific dish prescription.
-[[nodiscard]] inline std::optional<CompiledSegmentedScene> compile_segmented_scene(
-    const ImportedSegmentedScene& input) {
+[[nodiscard]] inline std::optional<CompiledSegmentedOpticalModel> compile_segmented_optical_model(
+    const ImportedSegmentedOpticalModel& input) {
   if (!has_valid_provenance(input.provenance) || input.primary_facets.empty()) {
     return std::nullopt;
   }
@@ -198,7 +198,7 @@ struct CompiledSegmentedScene {
     if (!is_valid(obscurer) || !ids.insert(obscurer.id).second) return std::nullopt;
   }
   if (input.primary_reflectivity && !input.primary_reflectivity->is_valid()) return std::nullopt;
-  return CompiledSegmentedScene{input.provenance, input.primary_facets, input.detector_surfaces,
+  return CompiledSegmentedOpticalModel{input.provenance, input.primary_facets, input.detector_surfaces,
                                 input.cylinder_obscurers, input.primary_reflectivity};
 }
 
@@ -301,9 +301,9 @@ struct SegmentedFacetHit {
 }
 
 [[nodiscard]] inline std::optional<SegmentedFacetHit> intersect_segmented_primary_unchecked(
-    const Ray& ray, const CompiledSegmentedScene& scene) {
+    const Ray& ray, const CompiledSegmentedOpticalModel& optical_model) {
   std::optional<SegmentedFacetHit> nearest;
-  for (const auto& facet : scene.primary_facets) {
+  for (const auto& facet : optical_model.primary_facets) {
     const auto candidate = intersect_segmented_facet_unchecked(ray, facet);
     if (candidate && (!nearest || candidate->distance_m < nearest->distance_m)) nearest = candidate;
   }
@@ -311,9 +311,9 @@ struct SegmentedFacetHit {
 }
 
 [[nodiscard]] inline std::optional<SegmentedFacetHit> intersect_segmented_primary(
-    const Ray& ray, const CompiledSegmentedScene& scene) {
-  if (!is_valid(scene)) return std::nullopt;
-  return intersect_segmented_primary_unchecked(ray, scene);
+    const Ray& ray, const CompiledSegmentedOpticalModel& optical_model) {
+  if (!is_valid(optical_model)) return std::nullopt;
+  return intersect_segmented_primary_unchecked(ray, optical_model);
 }
 
 struct DetectorSurfaceHit {
@@ -329,9 +329,9 @@ struct CylinderObscurerHit {
 };
 
 [[nodiscard]] inline std::optional<CylinderObscurerHit> intersect_cylinder_obscurers_unchecked(
-    const Ray& ray, const CompiledSegmentedScene& scene) {
+    const Ray& ray, const CompiledSegmentedOpticalModel& optical_model) {
   std::optional<CylinderObscurerHit> nearest;
-  for (const auto& obscurer : scene.cylinder_obscurers) {
+  for (const auto& obscurer : optical_model.cylinder_obscurers) {
     const auto distance_m = intersect_closed_finite_cylinder(
         ray, obscurer.first_endpoint_m, obscurer.second_endpoint_m, obscurer.diameter_m * 0.5);
     if (distance_m && (!nearest || *distance_m < nearest->distance_m))
@@ -362,9 +362,9 @@ struct CylinderObscurerHit {
 }
 
 [[nodiscard]] inline std::optional<DetectorSurfaceHit> intersect_detector_surfaces_unchecked(
-    const Ray& ray, const CompiledSegmentedScene& scene) {
+    const Ray& ray, const CompiledSegmentedOpticalModel& optical_model) {
   std::optional<DetectorSurfaceHit> nearest;
-  for (const auto& surface : scene.detector_surfaces) {
+  for (const auto& surface : optical_model.detector_surfaces) {
     const auto candidate = intersect_detector_surface_unchecked(ray, surface);
     if (candidate && (!nearest || candidate->distance_m < nearest->distance_m)) nearest = candidate;
   }
@@ -372,9 +372,9 @@ struct CylinderObscurerHit {
 }
 
 [[nodiscard]] inline std::optional<DetectorSurfaceHit> intersect_detector_surfaces(
-    const Ray& ray, const CompiledSegmentedScene& scene) {
-  if (!is_valid(scene)) return std::nullopt;
-  return intersect_detector_surfaces_unchecked(ray, scene);
+    const Ray& ray, const CompiledSegmentedOpticalModel& optical_model) {
+  if (!is_valid(optical_model)) return std::nullopt;
+  return intersect_detector_surfaces_unchecked(ray, optical_model);
 }
 
 }  // namespace obdeect

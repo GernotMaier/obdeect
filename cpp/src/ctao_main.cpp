@@ -15,7 +15,7 @@ void usage() {
   std::cout << "Usage: obdeect-analytic-optics --telescope LST|MST|SST|SCT [--photons N] [--output paths.csv]\n"
             << "                                [--field-x-deg D] [--field-y-deg D] [--wavelength-nm N[,N...]]\n"
             << "Developer diagnostic: trace a discrete spectrum of parallel photons through an analytic prescription.\n"
-            << "Use obdeect-simtools-raytrace --scene-file for model-derived CTAO geometry.\n";
+            << "Use obdeect-simtools-raytrace --optical-model-file for model-derived CTAO geometry.\n";
 }
 }  // namespace
 

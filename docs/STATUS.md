@@ -19,7 +19,7 @@ Every release is judged by:
   identities within predeclared scientific tolerances.
 - **Precision:** SI units, binary64 geometry, stable frame/time conventions,
   deterministic seeds and reproducible loss accounting.
-- **Performance:** bounded memory, reusable compiled scenes, batch tracing and
+- **Performance:** bounded memory, reusable compiled optical models, batch tracing and
   measured photons/s, compilation, I/O and peak RSS.
 
 The importer accepts any compatible, explicitly selected simulation-models
@@ -45,7 +45,7 @@ phase.
   nominal mirror footprints/normals, focal-plane layout geometry and
   unresolved-field reporting. ECSV mirror lists and focal-plane layouts from
   simulation-models compile for the LST and both MST variants.
-- Native scene export now carries provenance, explicit panel centres, normals,
+- Native optical model export now carries provenance, explicit panel centres, normals,
   polygon orientation and detector extent. The C++ simtools CLI loads this
   table and traces imported LST and MST panel geometry directly, preserving
   panel boundaries, detector misses, path lengths and incidence angles.
@@ -66,8 +66,8 @@ phase.
   distance, wavelength, source-position and divergence options. Its records
   include focal, primary and secondary incidence angles, interaction points
   and an explicit `source_kind` field so downstream plots and analysis cannot
-  confuse source classes. `--scene-file` executes the model-derived native
-  scene surface table; the built-in analytic prescription remains available
+  confuse source classes. `--optical-model-file` executes the model-derived native
+  optical model surface table; the built-in analytic prescription remains available
   for comparison.
 - A `SimulatorObdeect` runner and explicit `RayTracing` backend branch are now
   present in the sibling simtools checkout. They invoke the reference CLI and
@@ -79,7 +79,7 @@ phase.
   points. Both reject unsupported weighted PSF inputs instead of silently
   producing biased results.
 - An optional simtools backend configuration keeps `sim_telarray` as the
-  default; native scene execution is selected explicitly for validation.
+  default; native optical model execution is selected explicitly for validation.
 - PyPI CI builds wheels and an sdist for every pull request and uploads them as
   artifacts. Tag pushes matching `v*` are the only automatic PyPI publishes;
   ordinary branch pushes do not run this workflow.
@@ -88,7 +88,7 @@ phase.
 
 ### 1. Freeze contracts and references
 
-1. Define versioned SI schemas for source batches, compiled scenes, arrivals,
+1. Define versioned SI schemas for source batches, compiled optical models, arrivals,
    interactions and losses. Preserve run/event/telescope/bunch IDs, weights,
    wavelength, emission and arrival times, paths, surface ID and incidence
    angle.
@@ -108,7 +108,7 @@ phase.
    shadows and curved focal surface. Add SCT only with its own model and gate.
 3. Bind optical coatings, filters, windows, light guides and active detector
    surfaces. Keep optical arrival, transmission and component losses separate.
-4. Keep the scene IR observatory-neutral. Add a ROBAST adapter only through
+4. Keep the optical model IR observatory-neutral. Add a ROBAST adapter only through
    the same surface/material/provenance contract.
 
 ### 3. Replace the simtools guards with a working backend
@@ -118,7 +118,7 @@ phase.
    wavelength, single-panel selection, alignment/roughness settings, seed and
    output paths. Preserve simtools force/test modes and concurrent offsets.
 2. Complete the reference backend in `simtools.ray_tracing.RayTracing` for
-   production scenes. Keep sim_telarray unchanged and default.
+   production optical models. Keep sim_telarray unchanged and default.
 3. Emit a versioned arrival table and summary consumable without `rx`: focal
    x/y, throughput, optical time, path length, terminal loss, surface IDs and
    provenance.
@@ -159,7 +159,7 @@ dual-mirror, spectral, source, EventIO and reproducibility fixtures. Compare
 against simtools-driven sim_telarray with identical photon blocks and
 conventions. Retain residual maps, first divergent interactions and loss
 closures. Test photon order, block size and thread count. Publish tolerances,
-Monte Carlo uncertainty, photons/s, peak RSS, compile time, I/O time and scene
+Monte Carlo uncertainty, photons/s, peak RSS, compile time, I/O time and optical model
 cache time. Do not enable a telescope/source workflow until its fixture passes.
 
 ## Current blockers and completion gate
@@ -176,23 +176,23 @@ cache time. Do not enable a telescope/source workflow until its fixture passes.
   scattered light remain explicit source-model responsibilities.
 - The importer retains only ray-transport geometry and optical-response
   parameters. Camera electronics, trigger, gain, and calibration parameters
-  are excluded from the optical scene IR.
+  are excluded from the optical optical model IR.
 - Raw sim_telarray photon lists and the unused benchmark placeholder were
   removed. The checked-in reference products are PSF figures, containment
   values, cumulative distributions, and manifest metadata. Incident-angle
   reference products still need to be generated by the validation matrix.
 - `obdeect-demo-mst` and `obdeect-analytic-optics` are developer diagnostics;
   they are not CTAO telescope simulations. User-facing CTAO traces use
-  `obdeect-simtools-raytrace --scene-file`. Test programs are emitted into a
+  `obdeect-simtools-raytrace --optical-model-file`. Test programs are emitted into a
   separate build directory.
 - `obdeect-validate-production` now provides the fail-closed final gate for
-  a compiled LST/MST/SST scene and a common, normalized sim_telarray photon
+  a compiled LST/MST/SST optical model and a common, normalized sim_telarray photon
   block. It checks identities, terminal categories, focal position, optical
   path, and all reported incidence angles against declared tolerances, records
-  the first divergence, and refuses incomplete scenes.
+  the first divergence, and refuses incomplete optical models.
 
-The simtools backend selector, container integration, native scene loader,
-incident-angle path and CSV PSF reader exist. The imported LST/MST scene path
+The simtools backend selector, container integration, native optical model loader,
+incident-angle path and CSV PSF reader exist. The imported LST/MST optical model path
 traces nominal curved spherical panels, a physical focal boundary, primary
 wavelength response where the model supplies a one-dimensional table, and
 model-provided finite cylindrical obscurers. Full production equivalence still

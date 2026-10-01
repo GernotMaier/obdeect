@@ -9,14 +9,14 @@
 namespace obdeect {
 
 // Canonical import target. Parsers live outside the hot C++ kernels and must
-// populate provenance before a model can be compiled into a scene.
+// populate provenance before a model can be compiled into a optical model.
 struct ModelProvenance {
   std::string model_name;
   std::string model_version;
   std::string content_hash;
 };
 
-struct ImportedOpticalModel {
+struct ImportedModelMetadata {
   TelescopeOpticalFamily family;
   ModelProvenance provenance;
   bool requires_segment_list{true};
@@ -28,7 +28,7 @@ struct ImportedOpticalModel {
 // provenance; tracing never discovers an arbitrary model implicitly.
 struct ImportedCtaoReferenceModel {
   CtaoReferenceModel optical;
-  ImportedOpticalModel import;
+  ImportedModelMetadata import;
 };
 
 [[nodiscard]] inline std::optional<ImportedCtaoReferenceModel> import_ctao_reference_model(

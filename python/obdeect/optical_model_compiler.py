@@ -1,9 +1,9 @@
-"""Compile a provenance-checked simulation-models IR into generic scene data.
+"""Compile a provenance-checked simulation-models IR into generic optical_model data.
 
 This adapter verifies the selected production and extracts documented mirror
 footprints and focal-plane layouts. It does not invent dish sag, panel
 normals, detector surfaces, or material behaviour. The output is an audited
-handoff, not a trace-ready production scene.
+handoff, not a trace-ready production optical_model.
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ from obdeect.model_import import ImportError as ModelImportError
 from obdeect.model_import import component, record, resolve_model
 
 
-class SceneCompileError(ValueError):
+class OpticalModelCompileError(ValueError):
     """The provenance IR cannot be compiled without guessing optical data."""
 
 
@@ -41,23 +41,29 @@ def parse_simtel_segmentation(contents: str) -> list[dict[str, Any]]:
             continue
         kind = fields[0].lower()
         if kind not in {"hex", "yhex", "ring"}:
-            raise SceneCompileError(
+            raise OpticalModelCompileError(
                 f"segmentation line {line_number}: unsupported type {fields[0]}"
             )
         expected_fields = {5, 6} if kind in {"hex", "yhex"} else {5, 6, 7}
         if len(fields) not in expected_fields:
-            raise SceneCompileError(f"segmentation line {line_number}: wrong field count")
+            raise OpticalModelCompileError(f"segmentation line {line_number}: wrong field count")
         try:
             count = int(fields[1])
             values = [float(value) for value in fields[2:]]
         except ValueError as error:
-            raise SceneCompileError(f"segmentation line {line_number}: invalid number") from error
+            raise OpticalModelCompileError(
+                f"segmentation line {line_number}: invalid number"
+            ) from error
         if count < 1 or not all(math.isfinite(value) for value in values):
-            raise SceneCompileError(f"segmentation line {line_number}: invalid count or value")
+            raise OpticalModelCompileError(
+                f"segmentation line {line_number}: invalid count or value"
+            )
         if kind in {"hex", "yhex"}:
             x_cm, y_cm, diameter_cm, rotation_deg = (*values, 0.0)[0:4]
             if count != 1 or diameter_cm <= 0.0:
-                raise SceneCompileError(f"segmentation line {line_number}: invalid hex footprint")
+                raise OpticalModelCompileError(
+                    f"segmentation line {line_number}: invalid hex footprint"
+                )
             segments.append({
                 "id": len(segments),
                 "shape": "hexagon",
@@ -68,9 +74,13 @@ def parse_simtel_segmentation(contents: str) -> list[dict[str, Any]]:
         else:
             inner_cm, outer_cm, span_deg, start_deg, gap_cm = (*values, 0.0, 0.0)[0:5]
             if inner_cm < 0.0 or outer_cm <= inner_cm or span_deg <= 0.0 or gap_cm < 0.0:
-                raise SceneCompileError(f"segmentation line {line_number}: invalid ring footprint")
+                raise OpticalModelCompileError(
+                    f"segmentation line {line_number}: invalid ring footprint"
+                )
             if count * span_deg > 360.0 + 1e-9:
-                raise SceneCompileError(f"segmentation line {line_number}: ring exceeds full turn")
+                raise OpticalModelCompileError(
+                    f"segmentation line {line_number}: ring exceeds full turn"
+                )
             for index in range(count):
                 segments.append({
                     "id": len(segments),
@@ -82,31 +92,31 @@ def parse_simtel_segmentation(contents: str) -> list[dict[str, Any]]:
                     "gap_m": gap_cm * 0.01,
                 })
     if not segments:
-        raise SceneCompileError("segmentation contains no segments")
+        raise OpticalModelCompileError("segmentation contains no segments")
     return segments
 
 
 def _number(value: object, context: str) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
-        raise SceneCompileError(f"{context} must be a finite number")
+        raise OpticalModelCompileError(f"{context} must be a finite number")
     return float(value)
 
 
 def _length_m(parameter: dict[str, Any], name: str, *, allow_zero: bool = False) -> float:
     unit = parameter.get("unit")
     if unit not in _UNIT_TO_M:
-        raise SceneCompileError(f"{name} has unsupported length unit {unit!r}")
+        raise OpticalModelCompileError(f"{name} has unsupported length unit {unit!r}")
     value = _number(parameter.get("value"), name) * _UNIT_TO_M[unit]
     if value < 0.0 or (value == 0.0 and not allow_zero):
         qualifier = "non-negative" if allow_zero else "positive"
-        raise SceneCompileError(f"{name} must be {qualifier}")
+        raise OpticalModelCompileError(f"{name} must be {qualifier}")
     return value
 
 
 def _signed_length_m(parameter: dict[str, Any], name: str) -> float:
     unit = parameter.get("unit")
     if unit not in _UNIT_TO_M:
-        raise SceneCompileError(f"{name} has unsupported length unit {unit!r}")
+        raise OpticalModelCompileError(f"{name} has unsupported length unit {unit!r}")
     return _number(parameter.get("value"), name) * _UNIT_TO_M[unit]
 
 
@@ -127,7 +137,7 @@ def parse_simtel_mirror_list(
     if fallback_focal_length_m is not None and (
         not math.isfinite(fallback_focal_length_m) or fallback_focal_length_m <= 0.0
     ):
-        raise SceneCompileError("fallback focal length must be finite and positive")
+        raise OpticalModelCompileError("fallback focal length must be finite and positive")
     facets: list[dict[str, Any]] = []
     for line_number, source_line in enumerate(contents.splitlines(), start=1):
         line = source_line.strip()
@@ -140,7 +150,9 @@ def parse_simtel_mirror_list(
         if fields[:5] == ["mirror_x", "mirror_y", "mirror_diameter", "focal_length", "shape_type"]:
             continue
         if len(fields) < 5:
-            raise SceneCompileError(f"mirror list line {line_number}: expected at least 5 columns")
+            raise OpticalModelCompileError(
+                f"mirror list line {line_number}: expected at least 5 columns"
+            )
         try:
             x_cm, y_cm, diameter_cm, focal_cm = (float(item) for item in fields[:4])
             shape_value = float(fields[4])
@@ -152,30 +164,34 @@ def parse_simtel_mirror_list(
             if len(fields) >= 6 and not fields[5].startswith("#"):
                 z_cm = float(fields[5])
         except ValueError as error:
-            raise SceneCompileError(
+            raise OpticalModelCompileError(
                 f"mirror list line {line_number}: invalid numeric field"
             ) from error
         if not all(
             math.isfinite(item) for item in (x_cm, y_cm, diameter_cm, focal_cm, shape_value, z_cm)
         ):
-            raise SceneCompileError(f"mirror list line {line_number}: non-finite value")
+            raise OpticalModelCompileError(f"mirror list line {line_number}: non-finite value")
         if shape_value != shape_code:
-            raise SceneCompileError(f"mirror list line {line_number}: shape must be an integer")
+            raise OpticalModelCompileError(
+                f"mirror list line {line_number}: shape must be an integer"
+            )
         if diameter_cm <= 0.0:
-            raise SceneCompileError(f"mirror list line {line_number}: diameter must be positive")
+            raise OpticalModelCompileError(
+                f"mirror list line {line_number}: diameter must be positive"
+            )
         if shape_code not in _SHAPES:
-            raise SceneCompileError(
+            raise OpticalModelCompileError(
                 f"mirror list line {line_number}: unsupported shape {shape_code}"
             )
         focal_m = focal_cm * 0.01
         if focal_m == 0.0:
             if fallback_focal_length_m is None:
-                raise SceneCompileError(
+                raise OpticalModelCompileError(
                     f"mirror list line {line_number}: zero focal length has no fallback"
                 )
             focal_m = fallback_focal_length_m
         if focal_m <= 0.0:
-            raise SceneCompileError(
+            raise OpticalModelCompileError(
                 f"mirror list line {line_number}: focal length must be positive"
             )
         facet: dict[str, Any] = {
@@ -187,7 +203,7 @@ def parse_simtel_mirror_list(
         }
         facets.append(facet)
     if not facets:
-        raise SceneCompileError("mirror list contains no facets")
+        raise OpticalModelCompileError("mirror list contains no facets")
     return facets
 
 
@@ -204,21 +220,25 @@ def parse_obscuration_cylinders(contents: str) -> list[dict[str, Any]]:
         if header is None:
             header = fields
             if not required.issubset(header):
-                raise SceneCompileError("obscuration cylinders lack required columns")
+                raise OpticalModelCompileError("obscuration cylinders lack required columns")
             continue
         if len(fields) != len(header):
-            raise SceneCompileError(f"obscuration cylinder line {line_number}: wrong column count")
+            raise OpticalModelCompileError(
+                f"obscuration cylinder line {line_number}: wrong column count"
+            )
         row = dict(zip(header, fields, strict=True))
         try:
             values = [float(row[name]) for name in ("x1", "y1", "z1", "x2", "y2", "z2", "diameter")]
         except ValueError as error:
-            raise SceneCompileError(
+            raise OpticalModelCompileError(
                 f"obscuration cylinder line {line_number}: invalid number"
             ) from error
         if not all(math.isfinite(value) for value in values) or values[-1] <= 0:
-            raise SceneCompileError(f"obscuration cylinder line {line_number}: invalid geometry")
+            raise OpticalModelCompileError(
+                f"obscuration cylinder line {line_number}: invalid geometry"
+            )
         if math.dist(values[:3], values[3:6]) <= 1.0e-12:
-            raise SceneCompileError(f"obscuration cylinder line {line_number}: zero length")
+            raise OpticalModelCompileError(f"obscuration cylinder line {line_number}: zero length")
         cylinders.append({
             "id": row["id"],
             "first_endpoint_m": values[:3],
@@ -226,7 +246,7 @@ def parse_obscuration_cylinders(contents: str) -> list[dict[str, Any]]:
             "diameter_m": values[6],
         })
     if header is None or not cylinders:
-        raise SceneCompileError("obscuration cylinder table is empty")
+        raise OpticalModelCompileError("obscuration cylinder table is empty")
     return cylinders
 
 
@@ -242,30 +262,32 @@ def parse_wavelength_response(contents: str, name: str) -> list[dict[str, float]
         if header is None:
             header = fields
             if "wavelength" not in header or "reflectivity" not in header:
-                raise SceneCompileError(f"{name} lacks wavelength and reflectivity columns")
+                raise OpticalModelCompileError(f"{name} lacks wavelength and reflectivity columns")
             if "incidence_angle" in header:
-                raise SceneCompileError(f"{name} has incidence-dependent response")
+                raise OpticalModelCompileError(f"{name} has incidence-dependent response")
             continue
         if len(fields) != len(header):
-            raise SceneCompileError(f"{name} line {line_number}: wrong column count")
+            raise OpticalModelCompileError(f"{name} line {line_number}: wrong column count")
         row = dict(zip(header, fields, strict=True))
         try:
             wavelength, value = float(row["wavelength"]), float(row["reflectivity"])
         except ValueError as error:
-            raise SceneCompileError(f"{name} line {line_number}: invalid response") from error
+            raise OpticalModelCompileError(
+                f"{name} line {line_number}: invalid response"
+            ) from error
         if (
             not math.isfinite(wavelength)
             or not math.isfinite(value)
             or wavelength <= 0
             or not 0 <= value <= 1
         ):
-            raise SceneCompileError(f"{name} line {line_number}: invalid response")
+            raise OpticalModelCompileError(f"{name} line {line_number}: invalid response")
         response.append({"wavelength_nm": wavelength, "response": value})
     if len(response) < 2 or any(
         left["wavelength_nm"] > right["wavelength_nm"]
         for left, right in zip(response, response[1:])
     ):
-        raise SceneCompileError(f"{name} must have strictly increasing wavelengths")
+        raise OpticalModelCompileError(f"{name} must have strictly increasing wavelengths")
     # Some released response tables repeat a wavelength for independent
     # measurements. A table-driven transport kernel needs one ordinate per
     # abscissa, so retain their arithmetic mean instead of depending on parser
@@ -297,7 +319,7 @@ def derive_nominal_single_reflector(
     offset = _signed_length_m(parameters["mirror_offset"], "mirror_offset")
     parabolic = parameters["parabolic_dish"].get("value")
     if not isinstance(parabolic, bool):
-        raise SceneCompileError("parabolic_dish must be boolean")
+        raise OpticalModelCompileError("parabolic_dish must be boolean")
     for facet in facets:
         x, y, file_z = facet["centre_m"]
         radius = math.hypot(x, y)
@@ -307,7 +329,9 @@ def derive_nominal_single_reflector(
             height = radius * radius / (4 * dish_length)
         else:
             if radius > dish_length:
-                raise SceneCompileError("panel centre lies outside Davies-Cotton dish radius")
+                raise OpticalModelCompileError(
+                    "panel centre lies outside Davies-Cotton dish radius"
+                )
             height = dish_length - math.sqrt(dish_length * dish_length - radius * radius)
         distance = math.hypot(focal_length - height, radius)
         if file_z > 0:
@@ -334,17 +358,17 @@ def _even_polynomial_surface(parameter: dict[str, Any], name: str) -> list[float
         or not 1 <= len(value) <= 20
         or any(entry != "cm" for entry in unit)
     ):
-        raise SceneCompileError(f"{name} must be a physical-centimetre coefficient list")
+        raise OpticalModelCompileError(f"{name} must be a physical-centimetre coefficient list")
     coefficients = []
     for index, coefficient in enumerate(value):
         if isinstance(coefficient, bool) or not isinstance(coefficient, (int, float)):
-            raise SceneCompileError(f"{name} has a non-numeric coefficient")
+            raise OpticalModelCompileError(f"{name} has a non-numeric coefficient")
         converted = float(coefficient) * 0.01 ** (1 - 2 * index)
         if not math.isfinite(converted):
-            raise SceneCompileError(f"{name} has a non-finite coefficient")
+            raise OpticalModelCompileError(f"{name} has a non-finite coefficient")
         coefficients.append(converted)
     if any(value != 0.0 for value in coefficients[13:]):
-        raise SceneCompileError(f"{name} exceeds the native 13-coefficient surface contract")
+        raise OpticalModelCompileError(f"{name} exceeds the native 13-coefficient surface contract")
     return coefficients[:13] + [0.0] * (13 - len(coefficients[:13]))
 
 
@@ -363,7 +387,7 @@ def _dual_reflector_surfaces(parameters: dict[str, Any]) -> dict[str, dict[str, 
     if not present:
         return None
     if present != required:
-        raise SceneCompileError(
+        raise OpticalModelCompileError(
             "dual-reflector optical prescription is incomplete: "
             + ", ".join(sorted(required - present))
         )
@@ -397,14 +421,16 @@ def _dual_reflector_surfaces(parameters: dict[str, Any]) -> dict[str, dict[str, 
             or not 1 <= len(values) <= 20
             or any(unit != "cm" for unit in units)
         ):
-            raise SceneCompileError(f"{prefix}_parameters must be a centimetre coefficient list")
+            raise OpticalModelCompileError(
+                f"{prefix}_parameters must be a centimetre coefficient list"
+            )
         if any(isinstance(value, bool) or not isinstance(value, (int, float)) for value in values):
-            raise SceneCompileError(f"{prefix}_parameters has a non-numeric coefficient")
+            raise OpticalModelCompileError(f"{prefix}_parameters has a non-numeric coefficient")
         coefficient_m = [float(value) * scale for value in values]
         if not all(math.isfinite(value) for value in coefficient_m):
-            raise SceneCompileError(f"{prefix}_parameters has a non-finite coefficient")
+            raise OpticalModelCompileError(f"{prefix}_parameters has a non-finite coefficient")
         if any(value != 0.0 for value in coefficient_m[13:]):
-            raise SceneCompileError(
+            raise OpticalModelCompileError(
                 f"{prefix}_parameters exceeds the native 13-coefficient surface contract"
             )
         return coefficient_m[:13] + [0.0] * (13 - len(coefficient_m[:13])), scale
@@ -418,7 +444,7 @@ def _dual_reflector_surfaces(parameters: dict[str, Any]) -> dict[str, dict[str, 
             * 0.5
         )
         if inner >= outer:
-            raise SceneCompileError(f"{prefix} hole must be smaller than its aperture")
+            raise OpticalModelCompileError(f"{prefix} hole must be smaller than its aperture")
         coefficient_m, scale = polynomial(prefix)
         return {
             "coefficient_m": coefficient_m,
@@ -442,20 +468,20 @@ def _dual_reflector_surfaces(parameters: dict[str, Any]) -> dict[str, dict[str, 
     }
 
 
-def compile_scene(
+def compile_optical_model(
     ir: dict[str, Any], source_root: Path, *, simtel_root: Path | None = None
 ) -> dict[str, Any]:
-    """Compile ``obdeect.simulation-models-ir.v1`` into generic scene data."""
-    if ir.get("format") != "obdeect.simulation-models-ir.v1":
-        raise SceneCompileError("expected obdeect.simulation-models-ir.v1")
+    """Compile ``obdeect.simulation-models-optical-model-ir.v1`` into generic optical model data."""
+    if ir.get("format") != "obdeect.simulation-models-optical-model-ir.v1":
+        raise OpticalModelCompileError("expected obdeect.simulation-models-optical-model-ir.v1")
     model = ir.get("model")
     version = ir.get("model_version")
     parameters = ir.get("parameters")
     assets = ir.get("assets")
     if not isinstance(model, str) or not model or not isinstance(version, str) or not version:
-        raise SceneCompileError("IR model identity is invalid")
+        raise OpticalModelCompileError("IR model identity is invalid")
     if not isinstance(parameters, dict) or not isinstance(assets, dict):
-        raise SceneCompileError("IR parameters and assets must be objects")
+        raise OpticalModelCompileError("IR parameters and assets must be objects")
     root = source_root.resolve()
     # Keep the compiler's source-root contract aligned with the importer: a
     # released checkout may contain its data package in simulation-models/.
@@ -464,14 +490,14 @@ def compile_scene(
         root = nested_root
     records = ir.get("input_records", {})
     if not isinstance(records, dict):
-        raise SceneCompileError("IR input_records must be an object")
+        raise OpticalModelCompileError("IR input_records must be an object")
     try:
         source_ir = resolve_model(source_root, model, version)
     except ModelImportError as error:
-        raise SceneCompileError(f"cannot verify source production: {error}") from error
+        raise OpticalModelCompileError(f"cannot verify source production: {error}") from error
     for key in ("source_root", "input_records", "assets", "parameters"):
         if ir.get(key) != source_ir[key]:
-            raise SceneCompileError(f"IR {key} differs from the verified source production")
+            raise OpticalModelCompileError(f"IR {key} differs from the verified source production")
     verified_assets = {name: root / entry["path"] for name, entry in assets.items()}
 
     fallback = None
@@ -538,7 +564,7 @@ def compile_scene(
             "interpretation": "Footprints parsed; surface sag and normals unresolved.",
         }
     else:
-        raise SceneCompileError("IR has no tracked primary mirror geometry asset")
+        raise OpticalModelCompileError("IR has no tracked primary mirror geometry asset")
     if "telescope_obscuration_cylinders" in verified_assets:
         primary["cylinder_obscurers"] = parse_obscuration_cylinders(
             verified_assets["telescope_obscuration_cylinders"].read_text(encoding="utf-8")
@@ -551,7 +577,7 @@ def compile_scene(
                 "mirror_reflectivity",
             )
             consumed.add("mirror_reflectivity")
-        except SceneCompileError as error:
+        except OpticalModelCompileError as error:
             if "incidence-dependent response" not in str(error):
                 raise
     secondary = None
@@ -591,7 +617,7 @@ def compile_scene(
                     "secondary_mirror_reflectivity",
                 )
                 consumed.add("secondary_mirror_reflectivity")
-            except SceneCompileError as error:
+            except OpticalModelCompileError as error:
                 if "incidence-dependent response" not in str(error):
                     raise
     camera = None
@@ -610,23 +636,25 @@ def compile_scene(
                 else parse_camera_layout(contents)
             )
         except CameraConfigError as error:
-            raise SceneCompileError(str(error)) from error
+            raise OpticalModelCompileError(str(error)) from error
         consumed.add(camera_asset_name)
         declared_pixels = parameters.get("camera_pixels", {}).get("value")
         if isinstance(declared_pixels, bool) or not isinstance(declared_pixels, int):
-            raise SceneCompileError("camera_pixels must be an integer count")
+            raise OpticalModelCompileError("camera_pixels must be an integer count")
         if len(camera["pixels"]) != declared_pixels:
-            raise SceneCompileError(
+            raise OpticalModelCompileError(
                 "pixel count differs: focal-plane element count differs from production record"
             )
         consumed.add("camera_pixels")
         for pixel_type in camera["pixel_types"]:
             for filename in pixel_type["response_files"]:
                 if not component(filename):
-                    raise SceneCompileError(f"unsafe camera response filename: {filename}")
+                    raise OpticalModelCompileError(f"unsafe camera response filename: {filename}")
                 path = root / "model_parameters" / "Files" / filename
                 if not path.resolve().is_relative_to(root):
-                    raise SceneCompileError(f"camera response path escapes source root: {filename}")
+                    raise OpticalModelCompileError(
+                        f"camera response path escapes source root: {filename}"
+                    )
                 if path.is_file():
                     nested_assets[filename] = record(path, root)
                 else:
@@ -652,7 +680,9 @@ def compile_scene(
     deferred = sorted(set(parameters) - consumed)
     for name in deferred:
         if parameters[name].get("required_for_trace") is True:
-            raise SceneCompileError(f"required field {name} is not supported by the compiler")
+            raise OpticalModelCompileError(
+                f"required field {name} is not supported by the compiler"
+            )
     report = {
         "native_trace_ready": False,
         "consumed": sorted(consumed),
@@ -663,7 +693,7 @@ def compile_scene(
                 "disposition": "consumed" if name in consumed else "deferred",
                 "reason": "parsed into geometry"
                 if name in consumed
-                else "not compiled into an optical scene",
+                else "not compiled into an optical optical model",
             }
             for name in sorted(parameters)
         },
@@ -707,11 +737,11 @@ def compile_scene(
         # The camera layout bounds the only model-derived focal aperture.  A
         # native curved detector is intentionally not fabricated until its
         # coordinate transform and active boundary are represented by the
-        # native scene format.
+        # native optical_model format.
         if camera is not None:
             compiled_focal_surface["outer_radius_m"] = _camera_extent_m(camera)
     compiled = {
-        "format": "obdeect.compiled-scene.v1",
+        "format": "obdeect.compiled-optical-model.v1",
         "provenance": {
             "model": model,
             "model_version": version,
@@ -731,18 +761,18 @@ def compile_scene(
     if camera is not None:
         compiled["camera"] = camera
     canonical = json.dumps(compiled, sort_keys=True, separators=(",", ":")).encode()
-    compiled["scene_sha256"] = hashlib.sha256(canonical).hexdigest()
+    compiled["optical_model_sha256"] = hashlib.sha256(canonical).hexdigest()
     return compiled
 
 
-def require_trace_ready(scene: dict[str, Any]) -> None:
-    """Reject a compiled scene that cannot be passed to a production tracer."""
-    report = scene.get("report", {})
+def require_trace_ready(optical_model: dict[str, Any]) -> None:
+    """Reject a compiled optical model that cannot be passed to a production tracer."""
+    report = optical_model.get("report", {})
     blockers = report.get("trace_blockers", [])
     if not report.get("native_trace_ready", False):
-        blockers = [*blockers, "native production scene binding is unavailable"]
+        blockers = [*blockers, "native production optical model binding is unavailable"]
     if blockers:
-        raise SceneCompileError("scene is not trace-ready: " + "; ".join(blockers))
+        raise OpticalModelCompileError("optical model is not trace-ready: " + "; ".join(blockers))
 
 
 def _camera_extent_m(camera: dict[str, Any]) -> float:
@@ -764,34 +794,36 @@ def _camera_extent_m(camera: dict[str, Any]) -> float:
                 math.hypot(float(x), float(y)) + radii.get(pixel.get("type_id"), 0.0),
             )
     except (KeyError, IndexError, TypeError, ValueError) as error:
-        raise SceneCompileError("native export found an invalid focal-plane layout") from error
+        raise OpticalModelCompileError(
+            "native export found an invalid focal-plane layout"
+        ) from error
     if not math.isfinite(extent) or extent <= 0.0:
-        raise SceneCompileError("native export found an invalid focal-plane extent")
+        raise OpticalModelCompileError("native export found an invalid focal-plane extent")
     return extent
 
 
 def native_surface_rows(
-    scene: dict[str, Any],
+    optical_model: dict[str, Any],
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[tuple[float, float]]]:
-    """Return model-derived planar surfaces for the native scene adapter.
+    """Return model-derived planar surfaces for the native optical_model adapter.
 
     The exporter only accepts facets with explicit nominal centres and normals.
     It never reconstructs a missing telescope prescription. The focal surface
     is represented by the imported focal-plane extent at the selected focal
     length, so the native tracer can preserve detector-boundary losses.
     """
-    report = scene.get("report", {})
+    report = optical_model.get("report", {})
     if report.get("facet_geometry_evidence", {}).get("normal_status") != "nominal_unperturbed":
-        raise SceneCompileError("native export requires explicit facet normals")
-    facets = scene.get("primary", {}).get("facets", [])
+        raise OpticalModelCompileError("native export requires explicit facet normals")
+    facets = optical_model.get("primary", {}).get("facets", [])
     if not facets:
-        raise SceneCompileError("native export has no primary facets")
+        raise OpticalModelCompileError("native export has no primary facets")
     rows: list[dict[str, Any]] = []
     for facet in facets:
         centre = facet.get("nominal_centre_m")
         normal = facet.get("nominal_normal")
         if not isinstance(centre, list) or not isinstance(normal, list):
-            raise SceneCompileError("native export found a facet without nominal placement")
+            raise OpticalModelCompileError("native export found a facet without nominal placement")
         rows.append({
             "surface_id": int(facet["id"]),
             "role": "mirror",
@@ -801,12 +833,12 @@ def native_surface_rows(
             "diameter_m": facet["diameter_m"],
             "focal_length_m": facet["focal_length_m"],
         })
-    camera = scene.get("camera", {})
+    camera = optical_model.get("camera", {})
     # ``parse_simtel_mirror_list`` retains the focal length for every facet;
     # use that explicit catalogue value for the detector plane.  A compiled
-    # scene intentionally does not copy the whole parameter table, so this is
+    # optical_model intentionally does not copy the whole parameter table, so this is
     # the only value the native exporter is allowed to consume here.
-    focal_length = scene.get("focal_length_m")
+    focal_length = optical_model.get("focal_length_m")
     if (
         not isinstance(focal_length, (int, float))
         or not math.isfinite(float(focal_length))
@@ -818,10 +850,10 @@ def native_surface_rows(
             not math.isclose(value, focal_length, rel_tol=1e-9, abs_tol=1e-12)
             for value in focal_lengths
         ):
-            raise SceneCompileError("native export requires an explicit focal length")
+            raise OpticalModelCompileError("native export requires an explicit focal length")
     pixels = camera.get("pixels", [])
     if not pixels:
-        raise SceneCompileError("native export requires focal-plane layout")
+        raise OpticalModelCompileError("native export requires focal-plane layout")
     extent = _camera_extent_m(camera)
     rows.append({
         "surface_id": max(row["surface_id"] for row in rows) + 1,
@@ -831,20 +863,22 @@ def native_surface_rows(
         "normal": [0.0, 0.0, 1.0],
         "diameter_m": 2.0 * extent,
     })
-    obscurers = scene.get("primary", {}).get("cylinder_obscurers", [])
+    obscurers = optical_model.get("primary", {}).get("cylinder_obscurers", [])
     if not isinstance(obscurers, list):
-        raise SceneCompileError("native export found invalid cylinder obscurers")
+        raise OpticalModelCompileError("native export found invalid cylinder obscurers")
     next_surface_id = max(row["surface_id"] for row in rows) + 1
     native_obscurers = []
     for obscurer in obscurers:
         if not isinstance(obscurer, dict):
-            raise SceneCompileError("native export found invalid cylinder obscurer")
+            raise OpticalModelCompileError("native export found invalid cylinder obscurer")
         try:
             first = [float(value) for value in obscurer["first_endpoint_m"]]
             second = [float(value) for value in obscurer["second_endpoint_m"]]
             diameter = float(obscurer["diameter_m"])
         except (KeyError, TypeError, ValueError) as error:
-            raise SceneCompileError("native export found invalid cylinder obscurer") from error
+            raise OpticalModelCompileError(
+                "native export found invalid cylinder obscurer"
+            ) from error
         if (
             len(first) != 3
             or len(second) != 3
@@ -852,7 +886,7 @@ def native_surface_rows(
             or diameter <= 0
             or math.dist(first, second) <= 1e-12
         ):
-            raise SceneCompileError("native export found invalid cylinder obscurer")
+            raise OpticalModelCompileError("native export found invalid cylinder obscurer")
         native_obscurers.append({
             "surface_id": next_surface_id,
             "first": first,
@@ -875,38 +909,40 @@ def native_surface_rows(
             tangent = [candidate[index] - projection * normal[index] for index in range(3)]
             tangent_norm = math.sqrt(sum(value * value for value in tangent))
         row["tangent"] = [value / tangent_norm for value in tangent]
-    reflectivity = scene.get("primary", {}).get("reflectivity", [])
+    reflectivity = optical_model.get("primary", {}).get("reflectivity", [])
     if not isinstance(reflectivity, list):
-        raise SceneCompileError("native export found invalid primary reflectivity")
+        raise OpticalModelCompileError("native export found invalid primary reflectivity")
     native_reflectivity = []
     for entry in reflectivity:
         if not isinstance(entry, dict):
-            raise SceneCompileError("native export found invalid primary reflectivity")
+            raise OpticalModelCompileError("native export found invalid primary reflectivity")
         try:
             wavelength = float(entry["wavelength_nm"])
             value = float(entry["response"])
         except (KeyError, TypeError, ValueError) as error:
-            raise SceneCompileError("native export found invalid primary reflectivity") from error
+            raise OpticalModelCompileError(
+                "native export found invalid primary reflectivity"
+            ) from error
         if (
             not math.isfinite(wavelength)
             or not math.isfinite(value)
             or wavelength <= 0
             or not 0 <= value <= 1
         ):
-            raise SceneCompileError("native export found invalid primary reflectivity")
+            raise OpticalModelCompileError("native export found invalid primary reflectivity")
         native_reflectivity.append((wavelength, value))
     if any(
         left[0] >= right[0] for left, right in zip(native_reflectivity, native_reflectivity[1:])
     ):
-        raise SceneCompileError("native export found unordered primary reflectivity")
+        raise OpticalModelCompileError("native export found unordered primary reflectivity")
     return rows, native_obscurers, native_reflectivity
 
 
-def write_native_scene(scene: dict[str, Any], output: Path) -> None:
-    """Write the strict, dependency-free native scene surface table."""
-    primary = scene.get("primary", {})
-    secondary = scene.get("secondary", {})
-    focal = scene.get("focal_surface", {})
+def write_native_optical_model(optical_model: dict[str, Any], output: Path) -> None:
+    """Write the strict, dependency-free native optical model surface table."""
+    primary = optical_model.get("primary", {})
+    secondary = optical_model.get("secondary", {})
+    focal = optical_model.get("focal_surface", {})
     if (
         isinstance(primary, dict)
         and isinstance(secondary, dict)
@@ -914,14 +950,14 @@ def write_native_scene(scene: dict[str, Any], output: Path) -> None:
         and isinstance(primary.get("aspheric_surface"), dict)
         and secondary.get("kind") == "aspheric_mirror"
     ):
-        _write_native_axisymmetric_scene(scene, output)
+        _write_native_axisymmetric_optical_model(optical_model, output)
         return
-    rows, obscurers, reflectivity = native_surface_rows(scene)
+    rows, obscurers, reflectivity = native_surface_rows(optical_model)
     lines = [
-        "obdeect-scene-v1",
+        "obdeect-optical-model-v1",
         "surface_id,role,shape,cx_m,cy_m,cz_m,nx,ny,nz,tx,ty,tz,diameter_m,focal_length_m",
     ]
-    provenance = scene.get("provenance", {})
+    provenance = optical_model.get("provenance", {})
     model = provenance.get("model")
     version = provenance.get("model_version")
     records = provenance.get("input_records", {})
@@ -932,10 +968,10 @@ def write_native_scene(scene: dict[str, Any], output: Path) -> None:
         or "," in version
         or not isinstance(records, dict)
     ):
-        raise SceneCompileError("native export requires model provenance")
-    content_hash = scene.get("scene_sha256")
+        raise OpticalModelCompileError("native export requires model provenance")
+    content_hash = optical_model.get("optical_model_sha256")
     if not isinstance(content_hash, str) or len(content_hash) != 64:
-        raise SceneCompileError("native export requires scene_sha256")
+        raise OpticalModelCompileError("native export requires optical_model_sha256")
     lines.insert(1, f"provenance,{model},{version},{content_hash}")
     for row in rows:
         centre = row["centre_m"]
@@ -966,24 +1002,24 @@ def write_native_scene(scene: dict[str, Any], output: Path) -> None:
     output.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
-def _write_native_axisymmetric_scene(scene: dict[str, Any], output: Path) -> None:
+def _write_native_axisymmetric_optical_model(optical_model: dict[str, Any], output: Path) -> None:
     """Write an exact rotationally symmetric SST/SCT optical prescription.
 
     The source model defines these surfaces as an even polynomial around the
     telescope optical axis.  This format carries the radius convention and
     never replaces them with a faceted approximation.
     """
-    provenance = scene.get("provenance", {})
+    provenance = optical_model.get("provenance", {})
     model, version = provenance.get("model"), provenance.get("model_version")
-    content_hash = scene.get("scene_sha256")
+    content_hash = optical_model.get("optical_model_sha256")
     if (
         not isinstance(model, str)
         or not isinstance(version, str)
         or not isinstance(content_hash, str)
     ):
-        raise SceneCompileError("native export requires model provenance")
+        raise OpticalModelCompileError("native export requires model provenance")
     if len(content_hash) != 64 or "," in model or "," in version:
-        raise SceneCompileError("native export requires valid model provenance")
+        raise OpticalModelCompileError("native export requires valid model provenance")
 
     def row(role: str, surface: dict[str, Any]) -> str:
         coefficients = surface.get("coefficient_m")
@@ -1004,7 +1040,7 @@ def _write_native_axisymmetric_scene(scene: dict[str, Any], output: Path) -> Non
             or outer <= inner
             or scale <= 0
         ):
-            raise SceneCompileError(f"invalid {role} aspheric surface")
+            raise OpticalModelCompileError(f"invalid {role} aspheric surface")
         # The native intersection is z = vertex + polynomial(r), so retain
         # the physical vertex separately from the zeroed polynomial constant.
         local = [float(value) for value in coefficients]
@@ -1015,16 +1051,18 @@ def _write_native_axisymmetric_scene(scene: dict[str, Any], output: Path) -> Non
             *(f"{value:.17g}" for value in (vertex, inner, outer, scale, *local)),
         ])
 
-    primary_source = scene["primary"]
+    primary_source = optical_model["primary"]
     if primary_source.get("cylinder_obscurers"):
-        raise SceneCompileError("native axisymmetric export cannot represent cylinder obscurers")
+        raise OpticalModelCompileError(
+            "native axisymmetric export cannot represent cylinder obscurers"
+        )
     primary = primary_source["aspheric_surface"]
-    secondary = scene["secondary"]
-    focal = scene.get("focal_surface")
+    secondary = optical_model["secondary"]
+    focal = optical_model.get("focal_surface")
     if not isinstance(focal, dict) or focal.get("outer_radius_m") is None:
-        raise SceneCompileError("native dual-mirror export requires a bounded focal surface")
+        raise OpticalModelCompileError("native dual-mirror export requires a bounded focal surface")
     lines = [
-        "obdeect-axisymmetric-scene-v1",
+        "obdeect-axisymmetric-optical-model-v1",
         f"provenance,{model},{version},{content_hash}",
         "role,vertex_z_m,inner_radius_m,outer_radius_m,radial_scale_m,c0_m,c1_m,c2_m,c3_m,c4_m,c5_m,c6_m,c7_m,c8_m,c9_m,c10_m,c11_m,c12_m",
         row("primary", primary),
@@ -1037,32 +1075,32 @@ def _write_native_axisymmetric_scene(scene: dict[str, Any], output: Path) -> Non
     ):
         response = response_source.get("reflectivity", [])
         if not isinstance(response, list):
-            raise SceneCompileError(f"invalid {role} reflectivity")
+            raise OpticalModelCompileError(f"invalid {role} reflectivity")
         for entry in response:
             if not isinstance(entry, dict):
-                raise SceneCompileError(f"invalid {role} reflectivity")
+                raise OpticalModelCompileError(f"invalid {role} reflectivity")
             try:
                 wavelength = float(entry["wavelength_nm"])
                 value = float(entry["response"])
             except (KeyError, TypeError, ValueError) as error:
-                raise SceneCompileError(f"invalid {role} reflectivity") from error
+                raise OpticalModelCompileError(f"invalid {role} reflectivity") from error
             if (
                 not math.isfinite(wavelength)
                 or not math.isfinite(value)
                 or wavelength <= 0
                 or not 0 <= value <= 1
             ):
-                raise SceneCompileError(f"invalid {role} reflectivity")
+                raise OpticalModelCompileError(f"invalid {role} reflectivity")
             lines.append(f"{role}_reflectivity,{wavelength:.17g},{value:.17g}")
     output.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Compile a simulation-models IR into generic scene data."
+        description="Compile a simulation-models IR into generic optical model data."
     )
     parser.add_argument(
-        "--input", type=Path, required=True, help="provenance-checked scene IR JSON"
+        "--input", type=Path, required=True, help="provenance-checked optical model IR JSON"
     )
     parser.add_argument(
         "--source-root", type=Path, required=True, help="root used to resolve IR asset paths"
@@ -1072,7 +1110,9 @@ def main() -> None:
         type=Path,
         help="explicit sim_telarray installation for cfg/CTA camera tables",
     )
-    parser.add_argument("--output", type=Path, required=True, help="compiled generic-scene JSON")
+    parser.add_argument(
+        "--output", type=Path, required=True, help="compiled generic-optical model JSON"
+    )
     parser.add_argument("--native-output", type=Path, help="optional native surface table")
     parser.add_argument(
         "--require-trace-ready",
@@ -1083,16 +1123,18 @@ def main() -> None:
     try:
         ir = json.loads(args.input.read_text(encoding="utf-8"))
         if not isinstance(ir, dict):
-            raise SceneCompileError("IR root must be an object")
-        scene = compile_scene(ir, args.source_root, simtel_root=args.simtel_root)
+            raise OpticalModelCompileError("IR root must be an object")
+        optical_model = compile_optical_model(ir, args.source_root, simtel_root=args.simtel_root)
         if args.require_trace_ready:
-            require_trace_ready(scene)
+            require_trace_ready(optical_model)
         if args.native_output:
-            write_native_scene(scene, args.native_output)
-    except (OSError, json.JSONDecodeError, SceneCompileError) as error:
-        raise SystemExit(f"scene compilation failed: {error}") from error
-    args.output.write_text(json.dumps(scene, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    print(f"Compiled {scene['provenance']['model']} geometry into {args.output}")
+            write_native_optical_model(optical_model, args.native_output)
+    except (OSError, json.JSONDecodeError, OpticalModelCompileError) as error:
+        raise SystemExit(f"optical model compilation failed: {error}") from error
+    args.output.write_text(
+        json.dumps(optical_model, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    print(f"Compiled {optical_model['provenance']['model']} geometry into {args.output}")
     if args.native_output:
         print(f"Wrote native surface table to {args.native_output}")
 

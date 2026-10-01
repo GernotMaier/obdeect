@@ -1,4 +1,4 @@
-"""Tests for the standard-library simulation-models scene-IR importer."""
+"""Tests for the standard-library simulation-models optical-model IR importer."""
 
 import importlib.util
 import json
@@ -60,15 +60,15 @@ class TestSimulationModelsImport(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory) / "simulation-models"
             self.make_tree(root)
-            scene = IMPORTER.resolve_model(root, "TEST", "1.2.3")
-        self.assertEqual(scene["format"], "obdeect.simulation-models-ir.v1")
-        self.assertEqual(scene["parameters"]["focal_length"]["value"], 123.0)
+            optical_model = IMPORTER.resolve_model(root, "TEST", "1.2.3")
+        self.assertEqual(optical_model["format"], "obdeect.simulation-models-optical-model-ir.v1")
+        self.assertEqual(optical_model["parameters"]["focal_length"]["value"], 123.0)
         self.assertEqual(
-            set(scene["input_records"]),
+            set(optical_model["input_records"]),
             {"production_manifest", "parameter:focal_length", "parameter:mirror_list"},
         )
-        self.assertIn("mirror_list", scene["assets"])
-        self.assertEqual(len(scene["assets"]["mirror_list"]["sha256"]), 64)
+        self.assertIn("mirror_list", optical_model["assets"])
+        self.assertEqual(len(optical_model["assets"]["mirror_list"]["sha256"]), 64)
 
     def test_excludes_camera_electronics_from_ray_tracing_ir(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -91,9 +91,9 @@ class TestSimulationModelsImport(unittest.TestCase):
                     "file": False,
                 })
             )
-            scene = IMPORTER.resolve_model(root, "TEST", "1.2.3")
-        self.assertNotIn("fadc_noise", scene["parameters"])
-        self.assertNotIn("parameter:fadc_noise", scene["input_records"])
+            optical_model = IMPORTER.resolve_model(root, "TEST", "1.2.3")
+        self.assertNotIn("fadc_noise", optical_model["parameters"])
+        self.assertNotIn("parameter:fadc_noise", optical_model["input_records"])
 
     def test_keeps_dual_reflector_optical_parameters(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -116,8 +116,8 @@ class TestSimulationModelsImport(unittest.TestCase):
                     "file": False,
                 })
             )
-            scene = IMPORTER.resolve_model(root, "TEST", "1.2.3")
-        self.assertIn("secondary_mirror_parameters", scene["parameters"])
+            optical_model = IMPORTER.resolve_model(root, "TEST", "1.2.3")
+        self.assertIn("secondary_mirror_parameters", optical_model["parameters"])
 
     def test_missing_declared_asset_fails_closed(self):
         # T-IMPORT-002: an asset reference can never become an untracked path.
@@ -133,9 +133,9 @@ class TestSimulationModelsImport(unittest.TestCase):
             self.make_tree(root, asset_exists=False)
             local_asset = root / "model_parameters/TEST/mirror_list/mirrors.dat"
             local_asset.write_text("one facet\n")
-            scene = IMPORTER.resolve_model(root, "TEST", "1.2.3")
+            optical_model = IMPORTER.resolve_model(root, "TEST", "1.2.3")
         self.assertEqual(
-            scene["assets"]["mirror_list"]["path"],
+            optical_model["assets"]["mirror_list"]["path"],
             "model_parameters/TEST/mirror_list/mirrors.dat",
         )
 

@@ -96,7 +96,7 @@ def draw_reference_telescope(axis, telescope: str):
         axis.plot([-2.0, 2.0], [4.875, 4.875], color="black", linewidth=0.7, label="focal screen")
         return
     # Only validated analytic reference outlines are drawn here.
-    # SC geometry must come from a compiled-scene export.
+    # SC geometry must come from a compiled-optical-model export.
     if telescope in ("SST", "SCT"):
         axis.text(
             0.02,
@@ -147,17 +147,17 @@ def draw_structure(plt, telescope: str, output: Path):
     plt.close(figure)
 
 
-def draw_compiled_structure(plt, scene_path: Path, output: Path):
+def draw_compiled_structure(plt, optical_model_path: Path, output: Path):
     """Plot the explicit compiled primary facets and focal boundary.
 
-    The plot consumes only geometry present in the compiled scene JSON. Any
+    The plot consumes only geometry present in the compiled optical_model JSON. Any
     unavailable secondary, support, or obscuration geometry is listed in the
     figure annotation instead of being replaced by an illustrative outline.
     """
-    scene = json.loads(scene_path.read_text(encoding="utf-8"))
-    facets = scene.get("primary", {}).get("facets", [])
+    optical_model = json.loads(optical_model_path.read_text(encoding="utf-8"))
+    facets = optical_model.get("primary", {}).get("facets", [])
     if not facets:
-        raise SystemExit("compiled scene contains no primary facets")
+        raise SystemExit("compiled optical model contains no primary facets")
     figure, axes = plt.subplots(1, 2, figsize=(12, 5), sharey=True)
     for axis, coordinate in zip(axes, (0, 1), strict=True):
         for facet in facets:
@@ -165,14 +165,14 @@ def draw_compiled_structure(plt, scene_path: Path, output: Path):
             if not isinstance(centre, list) or len(centre) != 3:
                 continue
             axis.scatter(centre[coordinate], centre[2], s=8, c="tab:blue", alpha=0.65)
-        camera = scene.get("camera", {})
+        camera = optical_model.get("camera", {})
         elements = camera.get("pixels", [])
         if elements:
             extent = max(
                 math.hypot(float(item["centre_xy_m"][0]), float(item["centre_xy_m"][1]))
                 for item in elements
             )
-            focal = float(scene.get("focal_length_m", facets[0].get("focal_length_m", 0.0)))
+            focal = float(optical_model.get("focal_length_m", facets[0].get("focal_length_m", 0.0)))
             axis.plot(
                 [-extent, extent],
                 [focal, focal],
@@ -184,7 +184,7 @@ def draw_compiled_structure(plt, scene_path: Path, output: Path):
         axis.set_aspect("equal", adjustable="box")
     axes[0].scatter([], [], s=8, c="tab:blue", label="mirror facet centres")
     axes[0].legend(loc="best")
-    blockers = scene.get("report", {}).get("trace_blockers", [])
+    blockers = optical_model.get("report", {}).get("trace_blockers", [])
     subtitle = "compiled model geometry"
     if blockers:
         subtitle += "; unresolved: " + ", ".join(str(item) for item in blockers[:2])
@@ -360,9 +360,9 @@ def main():
     )
     parser.add_argument("--bins", type=int, default=64, help="focal-plane histogram bins per axis")
     parser.add_argument(
-        "--scene-json",
+        "--optical-model-json",
         type=Path,
-        help="compiled scene JSON for --view compiled-structure",
+        help="compiled optical model JSON for --view compiled-structure",
     )
     parser.add_argument(
         "--telescope",
@@ -377,8 +377,8 @@ def main():
         parser.error("--input is required for rays and focal plane")
     if args.focal_plane and args.view != "rays":
         parser.error("--focal-plane cannot be combined with --view")
-    if args.view == "compiled-structure" and args.scene_json is None:
-        parser.error("--scene-json is required for --view compiled-structure")
+    if args.view == "compiled-structure" and args.optical_model_json is None:
+        parser.error("--optical-model-json is required for --view compiled-structure")
 
     if args.focal_plane and args.output.suffix.lower() == ".svg":
         draw_focal_plane_svg(args.input, args.output, args.bins, args.telescope)
@@ -398,7 +398,7 @@ def main():
         draw_structure(plt, args.telescope, args.output)
         return
     if args.view == "compiled-structure":
-        draw_compiled_structure(plt, args.scene_json, args.output)
+        draw_compiled_structure(plt, args.optical_model_json, args.output)
         return
     if args.focal_plane or args.view == "focal-plane":
         draw_focal_plane(plt, args.input, args.output, args.bins, args.telescope)

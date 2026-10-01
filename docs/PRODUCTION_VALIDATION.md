@@ -45,15 +45,15 @@ MODEL=LSTN-design
 obdeect-import-simulation-models \
   --source-root "$OBDEECT_SIMULATION_MODELS_PATH" --model "$MODEL" --version 7.0.0 \
   --output "$MODEL.ir.json"
-obdeect-compile-scene \
+obdeect-compile-optical-model \
   --input "$MODEL.ir.json" --source-root "$OBDEECT_SIMULATION_MODELS_PATH" \
   --simtel-root "$SIMTEL_ROOT" --require-trace-ready \
-  --output "$MODEL.scene.json" --native-output "$MODEL.scene.csv"
+  --output "$MODEL.optical-model.json" --native-output "$MODEL.optical-model.csv"
 
 # Generate the two normalised comparison tables from the frozen common source block.
 obdeect-normalize-arrivals --input obdeect-arrivals.csv --output obdeect.normalized.csv
 obdeect-validate-production \
-  --scene "$MODEL.scene.json" --telescope-family LST \
+  --optical-model "$MODEL.optical-model.json" --telescope-family LST \
   --obdeect-arrivals obdeect.normalized.csv \
   --simtel-arrivals simtel.normalized.csv \
   --tolerances tolerances.json --output validation-summary.json

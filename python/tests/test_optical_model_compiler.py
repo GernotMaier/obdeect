@@ -1,4 +1,4 @@
-"""Tests for the generic simulation-models scene compiler."""
+"""Tests for the generic simulation-models optical model compiler."""
 
 import json
 import math
@@ -7,21 +7,21 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from obdeect.model_import import resolve_model
-from obdeect.scene_compiler import (
-    SceneCompileError,
+from obdeect.optical_model_compiler import (
+    OpticalModelCompileError,
     _dual_reflector_surfaces,
-    compile_scene,
+    compile_optical_model,
     derive_nominal_single_reflector,
     native_surface_rows,
     parse_obscuration_cylinders,
     parse_simtel_mirror_list,
     parse_simtel_segmentation,
     require_trace_ready,
-    write_native_scene,
+    write_native_optical_model,
 )
 
 
-class TestSceneCompiler(unittest.TestCase):
+class TestOpticalModelCompiler(unittest.TestCase):
     def test_parses_model_obscuration_cylinders_in_metres(self):
         cylinders = parse_obscuration_cylinders(
             "# %ECSV 1.0\nid group x1 y1 z1 x2 y2 z2 diameter\nmast-1 mast 0 0 1 0 0 4 0.2\n"
@@ -31,7 +31,7 @@ class TestSceneCompiler(unittest.TestCase):
         self.assertEqual(cylinders[0]["diameter_m"], 0.2)
 
     def test_native_detector_bound_includes_outer_pixel_entrance(self):
-        scene = {
+        optical_model = {
             "report": {"facet_geometry_evidence": {"normal_status": "nominal_unperturbed"}},
             "primary": {
                 "facets": [
@@ -51,7 +51,7 @@ class TestSceneCompiler(unittest.TestCase):
             },
             "focal_length_m": 16.0,
         }
-        rows, _, _ = native_surface_rows(scene)
+        rows, _, _ = native_surface_rows(optical_model)
         detector = rows[-1]
         self.assertAlmostEqual(detector["diameter_m"], 2.12)
 
@@ -92,10 +92,10 @@ class TestSceneCompiler(unittest.TestCase):
         self.assertEqual(surfaces["primary"]["coefficient_m"][:2], [0.0, 0.5])
         self.assertEqual(surfaces["focal_surface"]["coefficient_m"][0], 10.0)
 
-    def test_native_scene_export_contains_provenance_and_detector_surface(self):
-        scene = {
+    def test_native_optical_model_export_contains_provenance_and_detector_surface(self):
+        optical_model = {
             "provenance": {"model": "GENERIC", "model_version": "1.0.0", "input_records": {}},
-            "scene_sha256": "a" * 64,
+            "optical_model_sha256": "a" * 64,
             "report": {"facet_geometry_evidence": {"normal_status": "nominal_unperturbed"}},
             "primary": {
                 "facets": [
@@ -113,21 +113,23 @@ class TestSceneCompiler(unittest.TestCase):
             "focal_length_m": 16.0,
         }
         with TemporaryDirectory() as directory:
-            output = Path(directory) / "scene.csv"
-            write_native_scene(scene, output)
+            output = Path(directory) / "optical model.csv"
+            write_native_optical_model(optical_model, output)
             lines = output.read_text().splitlines()
-        self.assertEqual(lines[0], "obdeect-scene-v1")
+        self.assertEqual(lines[0], "obdeect-optical-model-v1")
         self.assertEqual(lines[1], "provenance,GENERIC,1.0.0," + "a" * 64)
         self.assertIn("0,mirror,hexagon_flat_y", lines[3])
         self.assertIn("1,detector,circle", lines[4])
 
-    def test_trace_readiness_requires_resolved_scene(self):
+    def test_trace_readiness_requires_resolved_optical_model(self):
         require_trace_ready({"report": {"trace_blockers": [], "native_trace_ready": True}})
-        with self.assertRaisesRegex(SceneCompileError, "detector surfaces"):
+        with self.assertRaisesRegex(OpticalModelCompileError, "detector surfaces"):
             require_trace_ready({
                 "report": {"trace_blockers": ["physical detector surfaces are unresolved"]}
             })
-        with self.assertRaisesRegex(SceneCompileError, "native production scene binding"):
+        with self.assertRaisesRegex(
+            OpticalModelCompileError, "native production optical model binding"
+        ):
             require_trace_ready({"report": {"trace_blockers": []}})
 
     def test_nominal_panel_normal_and_dish_position_follow_simtel_formula(self):
@@ -199,34 +201,42 @@ class TestSceneCompiler(unittest.TestCase):
         # T-IR-004: source units, shape, position and zero-focal fallback survive compilation.
         with TemporaryDirectory() as directory:
             root = Path(directory)
-            scene = compile_scene(self.make_ir(root), root)
-        facet = scene["primary"]["facets"][0]
-        self.assertEqual(scene["format"], "obdeect.compiled-scene.v1")
+            optical_model = compile_optical_model(self.make_ir(root), root)
+        facet = optical_model["primary"]["facets"][0]
+        self.assertEqual(optical_model["format"], "obdeect.compiled-optical-model.v1")
         self.assertEqual(facet["shape"], "hexagon_flat_y")
         self.assertEqual(facet["centre_m"], [0.0, 1.0, 0.2])
         self.assertEqual(facet["diameter_m"], 1.2)
         self.assertEqual(facet["focal_length_m"], 16.0)
-        self.assertEqual(scene["report"]["deferred"], ["camera_body_diameter", "camera_filter"])
-        self.assertEqual(scene["report"]["facet_geometry_evidence"]["normal_status"], "unavailable")
-        self.assertIn("No normals", scene["report"]["facet_geometry_evidence"]["interpretation"])
-        self.assertEqual(len(scene["scene_sha256"]), 64)
+        self.assertEqual(
+            optical_model["report"]["deferred"], ["camera_body_diameter", "camera_filter"]
+        )
+        self.assertEqual(
+            optical_model["report"]["facet_geometry_evidence"]["normal_status"], "unavailable"
+        )
+        self.assertIn(
+            "No normals", optical_model["report"]["facet_geometry_evidence"]["interpretation"]
+        )
+        self.assertEqual(len(optical_model["optical_model_sha256"]), 64)
 
     def test_native_export_contains_provenance_and_detector_surface(self):
         with TemporaryDirectory() as directory:
             root = Path(directory)
             # Keep this focused on the strict writer contract; the production
             # compiler's camera parser is tested separately.
-            scene = compile_scene(self.make_ir(root), root)
-            scene["camera"] = {"pixels": [{"centre_xy_m": [0.1, 0.0]}]}
-            scene["focal_length_m"] = 16.0
-            scene["report"]["facet_geometry_evidence"]["normal_status"] = "nominal_unperturbed"
-            for facet in scene["primary"]["facets"]:
+            optical_model = compile_optical_model(self.make_ir(root), root)
+            optical_model["camera"] = {"pixels": [{"centre_xy_m": [0.1, 0.0]}]}
+            optical_model["focal_length_m"] = 16.0
+            optical_model["report"]["facet_geometry_evidence"]["normal_status"] = (
+                "nominal_unperturbed"
+            )
+            for facet in optical_model["primary"]["facets"]:
                 facet["nominal_centre_m"] = [*facet["centre_m"][:2], 0.0]
                 facet["nominal_normal"] = [0.0, 0.0, 1.0]
-            output = root / "scene.csv"
-            write_native_scene(scene, output)
+            output = root / "optical model.csv"
+            write_native_optical_model(optical_model, output)
             lines = output.read_text().splitlines()
-        assert lines[0] == "obdeect-scene-v1"
+        assert lines[0] == "obdeect-optical-model-v1"
         assert lines[1].startswith("provenance,GENERIC,1.0.0,")
         assert lines[2].startswith("surface_id,role,shape,")
         assert any(",detector,circle," in line for line in lines[3:])
@@ -238,9 +248,9 @@ class TestSceneCompiler(unittest.TestCase):
             "outer_radius_m": 2.0,
             "radial_scale_m": 1.0,
         }
-        scene = {
+        optical_model = {
             "provenance": {"model": "GENERIC", "model_version": "1.0.0"},
-            "scene_sha256": "a" * 64,
+            "optical_model_sha256": "a" * 64,
             "primary": {
                 "aspheric_surface": surface,
                 "reflectivity": [
@@ -253,7 +263,7 @@ class TestSceneCompiler(unittest.TestCase):
         }
         with TemporaryDirectory() as directory:
             output = Path(directory) / "axisymmetric.csv"
-            write_native_scene(scene, output)
+            write_native_optical_model(optical_model, output)
             lines = output.read_text().splitlines()
         self.assertTrue(any(line.startswith("primary_reflectivity,300,0.8") for line in lines))
         self.assertTrue(any(line.startswith("primary_reflectivity,500,0.9") for line in lines))
@@ -265,9 +275,9 @@ class TestSceneCompiler(unittest.TestCase):
             "outer_radius_m": 2.0,
             "radial_scale_m": 1.0,
         }
-        scene = {
+        optical_model = {
             "provenance": {"model": "GENERIC", "model_version": "1.0.0"},
-            "scene_sha256": "a" * 64,
+            "optical_model_sha256": "a" * 64,
             "primary": {
                 "aspheric_surface": surface,
                 "cylinder_obscurers": [{"id": "mast"}],
@@ -276,8 +286,10 @@ class TestSceneCompiler(unittest.TestCase):
             "focal_surface": surface,
         }
         with TemporaryDirectory() as directory:
-            with self.assertRaisesRegex(SceneCompileError, "cannot represent cylinder obscurers"):
-                write_native_scene(scene, Path(directory) / "axisymmetric.csv")
+            with self.assertRaisesRegex(
+                OpticalModelCompileError, "cannot represent cylinder obscurers"
+            ):
+                write_native_optical_model(optical_model, Path(directory) / "axisymmetric.csv")
 
     def test_parses_real_simtel_comment_suffix_without_turning_it_into_alignment(self):
         # T-IR-006: LST mirror-list rows carry an optional z followed by a
@@ -307,7 +319,7 @@ class TestSceneCompiler(unittest.TestCase):
         self.assertEqual(facets[0]["focal_length_m"], 16.0)
 
     def test_rejects_invalid_optional_mirror_height(self):
-        with self.assertRaisesRegex(SceneCompileError, "invalid numeric field"):
+        with self.assertRaisesRegex(OpticalModelCompileError, "invalid numeric field"):
             parse_simtel_mirror_list("0 0 120 1600 1 missing\n", fallback_focal_length_m=16.0)
 
     def test_zero_catalogue_fallback_allows_real_lst_rows_with_panel_focal_lengths(self):
@@ -320,16 +332,16 @@ class TestSceneCompiler(unittest.TestCase):
                 mirror_contents="1022.49 -462.00 151.00 2912.50 3 0.0 #% id=198\n",
                 focal_cm=0.0,
             )
-            scene = compile_scene(ir, root)
-        self.assertEqual(scene["primary"]["facets"][0]["focal_length_m"], 29.125)
+            optical_model = compile_optical_model(ir, root)
+        self.assertEqual(optical_model["primary"]["facets"][0]["focal_length_m"], 29.125)
 
     def test_accepts_repository_root_containing_simulation_models_data_package(self):
         # T-IR-008: importer and compiler accept the same released-checkout layout.
         with TemporaryDirectory() as directory:
             checkout = Path(directory) / "simulation-models-repository"
             data_root = checkout / "simulation-models"
-            scene = compile_scene(self.make_ir(data_root), checkout)
-        self.assertEqual(len(scene["primary"]["facets"]), 1)
+            optical_model = compile_optical_model(self.make_ir(data_root), checkout)
+        self.assertEqual(len(optical_model["primary"]["facets"]), 1)
 
     def test_hash_mismatch_and_malformed_records_fail_closed(self):
         # T-IR-005: asset provenance and input syntax are validated before use.
@@ -337,9 +349,9 @@ class TestSceneCompiler(unittest.TestCase):
             root = Path(directory)
             ir = self.make_ir(root)
             (root / "model_parameters/Files/mirrors.dat").write_text("0 0 120 0 1\n")
-            with self.assertRaisesRegex(SceneCompileError, "IR assets differs"):
-                compile_scene(ir, root)
-        with self.assertRaisesRegex(SceneCompileError, "unsupported shape"):
+            with self.assertRaisesRegex(OpticalModelCompileError, "IR assets differs"):
+                compile_optical_model(ir, root)
+        with self.assertRaisesRegex(OpticalModelCompileError, "unsupported shape"):
             parse_simtel_mirror_list("0 0 120 1600 9\n", fallback_focal_length_m=16.0)
 
     def test_deferred_asset_and_parameter_records_are_verified(self):
@@ -348,12 +360,12 @@ class TestSceneCompiler(unittest.TestCase):
             root = Path(directory)
             ir = self.make_ir(root)
             (root / "model_parameters/Files/filter.dat").write_text("300 0.1\n")
-            with self.assertRaisesRegex(SceneCompileError, "IR assets differs"):
-                compile_scene(ir, root)
+            with self.assertRaisesRegex(OpticalModelCompileError, "IR assets differs"):
+                compile_optical_model(ir, root)
             (root / "model_parameters/Files/filter.dat").write_text("300 0.8\n400 0.9\n")
             ir["parameters"]["camera_body_diameter"]["value"] = 999.0
-            with self.assertRaisesRegex(SceneCompileError, "IR parameters differs"):
-                compile_scene(ir, root)
+            with self.assertRaisesRegex(OpticalModelCompileError, "IR parameters differs"):
+                compile_optical_model(ir, root)
 
     def test_parses_explicit_hex_and_ring_footprints(self):
         # T-IR-010: ring groups expand to stable IDs; geometry remains 2D.
@@ -365,7 +377,7 @@ class TestSceneCompiler(unittest.TestCase):
         self.assertEqual(segments[1]["inner_radius_m"], 1.0)
         self.assertEqual(segments[2]["start_deg"], 90.0)
         self.assertAlmostEqual(segments[1]["gap_m"], 0.014)
-        with self.assertRaisesRegex(SceneCompileError, "unsupported type"):
+        with self.assertRaisesRegex(OpticalModelCompileError, "unsupported type"):
             parse_simtel_segmentation("polygon 1 0 0 1 0\n")
 
     def test_defaults_omitted_segmentation_rotation_start_and_gap_to_zero(self):
@@ -407,11 +419,13 @@ class TestSceneCompiler(unittest.TestCase):
                 data["parameters"]["GENERIC"][name] = "1.0.0"
             production.write_text(json.dumps(data))
             ir = resolve_model(root, "GENERIC", "1.0.0")
-            scene = compile_scene(ir, root)
-        self.assertEqual(scene["primary"]["kind"], "segmented_footprints")
-        self.assertEqual(len(scene["primary"]["segments"]), 1)
-        self.assertEqual(len(scene["secondary"]["segments"]), 2)
-        self.assertEqual(scene["report"]["facet_geometry_evidence"]["normal_status"], "unavailable")
+            optical_model = compile_optical_model(ir, root)
+        self.assertEqual(optical_model["primary"]["kind"], "segmented_footprints")
+        self.assertEqual(len(optical_model["primary"]["segments"]), 1)
+        self.assertEqual(len(optical_model["secondary"]["segments"]), 2)
+        self.assertEqual(
+            optical_model["report"]["facet_geometry_evidence"]["normal_status"], "unavailable"
+        )
 
     def test_camera_layout_count_and_nested_response_provenance(self):
         # T-IR-012: camera channels are counted from the file, not only the record.
@@ -445,24 +459,24 @@ class TestSceneCompiler(unittest.TestCase):
                 data["parameters"]["GENERIC"][name] = "1.0.0"
             production.write_text(json.dumps(data))
             ir = resolve_model(root, "GENERIC", "1.0.0")
-            scene = compile_scene(ir, root)
-            self.assertEqual(scene["report"]["camera_layout_evidence"]["pixel_count"], 2)
-            self.assertIn("response.dat", scene["provenance"]["nested_assets"])
+            optical_model = compile_optical_model(ir, root)
+            self.assertEqual(optical_model["report"]["camera_layout_evidence"]["pixel_count"], 2)
+            self.assertIn("response.dat", optical_model["provenance"]["nested_assets"])
             (files / "response.dat").unlink()
             simtel_root = root / "sim_telarray"
             fallback = simtel_root / "cfg" / "CTA" / "response.dat"
             fallback.parent.mkdir(parents=True)
             fallback.write_text("300 0.7\n")
-            scene = compile_scene(ir, root, simtel_root=simtel_root)
+            optical_model = compile_optical_model(ir, root, simtel_root=simtel_root)
             self.assertEqual(
-                scene["provenance"]["nested_assets"]["response.dat"]["source_root"],
+                optical_model["provenance"]["nested_assets"]["response.dat"]["source_root"],
                 "sim_telarray",
             )
             self.assertEqual(
-                scene["report"]["camera_layout_evidence"]["unresolved_response_files"], []
+                optical_model["report"]["camera_layout_evidence"]["unresolved_response_files"], []
             )
             self.assertEqual(
-                compile_scene(ir, root)["report"]["camera_layout_evidence"][
+                compile_optical_model(ir, root)["report"]["camera_layout_evidence"][
                     "unresolved_response_files"
                 ],
                 ["response.dat"],
@@ -471,11 +485,13 @@ class TestSceneCompiler(unittest.TestCase):
             data = json.loads(count_record.read_text())
             data["value"] = 3
             count_record.write_text(json.dumps(data))
-            with self.assertRaisesRegex(SceneCompileError, "focal-plane element count differs"):
-                compile_scene(resolve_model(root, "GENERIC", "1.0.0"), root)
+            with self.assertRaisesRegex(
+                OpticalModelCompileError, "focal-plane element count differs"
+            ):
+                compile_optical_model(resolve_model(root, "GENERIC", "1.0.0"), root)
 
     def test_rejects_nonfinite_fallback_focal_length(self):
-        with self.assertRaisesRegex(SceneCompileError, "finite and positive"):
+        with self.assertRaisesRegex(OpticalModelCompileError, "finite and positive"):
             parse_simtel_mirror_list("0 0 120 0 1\n", fallback_focal_length_m=float("nan"))
 
 

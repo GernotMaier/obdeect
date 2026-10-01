@@ -53,7 +53,7 @@ namespace detail {
 
 // Apply direct-beam extinction once between source and telescope entrance.
 // The return value is weighted light removed from the direct beam. The caller
-// records this separately from losses inside the optical scene.
+// records this separately from losses inside the optical model.
 [[nodiscard]] inline double attenuate_eventio_direct_beam(
     std::span<OpticalPhoton> photons, const PhotonBatchContext& context,
     const EventioRunInfo& run, const AtmosphereTransmissionTable& table) {

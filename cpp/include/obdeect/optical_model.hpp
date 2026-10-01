@@ -2,7 +2,7 @@
 
 #include "obdeect/axisymmetric_optics.hpp"
 #include "obdeect/frames.hpp"
-#include "obdeect/segmented_scene.hpp"
+#include "obdeect/segmented_optical_model.hpp"
 
 #include <cstdint>
 #include <limits>
@@ -14,7 +14,7 @@
 namespace obdeect {
 
 enum class SurfaceRole : std::uint8_t { mirror, detector, obscurer };
-constexpr std::uint32_t kMaximumSceneInteractions = 64;
+constexpr std::uint32_t kMaximumOpticalModelInteractions = 64;
 
 // The frame fixes the plane centre, normal, and in-plane orientation. The
 // diameter defines a finite circle, square, or hexagon in that plane.
@@ -26,29 +26,29 @@ struct OpticalSurfaceRecord {
   SurfaceRole role{SurfaceRole::obscurer};
   std::uint32_t material_id{std::numeric_limits<std::uint32_t>::max()};
   // Optional local z(r) surface with a circular/annular aperture. The frame
-  // maps its vertex and local normal into the parent scene.
+  // maps its vertex and local normal into the parent optical_model.
   std::optional<EvenPolynomialSurface> sag{};
   double inner_radius_m{};
 };
 
-struct ImportedOpticalScene {
+struct ImportedOpticalModel {
   ModelProvenance provenance;
   std::vector<OpticalSurfaceRecord> surfaces;
   std::uint32_t max_interactions{8};
 };
 
-class CompiledOpticalScene {
+class CompiledOpticalModel {
  public:
-  CompiledOpticalScene(CompiledOpticalScene&&) = default;
-  CompiledOpticalScene(const CompiledOpticalScene&) = default;
+  CompiledOpticalModel(CompiledOpticalModel&&) = default;
+  CompiledOpticalModel(const CompiledOpticalModel&) = default;
 
   [[nodiscard]] const ModelProvenance& provenance() const { return provenance_; }
   [[nodiscard]] const std::vector<OpticalSurfaceRecord>& surfaces() const { return surfaces_; }
   [[nodiscard]] std::uint32_t max_interactions() const { return max_interactions_; }
 
  private:
-  friend std::optional<CompiledOpticalScene> compile_optical_scene(const ImportedOpticalScene&);
-  CompiledOpticalScene(ModelProvenance provenance, std::vector<OpticalSurfaceRecord> surfaces,
+  friend std::optional<CompiledOpticalModel> compile_optical_model(const ImportedOpticalModel&);
+  CompiledOpticalModel(ModelProvenance provenance, std::vector<OpticalSurfaceRecord> surfaces,
                        std::uint32_t max_interactions)
       : provenance_(std::move(provenance)), surfaces_(std::move(surfaces)),
         max_interactions_(max_interactions) {}
@@ -58,10 +58,10 @@ class CompiledOpticalScene {
   std::uint32_t max_interactions_{};
 };
 
-[[nodiscard]] inline std::optional<CompiledOpticalScene> compile_optical_scene(
-    const ImportedOpticalScene& input) {
+[[nodiscard]] inline std::optional<CompiledOpticalModel> compile_optical_model(
+    const ImportedOpticalModel& input) {
   if (!has_valid_provenance(input.provenance) || input.surfaces.empty() || input.max_interactions == 0 ||
-      input.max_interactions > kMaximumSceneInteractions)
+      input.max_interactions > kMaximumOpticalModelInteractions)
     return std::nullopt;
   std::unordered_set<std::uint32_t> ids;
   ids.reserve(input.surfaces.size());
@@ -77,7 +77,7 @@ class CompiledOpticalScene {
         (!surface.sag && surface.inner_radius_m != 0.0))
       return std::nullopt;
   }
-  return CompiledOpticalScene{input.provenance, input.surfaces, input.max_interactions};
+  return CompiledOpticalModel{input.provenance, input.surfaces, input.max_interactions};
 }
 
 struct OpticalSurfaceHit {
@@ -89,9 +89,9 @@ struct OpticalSurfaceHit {
 };
 
 [[nodiscard]] inline std::optional<OpticalSurfaceHit> intersect_nearest_surface(
-    const Ray& ray, const CompiledOpticalScene& scene) {
+    const Ray& ray, const CompiledOpticalModel& optical_model) {
   std::optional<OpticalSurfaceHit> nearest;
-  for (const auto& surface : scene.surfaces()) {
+  for (const auto& surface : optical_model.surfaces()) {
     std::optional<OpticalSurfaceHit> candidate;
     if (surface.sag) {
       const auto local_hit = intersect_axisymmetric_mirror(

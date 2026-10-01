@@ -1,4 +1,4 @@
-"""Import a selected simulation-models production into auditable scene IR.
+"""Import a selected simulation-models production into auditable optical_model IR.
 
 The importer deliberately uses the standard library only.  It records the
 complete selected parameter records and hashes declared assets; compiling
@@ -20,7 +20,7 @@ class ImportError(ValueError):
 
 # Optical transport ends at the physical detector surface.  This explicit
 # allow-list prevents camera electronics, trigger, gain, and calibration
-# settings from leaking into a ray-tracing scene IR.
+# settings from leaking into a ray-tracing optical_model IR.
 RAY_TRACING_PARAMETERS = frozenset({
     "axes_offsets",
     "camera_body_diameter",
@@ -185,7 +185,7 @@ def resolve_model(root: Path, model: str, version: str) -> dict[str, Any]:
             asset_path = existing[0]
             assets[name] = record(asset_path, root)
     return {
-        "format": "obdeect.simulation-models-ir.v1",
+        "format": "obdeect.simulation-models-optical-model-ir.v1",
         "model": model,
         "model_version": version,
         "source_root": root.name,
@@ -204,13 +204,17 @@ def main() -> None:
     )
     parser.add_argument("--model", required=True, help="production table, e.g. LSTN-design")
     parser.add_argument("--version", required=True, help="production model version")
-    parser.add_argument("--output", type=Path, required=True, help="destination scene-IR JSON")
+    parser.add_argument(
+        "--output", type=Path, required=True, help="destination optical-model IR JSON"
+    )
     args = parser.parse_args()
     try:
-        scene = resolve_model(args.source_root, args.model, args.version)
+        optical_model = resolve_model(args.source_root, args.model, args.version)
     except ImportError as error:
         raise SystemExit(f"import failed: {error}") from error
-    args.output.write_text(json.dumps(scene, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    args.output.write_text(
+        json.dumps(optical_model, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
     print(f"Imported ray-tracing inputs for {args.model} {args.version} into {args.output}")
 
 

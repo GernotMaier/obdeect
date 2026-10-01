@@ -19,19 +19,19 @@ int main() {
   const ModelProvenance provenance{"generic-fixture", "1.0.0", std::string(64, 'a')};
   const ImportedFacet facet{7, {1.0, 2.0, 3.0}, {0.0, 0.0, 1.0}, 1.2, 16.0,
                              FacetShape::hexagon_flat_y, {1.0, 0.0, 0.0}};
-  const auto scene = compile_segmented_scene({provenance, {facet}});
-  require(scene.has_value() && scene->primary_facets[0].shape == FacetShape::hexagon_flat_y,
+  const auto optical_model = compile_segmented_optical_model({provenance, {facet}});
+  require(optical_model.has_value() && optical_model->primary_facets[0].shape == FacetShape::hexagon_flat_y,
           "T-IR-001: compiler preserves generic facet geometry");
-  require(!compile_segmented_scene({provenance, {facet, facet}}),
+  require(!compile_segmented_optical_model({provenance, {facet, facet}}),
           "T-IR-002: duplicate facet IDs fail closed");
   auto invalid = facet;
   invalid.unit_normal = {0.0, 0.0, 0.0};
-  require(!compile_segmented_scene({provenance, {invalid}}),
+  require(!compile_segmented_optical_model({provenance, {invalid}}),
           "T-IR-003: missing alignment normals fail closed");
 
   auto missing_orientation = facet;
   missing_orientation.unit_tangent_u = {};
-  require(!compile_segmented_scene({provenance, {missing_orientation}}),
+  require(!compile_segmented_optical_model({provenance, {missing_orientation}}),
           "T-IR-006: polygon orientation cannot be inferred");
 
   // T-SEG-001: shape bounds use the documented diameter convention and do
@@ -65,10 +65,10 @@ int main() {
                            FacetShape::circle};
   const ImportedFacet near{11, {0.0, 0.0, 1.0}, {0.0, 0.0, 1.0}, 2.0, 16.0,
                             FacetShape::circle};
-  const auto transport_scene = compile_segmented_scene({provenance, {near, far}});
-  require(transport_scene.has_value(), "transport fixture compiles");
+  const auto transport_optical_model = compile_segmented_optical_model({provenance, {near, far}});
+  require(transport_optical_model.has_value(), "transport fixture compiles");
   const Ray on_axis{{0.0, 0.0, 5.0}, {0.0, 0.0, -1.0}};
-  const auto hit = intersect_segmented_primary(on_axis, *transport_scene);
+  const auto hit = intersect_segmented_primary(on_axis, *transport_optical_model);
   require(hit.has_value() && hit->facet_id == far.id && std::abs(hit->distance_m - 3.0) < 1.e-12,
           "nearest finite panel is selected");
 
@@ -79,7 +79,7 @@ int main() {
   const std::vector<double> weight{2.0, 3.0};
   const std::vector<std::uint64_t> ids{41, 42};
   const PhotonBlockView input{positions, directions, wavelength, time, weight, ids};
-  const auto result = trace(*transport_scene, input);
+  const auto result = trace(*transport_optical_model, input);
   require(result.photons.status[0] == PhotonStatus::no_detector &&
               result.photons.status[1] == PhotonStatus::missed_primary,
           "T-SEG-003: transport reports explicit no-detector and primary-miss terminals");
@@ -97,10 +97,10 @@ int main() {
                                                  FacetShape::circle};
   const ImportedDetectorSurface nearer_detector{22, {0.0, 0.0, 3.0}, {0.0, 0.0, 1.0}, 2.0,
                                                 FacetShape::circle};
-  const auto detected_scene = compile_segmented_scene({provenance, {near, far},
+  const auto detected_optical_model = compile_segmented_optical_model({provenance, {near, far},
                                                         {farther_detector, nearer_detector}});
-  require(detected_scene.has_value(), "scene with explicit detectors compiles");
-  const auto detected = trace(*detected_scene, input);
+  require(detected_optical_model.has_value(), "optical_model with explicit detectors compiles");
+  const auto detected = trace(*detected_optical_model, input);
   constexpr double speed_of_light_m_per_ns = 0.299792458;
   require(detected.photons.status[0] == PhotonStatus::detected &&
               detected.photons.surface_id[0] == nearer_detector.id &&
@@ -117,19 +117,19 @@ int main() {
 
   auto duplicate_detector = nearer_detector;
   duplicate_detector.id = near.id;
-  require(!compile_segmented_scene({provenance, {near, far}, {duplicate_detector}}),
+  require(!compile_segmented_optical_model({provenance, {near, far}, {duplicate_detector}}),
           "T-SEG-007: detector IDs must not collide with facet IDs");
   auto invalid_detector = nearer_detector;
   invalid_detector.diameter_m = 0.0;
-  require(!compile_segmented_scene({provenance, {near, far}, {invalid_detector}}),
+  require(!compile_segmented_optical_model({provenance, {near, far}, {invalid_detector}}),
           "T-SEG-008: invalid detector geometry fails closed");
 
-  // T-SEG-009: model-provided opaque structure is part of the scene and wins
+  // T-SEG-009: model-provided opaque structure is part of the optical_model and wins
   // whenever it is closer than a mirror or detector intersection.
-  const ImportedCylinderObscurer obscurer{30, {0.0, 0.0, 3.0}, {0.0, 0.0, 4.0}, 0.2};
-  const auto obscured_scene = compile_segmented_scene({provenance, {near, far}, {nearer_detector}, {obscurer}});
-  require(obscured_scene.has_value(), "scene with cylinder obscurer compiles");
-  const auto obscured = trace(*obscured_scene, input);
+  const ImportedCylinderObscurer obscurer{30, {0.0, 0.0, 4.0}, {0.0, 0.0, 5.0}, 0.2};
+  const auto obscured_optical_model = compile_segmented_optical_model({provenance, {near, far}, {nearer_detector}, {obscurer}});
+  require(obscured_optical_model.has_value(), "optical_model with cylinder obscurer compiles");
+  const auto obscured = trace(*obscured_optical_model, input);
   require(obscured.photons.status[0] == PhotonStatus::blocked_obscurer &&
               obscured.photons.surface_id[0] == obscurer.id &&
               obscured.photons.position_m[0].z == 4.0 &&
@@ -138,12 +138,12 @@ int main() {
           "opaque cylinder records its incoming terminal state");
 
   auto invalid_response = SpectralResponse{{300.0, 200.0}, {0.7, 0.9}};
-  require(!compile_segmented_scene({provenance, {facet}, {}, {}, invalid_response}),
-          "unordered spectral response fails during scene compilation");
+  require(!compile_segmented_optical_model({provenance, {facet}, {}, {}, invalid_response}),
+          "unordered spectral response fails during optical model compilation");
 
   const SpectralResponse reflectivity{{300.0, 500.0}, {0.7, 0.9}};
   require(reflectivity.is_valid() && std::abs(*reflectivity.at(400.0) - 0.8) < 1.e-12 &&
               !reflectivity.at(250.0),
           "spectral reflectivity interpolates only within declared range");
-  std::cout << "segmented scene tests passed\n";
+  std::cout << "segmented optical_model tests passed\n";
 }

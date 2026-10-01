@@ -47,4 +47,4 @@ The summary keeps simtools' iterative D80 and also reports the exact empirical
 The imaging lists include focal-plane crossings that miss active pixels;
 simtools computes the geometric PSF from all crossing positions. These
 fixtures supply a production reference for implementing and checking the
-obdeect scenes. They do not establish agreement between the two engines.
+obdeect optical models. They do not establish agreement between the two engines.
