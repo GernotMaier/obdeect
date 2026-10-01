@@ -63,8 +63,20 @@ class TestTracePathReader(unittest.TestCase):
             "trace_model": {
                 "kind": "segmented",
                 "detector_surfaces": [
-                    {"centre_m": [0.2, -0.3, 28.0], "diameter_m": 2.0},
-                    {"centre_m": [0.0, 0.0, 28.0], "diameter_m": 1.0},
+                    {
+                        "centre_m": [0.2, -0.3, 28.0],
+                        "normal": [0.0, 0.0, 1.0],
+                        "tangent": [1.0, 0.0, 0.0],
+                        "shape": "circle",
+                        "diameter_m": 2.0,
+                    },
+                    {
+                        "centre_m": [0.0, 0.0, 28.0],
+                        "normal": [0.0, 0.0, 1.0],
+                        "tangent": [1.0, 0.0, 0.0],
+                        "shape": "circle",
+                        "diameter_m": 1.0,
+                    },
                 ],
             }
         }

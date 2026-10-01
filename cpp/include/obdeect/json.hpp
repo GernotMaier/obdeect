@@ -21,6 +21,9 @@ struct Value {
   Kind kind{Kind::null};
   bool boolean{};
   double number{};
+  // Keep the source token so canonical artifact hashing preserves the
+  // compiler's JSON number spelling (for example, 1.0 versus 1).
+  std::string number_text;
   std::string string;
   std::vector<Value> array;
   std::vector<std::pair<std::string, Value>> object;
@@ -147,6 +150,7 @@ class Parser {
     Value result{};
     result.kind = Value::Kind::number;
     result.number = value;
+    result.number_text = text;
     return result;
   }
 

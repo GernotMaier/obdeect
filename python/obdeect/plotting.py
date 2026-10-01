@@ -84,11 +84,26 @@ def compiled_focal_plane_extent(path: Path) -> float:
         trace_model = optical_model["trace_model"]
         if trace_model["kind"] == "segmented":
             surfaces = trace_model["detector_surfaces"]
-            extent = max(
-                math.hypot(float(surface["centre_m"][0]), float(surface["centre_m"][1]))
-                + float(surface["diameter_m"]) * 0.5
-                for surface in surfaces
-            )
+            if not isinstance(surfaces, list) or not surfaces:
+                raise ValueError("segmented model requires detector surfaces")
+            extents = []
+            for index, surface in enumerate(surfaces):
+                polygon = _polygon_from_surface(
+                    surface,
+                    identifier=int(surface.get("id", index)),
+                    role="detector",
+                    description=f"detector surface {index}",
+                )
+                if surface["shape"] == "circle":
+                    centre = _vector3(surface["centre_m"], f"detector surface {index} centre_m")
+                    extents.append(
+                        math.hypot(centre[0], centre[1]) + float(surface["diameter_m"]) * 0.5
+                    )
+                else:
+                    extents.extend(
+                        math.hypot(vertex[0], vertex[1]) for vertex in polygon.vertices_m
+                    )
+            extent = max(extents)
         elif trace_model["kind"] == "axisymmetric":
             extent = float(trace_model["detector"]["outer_radius_m"])
         else:
@@ -553,7 +568,6 @@ def _draw_scene_assembly(axis, scene: PlotScene) -> None:
                 label=f"opaque cylinders ({len(scene.obscurers)})",
             )
         )
-        break
     _set_equal_3d_bounds(axis, scene)
     axis.set_proj_type("ortho")
     axis.view_init(elev=24, azim=-55)
@@ -1246,8 +1260,11 @@ def main():
     if args.view == "telescope":
         draw_telescope(plt, args.optical_model_json, args.output, args.section_plane)
         return
-    if args.view in {"pupil", "compiled-mirror"}:
+    if args.view == "pupil":
         draw_pupil(plt, args.optical_model_json, args.output)
+        return
+    if args.view == "compiled-mirror":
+        draw_compiled_mirror(plt, args.optical_model_json, args.output)
         return
     if args.view in {"section", "compiled-structure"}:
         draw_section(plt, args.optical_model_json, args.output, args.section_plane)

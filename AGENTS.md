@@ -11,13 +11,17 @@ validation matrix for architectural or scientific changes.
 ## Design rules
 
 - Never ever modify the main README.md. Suggest instead changes, don't apply them.
+- Terminology: this project is for gamma-ray astronomy. Always call the
+  compiled telescope geometry and optical-response artifact an "optical model";
+  never call it a "scene" in user-facing text, documentation,
+  diagnostics, or new APIs.
 - Keep it simple, efficient, deterministic, and portable. Prefer small,
   explicit data structures and testable physical kernels over frameworks,
   global state, hidden defaults, or abstraction in the hot path.
 - Keep the core C++ standard-library-only. Python, plotting, file import, and
   external-simulator dependencies belong at the boundary, never in a trace
   kernel.
-- Use immutable compiled scenes and contiguous SoA photon buffers. After
+- Use immutable compiled optical models and contiguous SoA photon buffers. After
   output buffers are sized, the per-photon path must not allocate, perform I/O,
   call Python, or dispatch virtually.
 - Make units, frames, random seeds, statuses, and loss accounting explicit.
@@ -38,7 +42,7 @@ validation matrix for architectural or scientific changes.
 
 - Make the narrowest complete change and preserve unrelated work.
 - Add or update a focused test for every behavioural change. Establish analytic
-  kernel and primitive tests before scene, cross-tool, or performance tests.
+  kernel and primitive tests before optical-model, cross-tool, or performance tests.
 - Preserve results across photon ordering, blocks, and thread counts. Record
   provenance for fixtures and cross-tool comparisons.
 - Do not weaken tolerances or replace golden data to hide a discrepancy. Keep

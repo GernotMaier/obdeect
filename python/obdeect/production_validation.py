@@ -97,7 +97,12 @@ def _maximum(values: list[float]) -> float:
 
 
 def validate_optical_model(optical_model: dict[str, Any], telescope_family: str) -> None:
-    """Require the compiled optical model to contain the physical model for its family."""
+    """Require either supported compiled schema to be production-ready.
+
+    The embedded ``trace_model`` schema is the current compiler contract.  The
+    older native-binding fields remain accepted as a compatibility adapter for
+    existing validation fixtures and archived model artifacts.
+    """
     report = optical_model.get("report")
     if not isinstance(report, dict):
         raise ProductionValidationError("compiled optical model lacks report")
@@ -105,6 +110,34 @@ def validate_optical_model(optical_model: dict[str, Any], telescope_family: str)
         raise ProductionValidationError(
             "compiled optical model is not production ready: " + "; ".join(report["trace_blockers"])
         )
+    if report.get("trace_ready") is True:
+        trace_model = optical_model.get("trace_model")
+        if not isinstance(trace_model, dict):
+            raise ProductionValidationError("compiled optical model lacks trace geometry")
+        kind = trace_model.get("kind")
+        if kind == "segmented":
+            if not trace_model.get("primary_facets"):
+                raise ProductionValidationError(
+                    "compiled optical model lacks finite primary facets"
+                )
+            if not trace_model.get("detector_surfaces"):
+                raise ProductionValidationError("compiled optical model lacks detector surfaces")
+        elif kind == "axisymmetric":
+            for role in ("primary", "secondary", "detector"):
+                if not isinstance(trace_model.get(role), dict):
+                    raise ProductionValidationError(
+                        f"compiled optical model lacks axisymmetric {role} surface"
+                    )
+        else:
+            raise ProductionValidationError(
+                "compiled optical model has an unsupported trace geometry"
+            )
+        if telescope_family == "SST" and kind != "axisymmetric":
+            raise ProductionValidationError(
+                "SST production optical model lacks axisymmetric surfaces"
+            )
+        return
+
     if report.get("native_trace_ready") is not True:
         raise ProductionValidationError("compiled optical model has no production native binding")
     primary = optical_model.get("primary", {})
