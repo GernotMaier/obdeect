@@ -22,22 +22,17 @@ def executable_path(name: str = "obdeect-simtools-raytrace") -> Path:
         If the wheel does not contain the requested executable.
     """
 
-    # Editable scikit-build installations import Python directly from the
-    # checkout, while CMake installs executables under site-packages.  Check
-    # both locations so `pip install -e .` has the same launcher behaviour as
-    # a regular wheel.
-    native_dirs = [Path(__file__).resolve().parent / "_native"]
-    native_dirs.extend(Path(entry) / "obdeect" / "_native" for entry in sys.path if entry)
-    candidates = [directory / name for directory in native_dirs]
+    native_dir = Path(__file__).resolve().parent / "_native"
+    candidates = [native_dir / name]
     if os.name == "nt" and not name.endswith(".exe"):
-        candidates.extend(directory / f"{name}.exe" for directory in native_dirs)
+        candidates.append(native_dir / f"{name}.exe")
     for candidate in candidates:
         if candidate.is_file():
             if os.name != "nt" and not os.access(candidate, os.X_OK):
                 raise PermissionError(f"Packaged obdeect executable is not executable: {candidate}")
             return candidate
     raise FileNotFoundError(
-        f"Packaged obdeect executable {name!r} was not found in any obdeect/_native directory. "
+        f"Packaged obdeect executable {name!r} was not found in {native_dir}. "
         "Reinstall obdeect-dev with a wheel for this platform."
     )
 
