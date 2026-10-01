@@ -1,5 +1,8 @@
 # Reference manifest (step 1)
 
+For current implementation limits and open tasks, read [STATUS.md](STATUS.md).
+This file retains technical recipes or contracts, not the current completion ledger.
+
 A comparison begins with a JSON configuration containing these required keys:
 
 - `sim_telarray_release`, `hessio_decoder`, `site`, `production_version`: exact selected identifiers.

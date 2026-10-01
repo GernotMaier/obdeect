@@ -1,5 +1,8 @@
 # Optical-study recipes
 
+For current implementation limits and open tasks, read [STATUS.md](STATUS.md).
+This file retains technical recipes or contracts, not the current completion ledger.
+
 Example use cases for the `obdeect` ray tracing package.
 
 Requires a simulation models as defined in the [CTAO simulation models repository](https://gitlab.cta-observatory.org/cta-science/simulations/simulation-model/simulation-models).

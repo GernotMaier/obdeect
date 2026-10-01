@@ -1,5 +1,8 @@
 # Optical comparison contract (step 2)
 
+For current implementation limits and open tasks, read [STATUS.md](STATUS.md).
+This file retains technical recipes or contracts, not the current completion ledger.
+
 All comparisons identify one `run_id`, `event_id`, `array_id`, `telescope_id`, `bunch_id`, and `photon_id`. The resolved photon is a telescope-local position in metres, a unit propagation direction, wavelength, emission time, and nonnegative weight. The current CSV boundary names wavelength in `wavelength_nm` and time in `time_ns`; a common comparison table must convert these to SI metres and seconds. Wavelength zero is an unresolved input sentinel and must be assigned by an explicit spectrum adapter before spectral transport. The batch carries telescope position in metres and a separate array reuse weight.
 
 Source descriptions must state source type, geometry and frame, spectral and temporal distributions, sampling policy, seed, and emitted or sampled weight. A compiled optical model must state its source model and asset hashes, rigid frame transforms, surface and component IDs, material bindings, detector geometry, and unresolved fields. A optical model with unresolved required geometry is not traceable.

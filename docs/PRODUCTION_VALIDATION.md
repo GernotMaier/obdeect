@@ -1,5 +1,8 @@
 # Production validation
 
+For current implementation limits and open tasks, read [STATUS.md](STATUS.md).
+This file retains technical recipes or contracts, not the current completion ledger.
+
 An obdeect trace is not a production CTAO result until this gate passes for
 each supported telescope family. The required 7.0.0 matrix is LSTN-design,
 MSTx-FlashCam, MSTx-NectarCam, and SSTS-design; run it for the selected site
