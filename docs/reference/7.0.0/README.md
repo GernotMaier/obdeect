@@ -25,9 +25,9 @@ effective area, and exact centroid-centred integration radii at 50%, 68%, 80%,
 distribution every 0.1% in centimetres, including the enclosed photon count.
 Raw sim_telarray photon lists are intentionally not retained in this repository.
 The derived PSF figures, containment radii, and cumulative profiles are the
-reference products. Regenerate them from a frozen sim_telarray manifest when a
+reference products. Regenerate them from a frozen sim_telarray reference-run record when a
 new reference is required.
-The regeneration helper consumes that external manifest and its archive root:
+The regeneration helper consumes that external reference summary and its archive root:
 
 ```sh
 python -m obdeect.simtel_reference_psf \

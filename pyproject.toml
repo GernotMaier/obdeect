@@ -28,7 +28,7 @@ scripts.obdeect-normalize-arrivals = "obdeect.arrival_normalizer:main"
 scripts.obdeect-photon-distributions = "obdeect.photon_distributions:main"
 scripts.obdeect-plot-reference = "obdeect.plotting:main"
 scripts.obdeect-psf = "obdeect.analysis:main"
-scripts.obdeect-reference-manifest = "obdeect.reference_manifest:main"
+scripts.obdeect-reference-run = "obdeect.reference_run:main"
 scripts.obdeect-simtools-raytrace = "obdeect.cli:simtools_raytrace_main"
 scripts.obdeect-validate-production = "obdeect.production_validation:main"
 

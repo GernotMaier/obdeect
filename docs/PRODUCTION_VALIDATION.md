@@ -35,7 +35,7 @@ Declare tolerances before running, for example:
 ```
 
 Those values are an example only. The accepted values belong in the frozen
-reference manifest after the uncertainty study; they must not be relaxed to
+reference-run record after the uncertainty study; they must not be relaxed to
 make a failed comparison pass.
 
 ## Reproducible command sequence
@@ -69,4 +69,4 @@ spectral samples, stars, illuminators, lasers, EventIO input, deterministic
 repeats, and the effective-area/focal-length/PSF/incidence observables. Store
 the source block hashes, model and software revisions, atmosphere, seed,
 commands, tolerances, and generated summaries in an
-`obdeect-reference-manifest` before interpreting any result as validation.
+`obdeect-reference-run` before interpreting any result as validation.

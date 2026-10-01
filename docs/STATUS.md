@@ -57,7 +57,7 @@ Paths below are relative to obdeect unless explicitly labelled simtools.
 | Results/analysis | Arrival-v1 CSV, weighted native PSF/D80, distributions, normalization; incomplete interaction/provenance contract | `python/obdeect/result_contract.py`, `analysis.py`, `arrival_normalizer.py` |
 | Plotting | Actual recorded paths and compiled panel/focal views; hardware absent from the model cannot be shown | `python/obdeect/plotting.py`, `photon_distributions.py` |
 | simtools backend | Selector, runner and consumers exist; runner cannot execute the current native command | Sibling `simtools/src/simtools/` |
-| References | Derived sim_telarray PSF/CDF products and manifests; no completed matched production comparison established | `docs/reference/7.0.0/`, `python/obdeect/reference_manifest.py` |
+| Reference runs | Derived sim_telarray PSF/CDF products and reference-run records; no completed matched production comparison established | `docs/reference/7.0.0/`, `python/obdeect/reference_run.py` |
 | Packaging | Native executables in wheels, CMake install and CI workflows; PyPI publishing restricted to version tags | `pyproject.toml`, `.github/workflows/` |
 | Python array API | Missing: Python launches executables; no nanobind bulk tracing module | `python/obdeect/cli.py`, `cpp/bindings/` |
 | Performance parity | Unproven: exhaustive facet scans, scalar tracing, full-batch source allocation, no parity benchmark | `segmented_optical_model.hpp`, `sources.hpp` |
