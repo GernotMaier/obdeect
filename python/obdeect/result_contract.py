@@ -72,7 +72,7 @@ TERMINAL_STATUSES = frozenset({
     "missed_screen",
     "no_detector",
     "invalid_input",
-    "escaped_optical model",
+    "escaped_optical_model",
     "interaction_limit",
 })
 

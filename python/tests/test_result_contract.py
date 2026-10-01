@@ -28,6 +28,17 @@ def test_read_arrival_exposes_optical_boundary(tmp_path: Path) -> None:
     assert arrivals[0].optical_weight == 1.5
 
 
+def test_read_arrival_accepts_cpp_escaped_optical_model_status(tmp_path: Path) -> None:
+    arrivals = read_arrivals(
+        write_trace(
+            tmp_path,
+            "obdeect-arrival-v1,0,star,400,0,1,0,escaped_optical_model,1,1,0,0,1\n",
+        )
+    )
+
+    assert arrivals[0].status == "escaped_optical_model"
+
+
 def test_read_arrival_rejects_unknown_contract_version(tmp_path: Path) -> None:
     row = "obdeect-arrival-v2,0,star,400,0,1,1,detected,1,1,0,0,1\n"
     with pytest.raises(ArrivalContractError, match="contract_version"):

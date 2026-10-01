@@ -56,7 +56,7 @@ and nonempty `trace_blockers`; the production gate rejects them as designed.
 | `simtools_raytrace_main.cpp` with `optical_model_file.hpp` | Model-derived command used by the README | Active nominal path. It has a separate segmented and dual-asphere trace loop. |
 | `reference_main.cpp` and `artificial_mst.hpp` | Developer demo and analytic tests | Retain as a diagnostic; keep it out of production claims. |
 | `ctao_main.cpp`, `ctao_trace.hpp`, `ctao_models.hpp` | Analytic developer command; also the no-optical model branch of the simtools tracer | Duplicate analytic route. Consolidate when the public command no longer needs that branch. |
-| `optical model.hpp` and its `trace.hpp` overload | Generic nonsequential kernel and tests | No model importer or public command currently supplies it. Do not advertise its material/obscurer capabilities as active CTAO support. |
+| `optical_model.hpp` and its `trace.hpp` overload | Generic nonsequential kernel and tests | No model importer or public command currently supplies it. Do not advertise its material/obscurer capabilities as active CTAO support. |
 | `materials.hpp`, `atmosphere.hpp`, EventIO readers | Primitive tests and optional adapters | Not bound into the model-derived native CLI. Their presence does not imply coating, atmosphere, or EventIO support in that workflow. |
 | `analysis.py`, `result_contract.py`, `plotting.py` | Three separate CSV consumers | Keep one versioned arrival contract and migrate consumers to it before changing the output schema. PSF analysis now rejects missing or impossible optical weights. |
 
