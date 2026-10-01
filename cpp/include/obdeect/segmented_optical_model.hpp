@@ -273,7 +273,11 @@ struct SegmentedFacetHit {
     if (!contains_facet_point(facet, point_m)) return std::nullopt;
     return SegmentedFacetHit{facet.id, distance_m, point_m, *normal};
   }
-  const Vec3 sphere_centre = facet.centre_m - *normal * facet.curvature_radius_m;
+  // The optical face is concave towards the incoming beam.  With a nominal
+  // normal pointing from the primary towards the focal surface, the sphere
+  // centre lies on that focal-surface side of the facet.  Putting it behind
+  // the facet produces a convex mirror and sends off-centre rays outward.
+  const Vec3 sphere_centre = facet.centre_m + *normal * facet.curvature_radius_m;
   const Vec3 offset = ray.position_m - sphere_centre;
   const double projection = dot(offset, *direction);
   const double discriminant = projection * projection -
@@ -284,7 +288,9 @@ struct SegmentedFacetHit {
     if (!std::isfinite(distance_m) || distance_m <= minimum_t_m) continue;
     const Vec3 point_m = ray.position_m + *direction * distance_m;
     const auto surface_normal = normalised_checked(point_m - sphere_centre);
-    if (!surface_normal || dot(*surface_normal, *normal) <= 0.0) continue;
+    // The geometric sphere normal points away from its centre and therefore
+    // opposite the nominal facet normal on the illuminated concave face.
+    if (!surface_normal || dot(*surface_normal, *normal) >= 0.0) continue;
     const Vec3 tangent_displacement = point_m - facet.centre_m -
                                       *normal * dot(point_m - facet.centre_m, *normal);
     const Vec3 aperture_point = facet.centre_m + tangent_displacement;

@@ -1,7 +1,7 @@
-# Code review notes
+# Consolidated project status
 
-Review scope: C++ trace/source/optical model interfaces, Python import/analysis/plot
-commands, tests, examples, and documentation at this worktree's base commit.
+Read [STATUS.md](STATUS.md) for the current implementation, reviewed gaps,
+and ordered tasks with acceptance criteria. Maintain that single document.
 
 ## Fixed here
 

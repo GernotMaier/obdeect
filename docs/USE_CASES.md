@@ -3,6 +3,29 @@
 Example use cases for the `obdeect` ray tracing package.
 
 Requires a simulation models as defined in the [CTAO simulation models repository](https://gitlab.cta-observatory.org/cta-science/simulations/simulation-model/simulation-models).
+All examples use named arguments; run `--help` before adapting a recipe.
+
+> [!WARNING]
+> For current implementation limits and open tasks, read [STATUS.md](STATUS.md).
+
+## Developer demo
+
+Raytracing demonstration of a simple MST-inspired optical setup with a spherical mirror, camera shadow, and four mast supports.
+
+Use it to inspect the basic ray-tracing output without downloading a production model.
+
+```sh
+obdeect-demo-mst --source star \
+  --field-x-deg 0.5 --field-y-deg -0.2 \
+  --wavelength-nm 400 --photons 10000 --output demo-mst.csv
+obdeect-plot-reference --input demo-mst.csv --view focal-plane \
+  --output demo-mst-focal-plane.png
+```
+
+`obdeect-analytic-optics` is likewise a developer diagnostic. For imported
+CTAO production geometry, use the compiled optical-model recipes below.
+
+## Realistic CTAO telescope studies
 
 The following two environment variables might be useful:
 
@@ -11,39 +34,68 @@ export OBDEECT_SIMULATION_MODELS_PATH=../simulation-models
 export OBDEECT_SIMULATION_MODELS_VERSION=7.0.0
 ```
 
-## Define an optical model
+### Define the optical model
 
-The following commands demonstrate how to read the simulation model and
-compile the geometry required by `obdeect` for the ray tracing.
+The following command reads the simulation model and
+compiles the optical model required by `obdeect` for the ray tracing.
+This is for the collection of surfaces, materials, responses, and detector
+geometry through which photons propagate.
+The JSON output is the single canonical artifact: it contains the auditable
+model and its directly traceable finite-surface representation.
 
-This creates geometry from the selected production. LST/MST export
-finite spherical panels using each panel's catalogue focal length; SST/SCT export their model-defined rotationally symmetric
-M1, M2, and curved focal-surface prescriptions. These nominal surfaces still
-need the production acceptance comparisons described below.
+Example:
 
 ```sh
-obdeect-import-simulation-models \
+obdeect-compile-optical-model \
   --source-root "$OBDEECT_SIMULATION_MODELS_PATH" --model LSTN-design \
   --version "$OBDEECT_SIMULATION_MODELS_VERSION" \
-  --output lst.ir.json
-obdeect-compile-optical-model \
-  --input lst.ir.json --source-root "$OBDEECT_SIMULATION_MODELS_PATH" \
-  --output lst.geometry.json --native-output lst.surfaces.csv
+  --output lst.optical-model.json
 ```
 
-For an MST, replace `LSTN-design` with `MSTx-FlashCam` or `MSTx-NectarCam`.
-For a dual-mirror run, use `SSTS-design`. `SCTS-design` also exports, but its
-current native on-axis smoke trace misses the focal surface; do not use it for
-a PSF until its prescription and frame conventions are resolved.
+### Plot the compiled optical model
 
-## Runnable native studies
+Use the telescope plate for a model-faithful overview of the finite optical
+geometry actually consumed by the tracer. It renders an orthographic assembly,
+an axial section, the entrance pupil, and focal geometry. It does not add
+camera supports, windows, or other structure absent from the selected model;
+the footer declares the available geometry coverage.
+
+```sh
+obdeect-plot-reference --view telescope \
+  --optical-model-json lst.optical-model.json \
+  --output lst-telescope.png
+```
+
+For the panel layout as seen from the mirror, use the face-on view.  Each
+finite panel face is drawn in its compiled tangent frame, so segmentation and
+gaps remain visible.
+
+```sh
+obdeect-plot-reference --view pupil \
+  --optical-model-json lst.optical-model.json \
+  --output lst-primary-face.png
+```
+
+For a paper-style optical cross-section or a full-size CAD-like orthographic
+view, select the corresponding model-derived renderer. `compiled-structure`,
+`compiled-mirror`, and `compiled-3d` remain supported aliases.
+
+```sh
+obdeect-plot-reference --view section --section-plane xz \
+  --optical-model-json lst.optical-model.json \
+  --output lst-optical-section.png
+
+obdeect-plot-reference --view assembly-3d \
+  --optical-model-json lst.optical-model.json \
+  --output lst-optical-model-3d.png
+```
 
 ### Single-panel 2F test stand
 
-Find the panel ID in `lst.geometry.json` under `primary.facets`. Place the source at the panel centre plus twice its `focal_length_m` along `nominal_normal`, and place a planar test screen at that point. Select the panel, then derive and plot the screen distribution.
+Find the panel ID in `lst.optical-model.json` under `primary.facets`. Place the source at the panel centre plus twice its `focal_length_m` along `nominal_normal`, and place a planar test screen at that point. Select the panel, then derive and plot the screen distribution.
 
 ```sh
-obdeect-simtools-raytrace --optical-model-file lst.surfaces.csv \
+obdeect-simtools-raytrace --optical-model lst.optical-model.json \
   --source illuminator --panel-id 42 --source-x-m -0.2 --source-y-m 0.1 --source-z-m 57.3 \
   --screen-x-m -0.2 --screen-y-m 0.1 --screen-z-m 57.3 --screen-radius-m 0.25 \
   --wavelength-nm 400 --photons 100000 --output panel-42.csv
@@ -58,11 +110,12 @@ Use coordinates computed from the selected panel; the numbers above are only an 
 Stars are plane waves. `field-x-deg` and `field-y-deg` define the two-dimensional offset. A comma-separated wavelength list is sampled evenly.
 
 ```sh
-obdeect-simtools-raytrace --optical-model-file lst.surfaces.csv --source star \
+obdeect-simtools-raytrace --optical-model lst.optical-model.json --source star \
   --field-x-deg 0.5 --field-y-deg -0.2 --wavelength-nm 300,400,500 \
   --photons 100000 --output lst-star.csv
 obdeect-psf derive --input lst-star.csv --output lst-star-psf.json
-obdeect-plot-reference --input lst-star.csv --view focal-plane --output lst-star-psf.png
+obdeect-plot-reference --input lst-star.csv --view focal-plane \
+  --optical-model-json lst.optical-model.json --output lst-star-psf.png
 ```
 
 ### Nearby illuminator, laser, and arrival time
@@ -71,12 +124,12 @@ An illuminator is a finite point source. A laser has an explicit origin, axis, a
 
 ```sh
 # Dish illuminator at 100 m.
-obdeect-simtools-raytrace --optical-model-file lst.surfaces.csv --source illuminator \
+obdeect-simtools-raytrace --optical-model lst.optical-model.json --source illuminator \
   --source-x-m 0 --source-y-m 0 --source-z-m 100 --wavelength-nm 400 \
   --emission-time-ns 20 --pulse-width-ns 4 --photons 100000 --output illuminator.csv
 
 # Calibration/alignment laser.
-obdeect-simtools-raytrace --optical-model-file lst.surfaces.csv --source laser \
+obdeect-simtools-raytrace --optical-model lst.optical-model.json --source laser \
   --source-x-m 0 --source-y-m 0 --source-z-m 10 \
   --direction-x 0 --direction-y 0 --direction-z -1 --divergence-deg 0.05 \
   --wavelength-nm 355 --photons 100000 --output laser.csv
@@ -131,9 +184,9 @@ For model-defined lasers, use the `ls-beam` configuration generated by `simtools
 
 ## Not yet runnable from this repository
 
-These requests need geometry or response data that the current native optical model format does not carry. They must not be approximated or labelled as CTAO results.
+These requests need geometry or response data that the current compiled optical model does not carry. They must not be approximated or labelled as CTAO results.
 
-| Study | Missing native optical model content |
+| Study | Missing compiled optical-model content |
 | --- | --- |
 | Camera-window incidence; flat or spherical windows | Window surface, curvature, thickness, and wavelength/incidence response. |
 | Shadowing versus offset (1D/2D) | Camera housing, masts, baffles, and other obscurer solids. |
@@ -141,4 +194,4 @@ These requests need geometry or response data that the current native optical mo
 | Full structure-and-ray rendering | Compiled 3D component geometry and per-component interaction records. |
 | Segmented SST/SCT structure, shadowing, and throughput | Segment placement/alignment, masts, camera housing, baffles, material binding, and validation fixtures. The M1/M2/focal aspheres are exported and traced. |
 
-The existing native structure plot shows only compiled panel centres and the focal boundary. It intentionally does not draw unmodelled hardware.
+The existing native structure plot shows only compiled panel centres and the focal boundary. It intentionally does not draw unmodeled hardware.

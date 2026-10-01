@@ -1,5 +1,8 @@
 # Production validation
 
+For current implementation limits and open tasks, read [STATUS.md](STATUS.md).
+This file retains technical recipes or contracts, not the current completion ledger.
+
 An obdeect trace is not a production CTAO result until this gate passes for
 each supported telescope family. The required 7.0.0 matrix is LSTN-design,
 MSTx-FlashCam, MSTx-NectarCam, and SSTS-design; run it for the selected site
@@ -32,23 +35,19 @@ Declare tolerances before running, for example:
 ```
 
 Those values are an example only. The accepted values belong in the frozen
-reference manifest after the uncertainty study; they must not be relaxed to
+reference-run record after the uncertainty study; they must not be relaxed to
 make a failed comparison pass.
 
 ## Reproducible command sequence
 
 ```sh
 export OBDEECT_SIMULATION_MODELS_PATH=/path/to/simulation-models
-SIMTEL_ROOT=/path/to/sim_telarray
 MODEL=LSTN-design
 
-obdeect-import-simulation-models \
-  --source-root "$OBDEECT_SIMULATION_MODELS_PATH" --model "$MODEL" --version 7.0.0 \
-  --output "$MODEL.ir.json"
 obdeect-compile-optical-model \
-  --input "$MODEL.ir.json" --source-root "$OBDEECT_SIMULATION_MODELS_PATH" \
-  --simtel-root "$SIMTEL_ROOT" --require-trace-ready \
-  --output "$MODEL.optical-model.json" --native-output "$MODEL.optical-model.csv"
+  --source-root "$OBDEECT_SIMULATION_MODELS_PATH" --model "$MODEL" --version 7.0.0 \
+  --require-trace-ready \
+  --output "$MODEL.optical-model.json"
 
 # Generate the two normalised comparison tables from the frozen common source block.
 obdeect-normalize-arrivals --input obdeect-arrivals.csv --output obdeect.normalized.csv
@@ -70,4 +69,4 @@ spectral samples, stars, illuminators, lasers, EventIO input, deterministic
 repeats, and the effective-area/focal-length/PSF/incidence observables. Store
 the source block hashes, model and software revisions, atmosphere, seed,
 commands, tolerances, and generated summaries in an
-`obdeect-reference-manifest` before interpreting any result as validation.
+`obdeect-reference-run` before interpreting any result as validation.

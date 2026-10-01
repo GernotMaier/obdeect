@@ -1,13 +1,7 @@
-"""Import a selected simulation-models production into auditable optical_model IR.
-
-The importer deliberately uses the standard library only.  It records the
-complete selected parameter records and hashes declared assets; compiling
-those records into optical geometry remains an explicit later stage.
-"""
+"""Resolve and record a selected simulation-models production for optical-model compilation."""
 
 from __future__ import annotations
 
-import argparse
 import hashlib
 import json
 from pathlib import Path
@@ -20,7 +14,7 @@ class ImportError(ValueError):
 
 # Optical transport ends at the physical detector surface.  This explicit
 # allow-list prevents camera electronics, trigger, gain, and calibration
-# settings from leaking into a ray-tracing optical_model IR.
+# settings from leaking into an optical model.
 RAY_TRACING_PARAMETERS = frozenset({
     "axes_offsets",
     "camera_body_diameter",
@@ -117,7 +111,7 @@ def record(path: Path, root: Path) -> dict[str, str]:
 
 
 def resolve_model(root: Path, model: str, version: str) -> dict[str, Any]:
-    """Return complete JSON-serializable provenance IR or raise ImportError."""
+    """Return complete JSON-serializable production data or raise ImportError."""
     root = root.resolve()
     # Released simulation-models checkouts commonly contain the data package
     # in a nested ``simulation-models/`` directory, while exported data trees
@@ -193,30 +187,3 @@ def resolve_model(root: Path, model: str, version: str) -> dict[str, Any]:
         "assets": assets,
         "parameters": parameters,
     }
-
-
-def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="Import ray-tracing inputs from a selected simulation-models production."
-    )
-    parser.add_argument(
-        "--source-root", type=Path, required=True, help="simulation-models repository root"
-    )
-    parser.add_argument("--model", required=True, help="production table, e.g. LSTN-design")
-    parser.add_argument("--version", required=True, help="production model version")
-    parser.add_argument(
-        "--output", type=Path, required=True, help="destination optical-model IR JSON"
-    )
-    args = parser.parse_args()
-    try:
-        optical_model = resolve_model(args.source_root, args.model, args.version)
-    except ImportError as error:
-        raise SystemExit(f"import failed: {error}") from error
-    args.output.write_text(
-        json.dumps(optical_model, indent=2, sort_keys=True) + "\n", encoding="utf-8"
-    )
-    print(f"Imported ray-tracing inputs for {args.model} {args.version} into {args.output}")
-
-
-if __name__ == "__main__":
-    main()

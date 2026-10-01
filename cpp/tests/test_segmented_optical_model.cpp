@@ -56,8 +56,15 @@ int main() {
   auto curved = circle;
   curved.curvature_radius_m = 20.0;
   const auto curved_hit = intersect_segmented_facet({{0.5, 0.0, 5.0}, {0.0, 0.0, -1.0}}, curved);
-  require(curved_hit && curved_hit->point_m.z < 0.0 && curved_hit->unit_normal.x > 0.0,
+  require(curved_hit && curved_hit->point_m.z > 0.0 && curved_hit->unit_normal.x > 0.0,
           "spherical panel uses its focal-length curvature and aperture");
+  const auto curved_reflection = curved_hit ? reflect_specular({0.0, 0.0, -1.0}, curved_hit->unit_normal)
+                                            : std::nullopt;
+  require(curved_reflection.has_value(), "spherical panel reflection is defined");
+  const double paraxial_distance = (10.0 - curved_hit->point_m.z) / curved_reflection->z;
+  const Vec3 paraxial_hit = curved_hit->point_m + *curved_reflection * paraxial_distance;
+  require(std::abs(paraxial_hit.x) < 1.e-3,
+          "concave spherical panel sends parallel rays towards its paraxial focus");
 
   // T-SEG-002: the closest finite panel wins, and reflection exposes the
   // supplied panel normal rather than an inferred dish normal.

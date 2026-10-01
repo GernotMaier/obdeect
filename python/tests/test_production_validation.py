@@ -59,6 +59,31 @@ class TestProductionValidation(unittest.TestCase):
             validate_optical_model(self._optical_model(), "SST")
         validate_optical_model(self._optical_model(sst=True), "SST")
 
+    def test_optical_model_accepts_embedded_trace_schema(self):
+        validate_optical_model(
+            {
+                "report": {"trace_ready": True, "trace_blockers": []},
+                "trace_model": {
+                    "kind": "segmented",
+                    "primary_facets": [{"id": 1}],
+                    "detector_surfaces": [{"id": 2}],
+                },
+            },
+            "LST",
+        )
+        validate_optical_model(
+            {
+                "report": {"trace_ready": True, "trace_blockers": []},
+                "trace_model": {
+                    "kind": "axisymmetric",
+                    "primary": {},
+                    "secondary": {},
+                    "detector": {},
+                },
+            },
+            "SST",
+        )
+
     def test_comparison_accepts_identical_resolved_photons(self):
         with tempfile.TemporaryDirectory() as directory:
             first, second = Path(directory) / "first.csv", Path(directory) / "second.csv"

@@ -103,7 +103,7 @@ def update_summary(summary_path: Path, root: Path, *, check: bool = False) -> No
     for row in summary["rows"]:
         if "imaging_list_archive" not in row or "imaging_list_archive" not in row.get("sha256", {}):
             raise ValueError(
-                "summary has no archived imaging list; provide a frozen reference manifest "
+                "summary has no archived imaging list; provide a frozen reference-run record "
                 "that includes imaging_list_archive and its hash"
             )
         archive = root / row["imaging_list_archive"]

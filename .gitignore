@@ -11,9 +11,7 @@
 *.dll
 
 # Generated trace and visualisation products
-*.csv
 *.npz
-*.png
 *.html
 
 # Python

@@ -1,4 +1,4 @@
-"""Weighted focal-plane analysis for recorded obdeect trace CSV files.
+"""Focal-plane analysis for recorded obdeect photon traces.
 
 This module deliberately analyses the detector intersections recorded by the
 tracer.  It does not re-trace rays or infer losses from a focal-plane image.
@@ -19,7 +19,7 @@ from obdeect.result_contract import TERMINAL_STATUSES
 
 @dataclass(frozen=True)
 class FocalPlaneHit:
-    """One detected focal-surface intersection, in telescope-frame metres."""
+    """One detected photon intersection with the focal surface, in metres."""
 
     x_m: float
     y_m: float
@@ -28,11 +28,12 @@ class FocalPlaneHit:
 
 @dataclass(frozen=True)
 class PsfResult:
-    """Weighted PSF and trace-loss summary for a single field direction.
+    """PSF and trace-loss summary for a single field direction.
 
     ``d80_m`` is the diameter of the smallest centroid-centred circle that
-    contains at least 80 percent of detected optical weight.  It is an
-    empirical weighted quantile, so no histogram binning is involved.
+    contains at least 80 percent of the detected photon optical response.  It
+    is an empirical response-weighted quantile, so no histogram binning is
+    involved.
     """
 
     input_weight: float
@@ -77,11 +78,12 @@ def _final_hit(row: dict[str, str], path: Path, row_number: int) -> tuple[float,
 
 
 def analyse_trace_csv(path: Path) -> PsfResult:
-    """Compute a weighted focal-plane PSF and loss closure from one trace CSV."""
+    """Compute a focal-plane PSF and loss closure from one photon-trace CSV."""
     input_weight = 0.0
     detected_weight = 0.0
     terminal_count: dict[str, int] = defaultdict(int)
     terminal_input_weight: dict[str, float] = defaultdict(float)
+    detected_photons = 0
     hits: list[FocalPlaneHit] = []
     with path.open(newline="") as handle:
         reader = csv.DictReader(handle)
@@ -106,14 +108,17 @@ def analyse_trace_csv(path: Path) -> PsfResult:
             if status != "detected":
                 continue
             x, y = _final_hit(row, path, row_number)
+            detected_photons += 1
             weight = source_weight * throughput
             detected_weight += weight
             if weight > 0.0:
                 hits.append(FocalPlaneHit(x, y, weight))
     if input_weight <= 0.0:
         raise ValueError(f"{path}: total input weight must be positive")
+    if detected_photons == 0:
+        raise ValueError(f"{path}: no detected focal-plane photons")
     if not hits:
-        raise ValueError(f"{path}: no detected focal-plane weight")
+        raise ValueError(f"{path}: detected focal-plane photons have zero optical response")
     centroid_x = sum(hit.x_m * hit.weight for hit in hits) / detected_weight
     centroid_y = sum(hit.y_m * hit.weight for hit in hits) / detected_weight
     radii = sorted(
@@ -183,7 +188,7 @@ def _plot_scan(results: list[tuple[float, PsfResult]], output: Path) -> None:
     throughput = [entry[1].optical_throughput for entry in results]
     figure, (psf_axis, throughput_axis) = plt.subplots(2, 1, sharex=True, figsize=(6, 6))
     psf_axis.plot(angle, d80, marker="o")
-    psf_axis.set(ylabel="D80 [m]", title="Weighted focal-plane PSF scan")
+    psf_axis.set(ylabel="D80 [m]", title="Focal-plane PSF scan")
     throughput_axis.plot(angle, throughput, marker="o")
     throughput_axis.set(xlabel="field x angle [deg]", ylabel="optical throughput")
     figure.tight_layout()

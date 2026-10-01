@@ -11,13 +11,17 @@ validation matrix for architectural or scientific changes.
 ## Design rules
 
 - Never ever modify the main README.md. Suggest instead changes, don't apply them.
+- Terminology: this project is for gamma-ray astronomy. Always call the
+  compiled telescope geometry and optical-response artifact an "optical model";
+  never call it a "scene" in user-facing text, documentation,
+  diagnostics, or new APIs.
 - Keep it simple, efficient, deterministic, and portable. Prefer small,
   explicit data structures and testable physical kernels over frameworks,
   global state, hidden defaults, or abstraction in the hot path.
 - Keep the core C++ standard-library-only. Python, plotting, file import, and
   external-simulator dependencies belong at the boundary, never in a trace
   kernel.
-- Use immutable compiled scenes and contiguous SoA photon buffers. After
+- Use immutable compiled optical models and contiguous SoA photon buffers. After
   output buffers are sized, the per-photon path must not allocate, perform I/O,
   call Python, or dispatch virtually.
 - Make units, frames, random seeds, statuses, and loss accounting explicit.
@@ -38,11 +42,17 @@ validation matrix for architectural or scientific changes.
 
 - Make the narrowest complete change and preserve unrelated work.
 - Add or update a focused test for every behavioural change. Establish analytic
-  kernel and primitive tests before scene, cross-tool, or performance tests.
+  kernel and primitive tests before optical-model, cross-tool, or performance tests.
 - Preserve results across photon ordering, blocks, and thread counts. Record
   provenance for fixtures and cross-tool comparisons.
 - Do not weaken tolerances or replace golden data to hide a discrepancy. Keep
   examples and fixtures clearly labelled and configuration-driven.
+- When renaming a public concept, update implementation symbols, imports,
+  exception types, serialized keys, fixture variables, and test call sites
+  together. For scene-to-optical-model renames, do not leave stale references
+  such as `write_native_scene`, `SceneCompileError`, `scene_sha256`, or local
+  variables named `scene` in optical-model tests unless they intentionally test
+  backward compatibility.
 
 ## Build, test, and lint
 
@@ -63,6 +73,11 @@ xargs -0 clang-format --dry-run --Werror
 Ruff is configured with a 100-character line limit. Run `ruff format` before
 `ruff check`, and manually wrap long strings or boolean expressions that the
 formatter leaves unchanged.
+
+After renames, search the affected Python files for removed symbols and run
+the focused tests before the full suite. A clean handoff requires both
+`ruff format --check python` and `ruff check python`; do not rely on a passing
+test run alone because stale test references can fail collection or linting.
 
 Run `clang-tidy -p build/debug cpp/src/<changed-file>.cpp` for changed C++
 translation units when available, and `pre-commit run --all-files` before

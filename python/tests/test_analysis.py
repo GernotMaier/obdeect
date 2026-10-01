@@ -65,9 +65,9 @@ class TestPsfAnalysis(unittest.TestCase):
             ))
         return path
 
-    def test_uses_optical_weights_and_unbinned_weighted_d80(self):
-        # T-VIS-015: D80 is the 80%-encircled *detected optical weight*, not
-        # a photon-count quantile or a histogram-dependent approximation.
+    def test_uses_photon_optical_response_and_unbinned_d80(self):
+        # T-VIS-015: D80 uses each detected photon's optical response, not a
+        # photon-count quantile or a histogram-dependent approximation.
         with tempfile.TemporaryDirectory() as directory:
             result = analyse_trace_csv(self._trace(Path(directory)))
         self.assertEqual(result.detected_count, 2)
@@ -153,6 +153,15 @@ class TestPsfAnalysis(unittest.TestCase):
                 "detected,2,1,1,0,0\n"
             )
             with self.assertRaisesRegex(ValueError, "missing final focal-plane vertex"):
+                analyse_trace_csv(path)
+
+    def test_no_detected_photons_is_reported_as_a_trace_outcome(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "misses.csv"
+            path.write_text(
+                "status,point_count,source_weight,throughput,x0_m,y0_m\nmissed_primary,1,1,0,0,0\n"
+            )
+            with self.assertRaisesRegex(ValueError, "no detected focal-plane photons"):
                 analyse_trace_csv(path)
 
     def test_missing_or_invalid_weights_fail_closed(self):

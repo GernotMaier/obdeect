@@ -338,14 +338,25 @@ def derive_nominal_single_reflector(
             z = file_z - offset
         else:
             z = focal_length - math.sqrt(distance * distance - radius * radius) - offset
-        inclination = 0.5 * math.asin(radius / distance)
-        if radius:
-            nx = -math.sin(inclination) * x / radius
-            ny = -math.sin(inclination) * y / radius
-        else:
-            nx = ny = 0.0
+        # A nominal facet normal is the bisector of the reverse incident
+        # direction (+z for a star) and the direction from the facet centre
+        # to the focal point.  Derive it from the final placement, including
+        # mirror_offset, so every chief ray reaches the compiled focal plane.
+        focal_distance = math.hypot(radius, focal_length - z)
+        if not math.isfinite(focal_distance) or focal_distance <= 0.0:
+            raise OpticalModelCompileError("facet has no finite focal-point direction")
+        outgoing_x = -x / focal_distance
+        outgoing_y = -y / focal_distance
+        outgoing_z = (focal_length - z) / focal_distance
+        normal_length = math.sqrt(
+            outgoing_x * outgoing_x + outgoing_y * outgoing_y + (outgoing_z + 1.0) ** 2
+        )
+        if not math.isfinite(normal_length) or normal_length <= 0.0:
+            raise OpticalModelCompileError("facet has no finite nominal normal")
+        nx = outgoing_x / normal_length
+        ny = outgoing_y / normal_length
         facet["nominal_centre_m"] = [x, y, z]
-        facet["nominal_normal"] = [nx, ny, math.cos(inclination)]
+        facet["nominal_normal"] = [nx, ny, (outgoing_z + 1.0) / normal_length]
 
 
 def _even_polynomial_surface(parameter: dict[str, Any], name: str) -> list[float]:
@@ -468,9 +479,7 @@ def _dual_reflector_surfaces(parameters: dict[str, Any]) -> dict[str, dict[str, 
     }
 
 
-def compile_optical_model(
-    ir: dict[str, Any], source_root: Path, *, simtel_root: Path | None = None
-) -> dict[str, Any]:
+def compile_optical_model(ir: dict[str, Any], source_root: Path) -> dict[str, Any]:
     """Compile ``obdeect.simulation-models-optical-model-ir.v1`` into generic optical model data."""
     if ir.get("format") != "obdeect.simulation-models-optical-model-ir.v1":
         raise OpticalModelCompileError("expected obdeect.simulation-models-optical-model-ir.v1")
@@ -658,25 +667,7 @@ def compile_optical_model(
                 if path.is_file():
                     nested_assets[filename] = record(path, root)
                 else:
-                    # sim_telarray fileopen() also searches its compiled-in
-                    # cfg/CTA path. Require that root explicitly so the
-                    # fallback cannot vary unnoticed between installations.
-                    fallback = (
-                        simtel_root.resolve() / "cfg" / "CTA" / filename
-                        if simtel_root is not None
-                        else None
-                    )
-                    if (
-                        fallback is not None
-                        and fallback.is_file()
-                        and fallback.resolve().is_relative_to(simtel_root.resolve())
-                    ):
-                        nested_assets[filename] = {
-                            **record(fallback, simtel_root.resolve()),
-                            "source_root": "sim_telarray",
-                        }
-                    else:
-                        unresolved_references.append(filename)
+                    unresolved_references.append(filename)
     deferred = sorted(set(parameters) - consumed)
     for name in deferred:
         if parameters[name].get("required_for_trace") is True:
@@ -684,7 +675,7 @@ def compile_optical_model(
                 f"required field {name} is not supported by the compiler"
             )
     report = {
-        "native_trace_ready": False,
+        "trace_ready": False,
         "consumed": sorted(consumed),
         "deferred": deferred,
         "unsupported": [],
@@ -737,7 +728,7 @@ def compile_optical_model(
         # The camera layout bounds the only model-derived focal aperture.  A
         # native curved detector is intentionally not fabricated until its
         # coordinate transform and active boundary are represented by the
-        # native optical_model format.
+        # embedded trace-model representation.
         if camera is not None:
             compiled_focal_surface["outer_radius_m"] = _camera_extent_m(camera)
     compiled = {
@@ -760,7 +751,14 @@ def compile_optical_model(
         compiled["focal_surface"] = compiled_focal_surface
     if camera is not None:
         compiled["camera"] = camera
-    canonical = json.dumps(compiled, sort_keys=True, separators=(",", ":")).encode()
+    try:
+        compiled["trace_model"] = build_trace_model(compiled)
+        compiled["report"]["trace_ready"] = True
+    except OpticalModelCompileError as error:
+        compiled["report"]["trace_blockers"].append(str(error))
+    canonical = json.dumps(
+        compiled, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    ).encode()
     compiled["optical_model_sha256"] = hashlib.sha256(canonical).hexdigest()
     return compiled
 
@@ -769,8 +767,8 @@ def require_trace_ready(optical_model: dict[str, Any]) -> None:
     """Reject a compiled optical model that cannot be passed to a production tracer."""
     report = optical_model.get("report", {})
     blockers = report.get("trace_blockers", [])
-    if not report.get("native_trace_ready", False):
-        blockers = [*blockers, "native production optical model binding is unavailable"]
+    if not report.get("trace_ready", False):
+        blockers = [*blockers, "trace-model binding is unavailable"]
     if blockers:
         raise OpticalModelCompileError("optical model is not trace-ready: " + "; ".join(blockers))
 
@@ -794,36 +792,34 @@ def _camera_extent_m(camera: dict[str, Any]) -> float:
                 math.hypot(float(x), float(y)) + radii.get(pixel.get("type_id"), 0.0),
             )
     except (KeyError, IndexError, TypeError, ValueError) as error:
-        raise OpticalModelCompileError(
-            "native export found an invalid focal-plane layout"
-        ) from error
+        raise OpticalModelCompileError("trace model found an invalid focal-plane layout") from error
     if not math.isfinite(extent) or extent <= 0.0:
-        raise OpticalModelCompileError("native export found an invalid focal-plane extent")
+        raise OpticalModelCompileError("trace model found an invalid focal-plane extent")
     return extent
 
 
-def native_surface_rows(
+def trace_surface_rows(
     optical_model: dict[str, Any],
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[tuple[float, float]]]:
-    """Return model-derived planar surfaces for the native optical_model adapter.
+    """Return model-derived planar surfaces for the embedded trace model.
 
     The exporter only accepts facets with explicit nominal centres and normals.
     It never reconstructs a missing telescope prescription. The focal surface
     is represented by the imported focal-plane extent at the selected focal
-    length, so the native tracer can preserve detector-boundary losses.
+    length, so the tracer can preserve detector-boundary losses.
     """
     report = optical_model.get("report", {})
     if report.get("facet_geometry_evidence", {}).get("normal_status") != "nominal_unperturbed":
-        raise OpticalModelCompileError("native export requires explicit facet normals")
+        raise OpticalModelCompileError("trace model requires explicit facet normals")
     facets = optical_model.get("primary", {}).get("facets", [])
     if not facets:
-        raise OpticalModelCompileError("native export has no primary facets")
+        raise OpticalModelCompileError("trace model has no primary facets")
     rows: list[dict[str, Any]] = []
     for facet in facets:
         centre = facet.get("nominal_centre_m")
         normal = facet.get("nominal_normal")
         if not isinstance(centre, list) or not isinstance(normal, list):
-            raise OpticalModelCompileError("native export found a facet without nominal placement")
+            raise OpticalModelCompileError("trace model found a facet without nominal placement")
         rows.append({
             "surface_id": int(facet["id"]),
             "role": "mirror",
@@ -837,7 +833,7 @@ def native_surface_rows(
     # ``parse_simtel_mirror_list`` retains the focal length for every facet;
     # use that explicit catalogue value for the detector plane.  A compiled
     # optical_model intentionally does not copy the whole parameter table, so this is
-    # the only value the native exporter is allowed to consume here.
+    # the only value the trace-model builder is allowed to consume here.
     focal_length = optical_model.get("focal_length_m")
     if (
         not isinstance(focal_length, (int, float))
@@ -850,10 +846,10 @@ def native_surface_rows(
             not math.isclose(value, focal_length, rel_tol=1e-9, abs_tol=1e-12)
             for value in focal_lengths
         ):
-            raise OpticalModelCompileError("native export requires an explicit focal length")
+            raise OpticalModelCompileError("trace model requires an explicit focal length")
     pixels = camera.get("pixels", [])
     if not pixels:
-        raise OpticalModelCompileError("native export requires focal-plane layout")
+        raise OpticalModelCompileError("trace model requires focal-plane layout")
     extent = _camera_extent_m(camera)
     rows.append({
         "surface_id": max(row["surface_id"] for row in rows) + 1,
@@ -865,20 +861,18 @@ def native_surface_rows(
     })
     obscurers = optical_model.get("primary", {}).get("cylinder_obscurers", [])
     if not isinstance(obscurers, list):
-        raise OpticalModelCompileError("native export found invalid cylinder obscurers")
+        raise OpticalModelCompileError("trace model found invalid cylinder obscurers")
     next_surface_id = max(row["surface_id"] for row in rows) + 1
-    native_obscurers = []
+    trace_obscurers = []
     for obscurer in obscurers:
         if not isinstance(obscurer, dict):
-            raise OpticalModelCompileError("native export found invalid cylinder obscurer")
+            raise OpticalModelCompileError("trace model found invalid cylinder obscurer")
         try:
             first = [float(value) for value in obscurer["first_endpoint_m"]]
             second = [float(value) for value in obscurer["second_endpoint_m"]]
             diameter = float(obscurer["diameter_m"])
         except (KeyError, TypeError, ValueError) as error:
-            raise OpticalModelCompileError(
-                "native export found invalid cylinder obscurer"
-            ) from error
+            raise OpticalModelCompileError("trace model found invalid cylinder obscurer") from error
         if (
             len(first) != 3
             or len(second) != 3
@@ -886,8 +880,8 @@ def native_surface_rows(
             or diameter <= 0
             or math.dist(first, second) <= 1e-12
         ):
-            raise OpticalModelCompileError("native export found invalid cylinder obscurer")
-        native_obscurers.append({
+            raise OpticalModelCompileError("trace model found invalid cylinder obscurer")
+        trace_obscurers.append({
             "surface_id": next_surface_id,
             "first": first,
             "second": second,
@@ -911,17 +905,17 @@ def native_surface_rows(
         row["tangent"] = [value / tangent_norm for value in tangent]
     reflectivity = optical_model.get("primary", {}).get("reflectivity", [])
     if not isinstance(reflectivity, list):
-        raise OpticalModelCompileError("native export found invalid primary reflectivity")
-    native_reflectivity = []
+        raise OpticalModelCompileError("trace model found invalid primary reflectivity")
+    trace_reflectivity = []
     for entry in reflectivity:
         if not isinstance(entry, dict):
-            raise OpticalModelCompileError("native export found invalid primary reflectivity")
+            raise OpticalModelCompileError("trace model found invalid primary reflectivity")
         try:
             wavelength = float(entry["wavelength_nm"])
             value = float(entry["response"])
         except (KeyError, TypeError, ValueError) as error:
             raise OpticalModelCompileError(
-                "native export found invalid primary reflectivity"
+                "trace model found invalid primary reflectivity"
             ) from error
         if (
             not math.isfinite(wavelength)
@@ -929,13 +923,71 @@ def native_surface_rows(
             or wavelength <= 0
             or not 0 <= value <= 1
         ):
-            raise OpticalModelCompileError("native export found invalid primary reflectivity")
-        native_reflectivity.append((wavelength, value))
-    if any(
-        left[0] >= right[0] for left, right in zip(native_reflectivity, native_reflectivity[1:])
+            raise OpticalModelCompileError("trace model found invalid primary reflectivity")
+        trace_reflectivity.append((wavelength, value))
+    if any(left[0] >= right[0] for left, right in zip(trace_reflectivity, trace_reflectivity[1:])):
+        raise OpticalModelCompileError("trace model found unordered primary reflectivity")
+    return rows, trace_obscurers, trace_reflectivity
+
+
+def build_trace_model(optical_model: dict[str, Any]) -> dict[str, Any]:
+    """Build the finite surfaces consumed directly from the compiled JSON.
+
+    This is deliberately embedded in the canonical optical-model document:
+    there is no second, flattened transport file to keep in sync.
+    """
+    primary = optical_model.get("primary", {})
+    secondary = optical_model.get("secondary", {})
+    focal = optical_model.get("focal_surface", {})
+    if (
+        isinstance(primary, dict)
+        and isinstance(secondary, dict)
+        and isinstance(focal, dict)
+        and isinstance(primary.get("aspheric_surface"), dict)
+        and secondary.get("kind") == "aspheric_mirror"
     ):
-        raise OpticalModelCompileError("native export found unordered primary reflectivity")
-    return rows, native_obscurers, native_reflectivity
+        return _axisymmetric_trace_model(optical_model)
+    rows, obscurers, reflectivity = trace_surface_rows(optical_model)
+    facets = []
+    detectors = []
+    for row in rows:
+        surface = {
+            "id": row["surface_id"],
+            "shape": row["shape"],
+            "centre_m": row["centre_m"],
+            "normal": row["normal"],
+            "tangent": row["tangent"],
+            "diameter_m": row["diameter_m"],
+        }
+        if row["role"] == "mirror":
+            facets.append({**surface, "focal_length_m": row["focal_length_m"]})
+        else:
+            detectors.append(surface)
+    return {
+        "kind": "segmented",
+        "primary_facets": facets,
+        "detector_surfaces": detectors,
+        "cylinder_obscurers": [
+            {
+                "id": item["surface_id"],
+                "first_endpoint_m": item["first"],
+                "second_endpoint_m": item["second"],
+                "diameter_m": item["diameter_m"],
+            }
+            for item in obscurers
+        ],
+        "primary_reflectivity": [
+            {"wavelength_nm": wavelength, "response": response}
+            for wavelength, response in reflectivity
+        ],
+    }
+
+
+def native_surface_rows(
+    optical_model: dict[str, Any],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[tuple[float, float]]]:
+    """Return the planar surfaces used by the dependency-free native writer."""
+    return trace_surface_rows(optical_model)
 
 
 def write_native_optical_model(optical_model: dict[str, Any], output: Path) -> None:
@@ -952,27 +1004,26 @@ def write_native_optical_model(optical_model: dict[str, Any], output: Path) -> N
     ):
         _write_native_axisymmetric_optical_model(optical_model, output)
         return
+
     rows, obscurers, reflectivity = native_surface_rows(optical_model)
-    lines = [
-        "obdeect-optical-model-v1",
-        "surface_id,role,shape,cx_m,cy_m,cz_m,nx,ny,nz,tx,ty,tz,diameter_m,focal_length_m",
-    ]
     provenance = optical_model.get("provenance", {})
     model = provenance.get("model")
     version = provenance.get("model_version")
-    records = provenance.get("input_records", {})
+    content_hash = optical_model.get("optical_model_sha256")
     if (
         not isinstance(model, str)
         or not isinstance(version, str)
         or "," in model
         or "," in version
-        or not isinstance(records, dict)
+        or not isinstance(content_hash, str)
+        or len(content_hash) != 64
     ):
         raise OpticalModelCompileError("native export requires model provenance")
-    content_hash = optical_model.get("optical_model_sha256")
-    if not isinstance(content_hash, str) or len(content_hash) != 64:
-        raise OpticalModelCompileError("native export requires optical_model_sha256")
-    lines.insert(1, f"provenance,{model},{version},{content_hash}")
+    lines = [
+        "obdeect-optical-model-v1",
+        f"provenance,{model},{version},{content_hash}",
+        "surface_id,role,shape,cx_m,cy_m,cz_m,nx,ny,nz,tx,ty,tz,diameter_m,focal_length_m",
+    ]
     for row in rows:
         centre = row["centre_m"]
         normal = row["normal"]
@@ -993,7 +1044,11 @@ def write_native_optical_model(optical_model: dict[str, Any], output: Path) -> N
                 str(obscurer["surface_id"]),
                 *(
                     f"{value:.17g}"
-                    for value in (*obscurer["first"], *obscurer["second"], obscurer["diameter_m"])
+                    for value in (
+                        *obscurer["first"],
+                        *obscurer["second"],
+                        obscurer["diameter_m"],
+                    )
                 ),
             ])
         )
@@ -1003,23 +1058,31 @@ def write_native_optical_model(optical_model: dict[str, Any], output: Path) -> N
 
 
 def _write_native_axisymmetric_optical_model(optical_model: dict[str, Any], output: Path) -> None:
-    """Write an exact rotationally symmetric SST/SCT optical prescription.
-
-    The source model defines these surfaces as an even polynomial around the
-    telescope optical axis.  This format carries the radius convention and
-    never replaces them with a faceted approximation.
-    """
+    """Write an exact rotationally symmetric SST/SCT optical prescription."""
     provenance = optical_model.get("provenance", {})
-    model, version = provenance.get("model"), provenance.get("model_version")
+    model = provenance.get("model")
+    version = provenance.get("model_version")
     content_hash = optical_model.get("optical_model_sha256")
     if (
         not isinstance(model, str)
         or not isinstance(version, str)
         or not isinstance(content_hash, str)
+        or len(content_hash) != 64
+        or "," in model
+        or "," in version
     ):
-        raise OpticalModelCompileError("native export requires model provenance")
-    if len(content_hash) != 64 or "," in model or "," in version:
         raise OpticalModelCompileError("native export requires valid model provenance")
+
+    primary_source = optical_model["primary"]
+    if primary_source.get("cylinder_obscurers"):
+        raise OpticalModelCompileError(
+            "native axisymmetric export cannot represent cylinder obscurers"
+        )
+    primary = primary_source["aspheric_surface"]
+    secondary = optical_model["secondary"]
+    focal = optical_model.get("focal_surface")
+    if not isinstance(focal, dict) or focal.get("outer_radius_m") is None:
+        raise OpticalModelCompileError("native dual-mirror export requires a bounded focal surface")
 
     def row(role: str, surface: dict[str, Any]) -> str:
         coefficients = surface.get("coefficient_m")
@@ -1041,8 +1104,6 @@ def _write_native_axisymmetric_optical_model(optical_model: dict[str, Any], outp
             or scale <= 0
         ):
             raise OpticalModelCompileError(f"invalid {role} aspheric surface")
-        # The native intersection is z = vertex + polynomial(r), so retain
-        # the physical vertex separately from the zeroed polynomial constant.
         local = [float(value) for value in coefficients]
         vertex = local[0]
         local[0] = 0.0
@@ -1051,16 +1112,6 @@ def _write_native_axisymmetric_optical_model(optical_model: dict[str, Any], outp
             *(f"{value:.17g}" for value in (vertex, inner, outer, scale, *local)),
         ])
 
-    primary_source = optical_model["primary"]
-    if primary_source.get("cylinder_obscurers"):
-        raise OpticalModelCompileError(
-            "native axisymmetric export cannot represent cylinder obscurers"
-        )
-    primary = primary_source["aspheric_surface"]
-    secondary = optical_model["secondary"]
-    focal = optical_model.get("focal_surface")
-    if not isinstance(focal, dict) or focal.get("outer_radius_m") is None:
-        raise OpticalModelCompileError("native dual-mirror export requires a bounded focal surface")
     lines = [
         "obdeect-axisymmetric-optical-model-v1",
         f"provenance,{model},{version},{content_hash}",
@@ -1069,10 +1120,7 @@ def _write_native_axisymmetric_optical_model(optical_model: dict[str, Any], outp
         row("secondary", secondary),
         row("detector", focal),
     ]
-    for role, surface, response_source in (
-        ("primary", primary, primary_source),
-        ("secondary", secondary, secondary),
-    ):
+    for role, response_source in (("primary", primary_source), ("secondary", secondary)):
         response = response_source.get("reflectivity", [])
         if not isinstance(response, list):
             raise OpticalModelCompileError(f"invalid {role} reflectivity")
@@ -1095,25 +1143,93 @@ def _write_native_axisymmetric_optical_model(optical_model: dict[str, Any], outp
     output.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+def _axisymmetric_trace_model(optical_model: dict[str, Any]) -> dict[str, Any]:
+    """Preserve exact rotationally symmetric surfaces inside compiled JSON."""
+    primary = optical_model["primary"]["aspheric_surface"]
+    secondary = optical_model["secondary"]
+    focal = optical_model.get("focal_surface")
+    if not isinstance(focal, dict) or focal.get("outer_radius_m") is None:
+        raise OpticalModelCompileError("trace model requires a bounded focal surface")
+
+    def surface(source: dict[str, Any], role: str) -> dict[str, Any]:
+        coefficients = source.get("coefficient_m")
+        outer = source.get("outer_radius_m")
+        inner = source.get("inner_radius_m", 0.0)
+        scale = source.get("radial_scale_m", 1.0)
+        if (
+            not isinstance(coefficients, list)
+            or len(coefficients) != 13
+            or not all(
+                isinstance(value, (int, float)) and math.isfinite(value) for value in coefficients
+            )
+            or not all(
+                isinstance(value, (int, float)) and math.isfinite(value)
+                for value in (inner, outer, scale)
+            )
+            or inner < 0
+            or outer <= inner
+            or scale <= 0
+        ):
+            raise OpticalModelCompileError(f"invalid {role} aspheric surface")
+        local = [float(value) for value in coefficients]
+        vertex = local[0]
+        local[0] = 0.0
+        return {
+            "vertex_z_m": vertex,
+            "inner_radius_m": float(inner),
+            "outer_radius_m": float(outer),
+            "radial_scale_m": float(scale),
+            "coefficient_m": local,
+        }
+
+    def response(source: dict[str, Any], role: str) -> list[dict[str, float]]:
+        result = source.get("reflectivity", [])
+        if not isinstance(result, list) or len(result) < 2:
+            raise OpticalModelCompileError(f"trace model requires {role} reflectivity")
+        values = []
+        for entry in result:
+            if not isinstance(entry, dict):
+                raise OpticalModelCompileError(f"invalid {role} reflectivity")
+            try:
+                wavelength = float(entry["wavelength_nm"])
+                value = float(entry["response"])
+            except (KeyError, TypeError, ValueError) as error:
+                raise OpticalModelCompileError(f"invalid {role} reflectivity") from error
+            if (
+                not math.isfinite(wavelength)
+                or not math.isfinite(value)
+                or wavelength <= 0
+                or not 0 <= value <= 1
+            ):
+                raise OpticalModelCompileError(f"invalid {role} reflectivity")
+            values.append({"wavelength_nm": wavelength, "response": value})
+        if any(
+            left["wavelength_nm"] >= right["wavelength_nm"]
+            for left, right in zip(values, values[1:])
+        ):
+            raise OpticalModelCompileError(f"trace model found unordered {role} reflectivity")
+        return values
+
+    return {
+        "kind": "axisymmetric",
+        "primary": surface(primary, "primary"),
+        "secondary": surface(secondary, "secondary"),
+        "detector": surface(focal, "detector"),
+        "primary_reflectivity": response(primary, "primary"),
+        "secondary_reflectivity": response(secondary, "secondary"),
+    }
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Compile a simulation-models IR into generic optical model data."
+        description="Compile a simulation-models production into an optical model."
     )
     parser.add_argument(
-        "--input", type=Path, required=True, help="provenance-checked optical model IR JSON"
+        "--source-root", type=Path, required=True, help="simulation-models repository root"
     )
-    parser.add_argument(
-        "--source-root", type=Path, required=True, help="root used to resolve IR asset paths"
-    )
-    parser.add_argument(
-        "--simtel-root",
-        type=Path,
-        help="explicit sim_telarray installation for cfg/CTA camera tables",
-    )
-    parser.add_argument(
-        "--output", type=Path, required=True, help="compiled generic-optical model JSON"
-    )
-    parser.add_argument("--native-output", type=Path, help="optional native surface table")
+    parser.add_argument("--model", required=True, help="production table, e.g. LSTN-design")
+    parser.add_argument("--version", required=True, help="production model version")
+    parser.add_argument("--output", type=Path, required=True, help="compiled optical model JSON")
     parser.add_argument(
         "--require-trace-ready",
         action="store_true",
@@ -1121,22 +1237,17 @@ def main() -> None:
     )
     args = parser.parse_args()
     try:
-        ir = json.loads(args.input.read_text(encoding="utf-8"))
-        if not isinstance(ir, dict):
-            raise OpticalModelCompileError("IR root must be an object")
-        optical_model = compile_optical_model(ir, args.source_root, simtel_root=args.simtel_root)
+        ir = resolve_model(args.source_root, args.model, args.version)
+        optical_model = compile_optical_model(ir, args.source_root)
         if args.require_trace_ready:
             require_trace_ready(optical_model)
-        if args.native_output:
-            write_native_optical_model(optical_model, args.native_output)
-    except (OSError, json.JSONDecodeError, OpticalModelCompileError) as error:
+    except (OSError, ModelImportError, OpticalModelCompileError) as error:
         raise SystemExit(f"optical model compilation failed: {error}") from error
     args.output.write_text(
-        json.dumps(optical_model, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+        json.dumps(optical_model, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
     )
     print(f"Compiled {optical_model['provenance']['model']} geometry into {args.output}")
-    if args.native_output:
-        print(f"Wrote native surface table to {args.native_output}")
 
 
 if __name__ == "__main__":

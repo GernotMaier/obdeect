@@ -1,4 +1,4 @@
-"""Reference manifests reject missing conventions and changed inputs."""
+"""Reference-run records reject missing conventions and changed inputs."""
 
 import json
 import subprocess
@@ -7,10 +7,10 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from obdeect.reference_manifest import ManifestError, freeze, verify
+from obdeect.reference_run import ReferenceRunError, freeze, verify
 
 
-class TestReferenceManifest(unittest.TestCase):
+class TestReferenceRun(unittest.TestCase):
     def test_freeze_and_verify(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -65,12 +65,12 @@ class TestReferenceManifest(unittest.TestCase):
                     }
                 ],
             }
-            manifest = freeze(config, model_root)
-            verify(manifest, model_root)
-            self.assertEqual(len(manifest["file_sha256"]), 2)
+            reference_run = freeze(config, model_root)
+            verify(reference_run, model_root)
+            self.assertEqual(len(reference_run["file_sha256"]), 2)
             block.write_text("photon_id\n2\n")
-            with self.assertRaisesRegex(ManifestError, "differs"):
-                verify(manifest, model_root)
+            with self.assertRaisesRegex(ReferenceRunError, "differs"):
+                verify(reference_run, model_root)
             block.write_text("photon_id\n1\n")
             (production / "TEST.json").write_text(
                 json.dumps({
@@ -80,10 +80,10 @@ class TestReferenceManifest(unittest.TestCase):
                     "comment": "changed without a new commit",
                 })
             )
-            with self.assertRaisesRegex(ManifestError, "differs"):
-                verify(manifest, model_root)
+            with self.assertRaisesRegex(ReferenceRunError, "differs"):
+                verify(reference_run, model_root)
             del config["coordinate_frames"]
-            with self.assertRaisesRegex(ManifestError, "coordinate_frames"):
+            with self.assertRaisesRegex(ReferenceRunError, "coordinate_frames"):
                 freeze(config, model_root)
 
 
