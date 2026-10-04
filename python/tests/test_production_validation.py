@@ -315,6 +315,7 @@ def test_comparison_table_rejects_detected_terminal_loss(tmp_path):
     fields = [*PHOTON.__dataclass_fields__]
     fields.remove("final_direction")
     fields.remove("interaction_surface_ids")
+    fields.remove("optical_path_m")
     values = {field: getattr(PHOTON, field) for field in fields}
     values.update(response_loss_fraction=0.1, terminal_loss_fraction=0.1)
     with path.open("w", newline="") as handle:
@@ -335,3 +336,12 @@ def test_direct_adapter_rejects_mixed_identity_context():
     rows = {7: PHOTON, (0, 0, 0, 0, 0, 7): PHOTON}
     with pytest.raises(ProductionValidationError, match="identity"):
         compare(rows, rows, TOLERANCES, FIXTURE)
+
+
+def test_comparison_retains_phase_path_separately_from_geometrical_path():
+    photon = replace(PHOTON, optical_path_m=13)
+    reference = replace(photon, optical_path_m=14)
+    with pytest.raises(ProductionValidationError, match='"field": "optical_path_m"'):
+        compare({7: photon}, {7: reference}, TOLERANCES, FIXTURE)
+    summary = compare({7: photon}, {7: photon}, TOLERANCES, FIXTURE)
+    assert summary["max_optical_path_residual_m"] == 0

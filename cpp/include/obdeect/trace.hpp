@@ -2,6 +2,7 @@
 
 #include "obdeect/abi.hpp"
 #include "obdeect/diagnostics.hpp"
+#include "obdeect/material_path.hpp"
 #include "obdeect/optical_model.hpp"
 #include "obdeect/reference_optical_model.hpp"
 #include "obdeect/segmented_optical_model.hpp"
@@ -76,8 +77,7 @@ struct TraceResult {
   return result;
 }
 
-// Geometry-only non-sequential reference. Every segment considers every
-// surface; material_id is retained for later response binding.
+// Nonsequential finite-surface transport with explicit dielectric media.
 [[nodiscard]] inline TraceResult trace(const CompiledOpticalModel &optical_model,
                                        const PhotonBlockView &input) {
   TraceResult result{PhotonResultBlock{input.position_m.size()}, {}};
@@ -89,44 +89,20 @@ struct TraceResult {
     return result;
   }
   for (std::size_t index = 0; index < input.position_m.size(); ++index) {
-    Ray ray{input.position_m[index], input.direction[index]};
-    result.photons.position_m[index] = ray.position_m;
-    result.photons.direction[index] = ray.direction;
-    result.photons.time_ns[index] = input.time_ns[index];
-    PhotonStatus status = PhotonStatus::interaction_limit;
-    for (std::uint32_t interaction = 0; interaction < optical_model.max_interactions();
-         ++interaction) {
-      const auto hit = intersect_nearest_surface(ray, optical_model);
-      if (!hit) {
-        status = PhotonStatus::escaped_optical_model;
-        break;
-      }
-      result.photons.optical_path_m[index] += hit->distance_m;
-      result.photons.time_ns[index] += hit->distance_m / kSpeedOfLightMPerNs;
-      result.photons.position_m[index] = hit->point_m;
-      if (hit->role == SurfaceRole::detector) {
-        status = PhotonStatus::detected;
-        result.photons.surface_id[index] = hit->surface_id;
-        break;
-      }
-      if (hit->role == SurfaceRole::obscurer) {
-        status = PhotonStatus::blocked_obscurer;
-        result.photons.surface_id[index] = hit->surface_id;
-        break;
-      }
-      const auto reflected = reflect_specular(ray.direction, hit->normal);
-      if (!reflected) {
-        status = PhotonStatus::invalid_input;
-        break;
-      }
-      result.photons.direction[index] = *reflected;
-      ray = {hit->point_m, *reflected};
-      if (interaction + 1 == optical_model.max_interactions())
-        result.photons.surface_id[index] = hit->surface_id;
-    }
-    result.photons.status[index] = status;
-    result.photons.weight[index] = status == PhotonStatus::detected ? input.weight[index] : 0.0;
-    result.summary.add(status, input.weight[index]);
+    const auto path = trace_material_path<false>({input.position_m[index], input.direction[index]},
+                                                 input.photon_id[index], input.wavelength_nm[index],
+                                                 optical_model);
+    result.photons.position_m[index] = path.points_m[path.point_count - 1];
+    result.photons.direction[index] = path.final_direction;
+    result.photons.optical_path_m[index] = path.optical_path_m;
+    result.photons.geometric_path_m[index] = path.path_length_m;
+    result.photons.time_ns[index] = input.time_ns[index] + path.group_delay_ns;
+    result.photons.surface_id[index] = path.terminal_surface_id;
+    result.photons.status[index] = path.status;
+    const double remaining = input.weight[index] * path.surviving_throughput;
+    result.photons.weight[index] = path.status == PhotonStatus::detected ? remaining : 0;
+    result.summary.add(path.status, input.weight[index], remaining,
+                       input.weight[index] - remaining);
   }
   return result;
 }

@@ -20,6 +20,7 @@ struct AxisymmetricSegment {
   double start_rad{};
   double span_rad{};
   double gap_m{};
+  bool gap_at_start{};
 };
 
 // Ring boundary and gap convention matches sim_telarray/common/sim_imaging.c
@@ -32,9 +33,11 @@ struct AxisymmetricSegment {
     const double radius = std::hypot(point.x, point.y);
     double angle = std::atan2(point.y, point.x) - segment.start_rad;
     angle -= 2 * std::numbers::pi * std::floor(angle / (2 * std::numbers::pi));
+    const double distance_from_gap =
+        segment.gap_at_start ? angle * radius : (segment.span_rad - angle) * radius;
     return radius >= segment.inner_radius_m && radius < segment.outer_radius_m &&
            angle < segment.span_rad && radius >= segment.gap_m &&
-           angle * radius <= segment.span_rad * radius - segment.gap_m;
+           distance_from_gap >= segment.gap_m;
   }
   const double radius = std::hypot(segment.centre_m.x, segment.centre_m.y);
   const double cx = radius > kEpsilon ? segment.centre_m.x / radius : 1;

@@ -126,6 +126,12 @@ int main() {
   assert(obdeect::contains_axisymmetric_segment(
       masked.primary_segments[0], masked.primary,
       {std::cos(std::numbers::pi / 2 - 0.15), std::sin(std::numbers::pi / 2 - 0.15), 0}));
+  auto reversed_gap = masked.primary_segments[0];
+  reversed_gap.gap_at_start = true;
+  assert(!obdeect::contains_axisymmetric_segment(reversed_gap, masked.primary,
+                                                 {std::cos(0.05), std::sin(0.05), 0}));
+  assert(obdeect::contains_axisymmetric_segment(reversed_gap, masked.primary,
+                                                {std::cos(0.15), std::sin(0.15), 0}));
   sector.id = 22;
   sector.start_rad = std::numbers::pi / 2;
   masked.secondary_segments = {sector};

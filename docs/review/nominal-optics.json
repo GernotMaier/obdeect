@@ -1,13 +1,13 @@
 {
   "model_root": "../simulation-models/simulation-models",
-  "native_executable_sha256": "34f6228cea5c04b34c1eff0bf43ca4b7dc291c23441f326253e2493cfc458a1e",
+  "native_executable_sha256": "8e77a19d2c4712155ba9406d4ed57b5b5bf448dc7f3dff23ac586ba12fcd6018",
   "production_version": "7.0.0",
   "purpose": "Nominal optical-model compilation and transport smoke; not a sim_telarray comparison or production qualification",
   "python_version": "3.14.8 (main, Sep 30 2026, 17:55:09) [Clang 21.0.0 (clang-2100.3.34.2)]",
   "runs": [
     {
-      "arrivals_sha256": "3541ebf2b2bac8cf871155bcd924f6b4c1e7597670ffb8340bf85101508c90a3",
-      "arriving_weight": 723.846032,
+      "arrivals_sha256": "3fb378d65ee4f9d604258348400da91942deacfbb0f2a6d62637e3ebd9d3dbab",
+      "arriving_weight": 393.1473726321551,
       "compile_argv": [
         "obdeect-compile-optical-model",
         "--source-root",
@@ -22,7 +22,7 @@
       "input_weight": 1000.0,
       "model": "LSTN-design",
       "native_trace_ready": true,
-      "optical_model_sha256": "4495a40306a75408c68ef73d50f0d5349e51a8b20b421c99ced7797c6a61b9d9",
+      "optical_model_sha256": "8458d50cdc67aa9b3d5c03ef7138381c88b08e4ff086139ee612dc2072e6dc52",
       "production_trace_ready": false,
       "source_record_sha256": {
         "parameter:axes_offsets": "708bde11981ad672cec5ee61771186018ebf09c475d115aef8721be4df1cb304",
@@ -31,6 +31,7 @@
         "parameter:camera_depth": "4f5cbab4fd0d3bf8461d3258ba6dc5ab8df4cde0a584beb38be03e782150ce68",
         "parameter:camera_filter": "496bf823aad8f4b7eebb8cbc724a5052c4a59c4b983371c92cb3bdeb11061ed9",
         "parameter:camera_pixel_layout": "f82364454d0e72c423826359604038509eeed71303721c5df1b4e6b9ce2b8d0e",
+        "parameter:camera_pixel_types": "d47437887b92fcc3cec8ec14b0df57dbf2694e1066c72d1c3e8745855c16b46b",
         "parameter:camera_pixels": "c16ab49c542e4ce020d2d23e54ae933062b515a9ddce7eebe9ba2ff009f7c84a",
         "parameter:camera_transmission": "9034fb652bef98e1da0e9950855d94106b7c1cf839df510f31e3ef621607ae6b",
         "parameter:dish_shape_length": "f0d161a320d8255d7d8165064009ae3823b72985e28c5080ab42483f5eef5045",
@@ -59,8 +60,9 @@
         "production_manifest": "d3af842a7a1bd439962db6551713992991701d4b67a295900c5b0569467f1438"
       },
       "terminal_counts": {
-        "detected": 784,
-        "missed_primary": 216
+        "detected": 727,
+        "missed_primary": 216,
+        "no_detector": 57
       },
       "trace_argv": [
         "build/debug/obdeect-simtools-raytrace",
@@ -75,12 +77,12 @@
       ],
       "trace_blockers": [
         "run-specific panel alignment and distance are not compiled",
-        "physical detector surfaces and materials remain deferred"
+        "concentrator wall profiles, windows and detector material response remain deferred"
       ]
     },
     {
-      "arrivals_sha256": "3fd707cb598c909e6041490969008aedffdb586f27b9dae6ff8ded427452b7b2",
-      "arriving_weight": 600.5903999999999,
+      "arrivals_sha256": "144bd43d2a8ce6a2783542a459bb7e629641d4e3069db9fff9da738e4c25a30b",
+      "arriving_weight": 266.8297126238882,
       "compile_argv": [
         "obdeect-compile-optical-model",
         "--source-root",
@@ -95,7 +97,7 @@
       "input_weight": 1000.0,
       "model": "MSTx-FlashCam",
       "native_trace_ready": true,
-      "optical_model_sha256": "d3cdd4912e8798dd37da5d1621441b50a09dd856dc6cc15f59cba3599d12c2e7",
+      "optical_model_sha256": "0fe6ef6576281eb1f3be960a98759d53a6fcb52d8dd907e3fd4efe09a0794a9d",
       "production_trace_ready": false,
       "source_record_sha256": {
         "parameter:axes_offsets": "baa18f875d7c4ab76e672e2e72e652f9f9ad2c2ccab409dac0c0fc24f8540689",
@@ -104,6 +106,7 @@
         "parameter:camera_depth": "31d7a8da1a78f33f73048c9752ec82acbae36fe613f5dbe8a25ee17642d08f4a",
         "parameter:camera_filter": "8ed3079b9b9278e227e447020ffc00e08fa8f7668b26e2f633d7f7c45c27ae60",
         "parameter:camera_pixel_layout": "e0e330b7fd1db72399a77334c3d5e8411e4185ef0d69b6855992c96448e9136e",
+        "parameter:camera_pixel_types": "10d7b9285e1ead704276aaa0d2952a58d8674c44ff3ded54233a7b0df8e444a9",
         "parameter:camera_pixels": "b249a80fa154c195b38cff863fe79fd7bb472af7cba22d5896a9360ed0be2a46",
         "parameter:camera_transmission": "644c43f14f5630f8ed1cca0149a5e05762f096e7e319697049f2794131cc7018",
         "parameter:dish_shape_length": "250ca9a364a39bd99ff3cbc7b357994dc571eedcb0f9c761baecabdbea71c5a0",
@@ -134,9 +137,10 @@
         "production_manifest": "e961737308b2513ef7c8843b7e5ed33fdcfd96a6a54cff783f73f0ae87e1ee2e"
       },
       "terminal_counts": {
-        "blocked_obscurer": 84,
-        "detected": 633,
-        "missed_primary": 283
+        "blocked_obscurer": 101,
+        "detected": 336,
+        "missed_primary": 283,
+        "no_detector": 280
       },
       "trace_argv": [
         "build/debug/obdeect-simtools-raytrace",
@@ -151,13 +155,13 @@
       ],
       "trace_blockers": [
         "run-specific panel alignment and distance are not compiled",
-        "physical detector surfaces and materials remain deferred",
+        "concentrator wall profiles, windows and detector material response remain deferred",
         "quadrilateral obscurers remain deferred"
       ]
     },
     {
-      "arrivals_sha256": "61b3ee48139a1ad913a27c893927446ce4a814f94d76d984cefde496cc3ed6e3",
-      "arriving_weight": 655.8994,
+      "arrivals_sha256": "1d6b04b0772f9ea4b56ef4e31c012885a3fdba5a294634cf0c4a596cc46a506c",
+      "arriving_weight": 538.215935746229,
       "compile_argv": [
         "obdeect-compile-optical-model",
         "--source-root",
@@ -172,7 +176,7 @@
       "input_weight": 1000.0,
       "model": "MSTx-NectarCam",
       "native_trace_ready": true,
-      "optical_model_sha256": "439f780461167c9de4f355c0477752e2801bab006d167ea50b5511d8c7395335",
+      "optical_model_sha256": "91aa95f8bbc0eea2e58ff499203fa7816f55c465a25dd83b62c26f225365123e",
       "production_trace_ready": false,
       "source_record_sha256": {
         "parameter:axes_offsets": "8cf7c6e67b037e8a1bd3b889d97e5ccf84e8ba88ed1caf96cdd5f43693804006",
@@ -181,6 +185,7 @@
         "parameter:camera_depth": "618e6e42c3b744c181783553647afe183e4186533ac9d560128acba301355fce",
         "parameter:camera_filter": "dc35d237c2bd95e2e78f45c74465655a7941c78df40e4022711341aa8b93dbaa",
         "parameter:camera_pixel_layout": "615c85026fcbe4ddab3ee6d9425329108584ba337fcba0d468d1f8b1c2b57857",
+        "parameter:camera_pixel_types": "4508f8f9b78c0e585af3d862ba03231dfc6cd86f4968922a8950125b9c43fb49",
         "parameter:camera_pixels": "026851a1fe70354f240448fe77799cb8b435cbd5246dc9e2898b2ab3d138d4c8",
         "parameter:camera_transmission": "6e58fd8b446a3e575da9fb93375fae005b011139fc56e6064a4f81561541ece6",
         "parameter:dish_shape_length": "1527899526ed17a2fe70ce0dd0fc0d513a9f60128515e9bbe4d5985868004922",
@@ -209,8 +214,9 @@
         "production_manifest": "cc74acd36e2e377f5df48cbb96100dc891abea704da30ef093c7be3d8c3a5d46"
       },
       "terminal_counts": {
-        "detected": 694,
-        "missed_primary": 306
+        "detected": 691,
+        "missed_primary": 306,
+        "no_detector": 3
       },
       "trace_argv": [
         "build/debug/obdeect-simtools-raytrace",
@@ -225,12 +231,12 @@
       ],
       "trace_blockers": [
         "run-specific panel alignment and distance are not compiled",
-        "physical detector surfaces and materials remain deferred"
+        "concentrator wall profiles, windows and detector material response remain deferred"
       ]
     },
     {
-      "arrivals_sha256": "cff2d9254ec2fe4810a670e75b3ccfc4c775a72b9655a52be22e976d6465fa6f",
-      "arriving_weight": 648.6444338016786,
+      "arrivals_sha256": "c1abc0fbbadc4cbedb1b8c90b73721f8898e64c200ea128e961e941d0af97f76",
+      "arriving_weight": 88.13969077307856,
       "compile_argv": [
         "obdeect-compile-optical-model",
         "--source-root",
@@ -245,7 +251,7 @@
       "input_weight": 1000.0,
       "model": "SSTS-design",
       "native_trace_ready": true,
-      "optical_model_sha256": "459749e36c177a350f6d37f1335bb60749ff986559a9e16f58a254366b4461f1",
+      "optical_model_sha256": "bd0ee895ff6c188d61481ec95d1575edb2bc0986ddb5ad72d8cd2a3f2ffb9e9c",
       "production_trace_ready": false,
       "source_record_sha256": {
         "parameter:axes_offsets": "9d8831fc01421956f0f689f5766297018830051162f023df06b0a774d55667cf",
@@ -254,6 +260,7 @@
         "parameter:camera_depth": "37aaff6cd63d380005cd926b8715d40b47d57841d969dd2d71447c2194473665",
         "parameter:camera_filter": "efba9783e9b1a76b3b1e82d72dbd48b67a4086784cba88a427264c1e608b4826",
         "parameter:camera_pixel_layout": "e57975745cfb7294c84400e684d9403dab1cfe694e9e9813faf7897089868e2f",
+        "parameter:camera_pixel_types": "29b48cddf7f77812f492a258f20afaa1724b3f2d35296fbf5d66ce3413e9594a",
         "parameter:camera_pixels": "9ccdb050cd30f1d023ed0a7501124ddbef3aef642b0ab9ccb88bf57724dbbd64",
         "parameter:camera_transmission": "d748db152b37567c3161d0d221a317ed3a0c0a7cc7288a57802bce0875bb7f2a",
         "parameter:effective_focal_length": "528867f1e3cb6e5f5c602c50bc0e0a83e54aa803edcf0dea11d0b209ed4c6ec3",
@@ -272,6 +279,7 @@
         "parameter:mirror_reflectivity": "87280af757655ee56d0a4fe4fb939c2f48d5ce3d01ffb6d9b84aad63f8d9a3b9",
         "parameter:optics_properties": "4c151272fb386c6024e060040367021efee3d1bd8e88d804563974b356247323",
         "parameter:parabolic_dish": "fa04df783649606aba9cdb77c2e7d54c820b1e7b3d7464bbba743f5ea2812279",
+        "parameter:pixels_parallel": "2816342ffaad9035ef1a65c1668a77aeea8017661f9397a585fa51daa0aba126",
         "parameter:primary_mirror_degraded_map": "39cafc27affc5aec7b61d011f7199f2c542d25442d914ddae87e6999498cb537",
         "parameter:primary_mirror_diameter": "34bdb4af3e1725539a61c2d6cca9c8f5c8318500812b5d4529c69b424bf72245",
         "parameter:primary_mirror_hole_diameter": "d48603711e1db62ffbf8a7d60817918e3163fc641814389e603e3e12fb697b3e",
@@ -300,8 +308,10 @@
       },
       "terminal_counts": {
         "blocked_obscurer": 171,
-        "detected": 750,
-        "missed_secondary": 79
+        "detected": 115,
+        "missed_primary": 167,
+        "missed_screen": 525,
+        "missed_secondary": 22
       },
       "trace_argv": [
         "build/debug/obdeect-simtools-raytrace",
@@ -316,12 +326,12 @@
       ],
       "trace_blockers": [
         "facet surface normals and alignment are not compiled",
-        "physical detector surfaces and materials remain deferred"
+        "concentrator wall profiles, windows and detector material response remain deferred"
       ]
     },
     {
-      "arrivals_sha256": "3c73d99036becd17a53474482696f1c92a45a78eb6c45b600a848b57432b1c93",
-      "arriving_weight": 604.1718536538984,
+      "arrivals_sha256": "524e7dfa3492f998d967939a24c66dfd3e564c2c785e58b0aa26c85eb447746c",
+      "arriving_weight": 466.72383140506986,
       "compile_argv": [
         "obdeect-compile-optical-model",
         "--source-root",
@@ -336,7 +346,7 @@
       "input_weight": 1000.0,
       "model": "SCTS-design",
       "native_trace_ready": true,
-      "optical_model_sha256": "67514640cf4e64f4a4b3a80f3a382a3275feba48757c1a2357761bd10d1739fb",
+      "optical_model_sha256": "0dbb8fa49e1e8e3b6b79db0085078cf4f2b44d6b76d93d158bd485023f61b36b",
       "production_trace_ready": false,
       "source_record_sha256": {
         "parameter:axes_offsets": "5c68b6db67e387ff23dded0f6586c26b5d766c8b892bbcf66e98a431df571e8d",
@@ -345,6 +355,7 @@
         "parameter:camera_depth": "573675490d73db6538a73a6d911d7fdc0ec049e05fa68c73b8cf9847d4eac59d",
         "parameter:camera_filter": "853a72fbd929934cd6cd147a52a1d03f9a7a80566b334b1bd3970cbb314f0d12",
         "parameter:camera_pixel_layout": "dd2abf3523da2bda374621c8d145650af3eb74015caa6d18def04dae2d170f6b",
+        "parameter:camera_pixel_types": "23d21c1146a0932cfcdc06795cdb2395da61017b4c23448a573d4630423c4be0",
         "parameter:camera_pixels": "86f7c0ec849515edcc0766c2685c0ece3ab7f5e684dccc25dd188b9004049833",
         "parameter:camera_transmission": "ebeaa60e5934ec4ff297df6991227f7ffcdfbbbd61e89c735b48a44c023ae0a0",
         "parameter:effective_focal_length": "a9ff5ebec8f25c75d4a05657c0427711ab9ef98a80bd2627bc8e5d0fb02d9456",
@@ -364,6 +375,7 @@
         "parameter:mirror_reflection_random_angle": "98d7958b7a598c96a746e5c6180031f17550d1e001ff344ddf9272f9ee541d4f",
         "parameter:mirror_reflectivity": "289d409be0265d45c3d063dc6b571d55e7f3ec53d2188b00ac084f483aa43066",
         "parameter:parabolic_dish": "05fde9ee7ed02008c0b12cce7a4e68704c3613989f95f3b9a68bdf7ccde77b47",
+        "parameter:pixels_parallel": "0a0f511c87239c2fc19660e06e561a8bee728101bf2f1f0e191b179886a9589c",
         "parameter:primary_mirror_degraded_map": "76fe5943774fc840e21730c6f7b4953833ab61cf9a2aae787411e4c42b71995a",
         "parameter:primary_mirror_diameter": "728f91244d3ca3851423b83773356a4394f23af39cf559274001e7690153b1f5",
         "parameter:primary_mirror_hole_diameter": "089468ff07add703bf9ef707abafaf8ad16cd332cc8eab254d311cfd3b78f4fd",
@@ -389,9 +401,11 @@
         "production_manifest": "7dba78029354cda952e9c1494593216914cb0ba355843fa61a2ca6e4383ec445"
       },
       "terminal_counts": {
-        "blocked_obscurer": 312,
-        "detected": 683,
-        "missed_primary": 5
+        "blocked_obscurer": 297,
+        "detected": 599,
+        "missed_primary": 39,
+        "missed_screen": 51,
+        "missed_secondary": 14
       },
       "trace_argv": [
         "build/debug/obdeect-simtools-raytrace",
@@ -406,7 +420,7 @@
       ],
       "trace_blockers": [
         "facet surface normals and alignment are not compiled",
-        "physical detector surfaces and materials remain deferred"
+        "concentrator wall profiles, windows and detector material response remain deferred"
       ]
     }
   ],

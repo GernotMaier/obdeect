@@ -2,11 +2,14 @@
 
 #include "obdeect/intersections.hpp"
 #include "obdeect/math.hpp"
+#include "obdeect/mirror_scatter.hpp"
 #include "obdeect/model_import.hpp"
+#include "obdeect/optical_response.hpp"
 
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <unordered_set>
 #include <utility>
@@ -57,69 +60,14 @@ struct ImportedCylinderObscurer {
   double diameter_m{};
 };
 
-struct SpectralResponse {
-  std::vector<double> wavelength_nm;
-  // Wavelength-major response values; an empty angle axis denotes a 1D table.
-  std::vector<double> response;
-  std::vector<double> incidence_angle_deg{};
-
-  [[nodiscard]] bool is_valid() const {
-    const std::size_t angles = incidence_angle_deg.empty() ? 1 : incidence_angle_deg.size();
-    if (wavelength_nm.size() < 2 || (!incidence_angle_deg.empty() && angles < 2) ||
-        response.size() / angles != wavelength_nm.size() || response.size() % angles != 0)
-      return false;
-    for (std::size_t i = 0; i < wavelength_nm.size(); ++i)
-      if (!std::isfinite(wavelength_nm[i]) || wavelength_nm[i] <= 0 ||
-          (i && wavelength_nm[i] <= wavelength_nm[i - 1]))
-        return false;
-    for (std::size_t i = 0; i < incidence_angle_deg.size(); ++i)
-      if (!std::isfinite(incidence_angle_deg[i]) || incidence_angle_deg[i] < 0 ||
-          incidence_angle_deg[i] > 90 ||
-          (i && incidence_angle_deg[i] <= incidence_angle_deg[i - 1]))
-        return false;
-    return std::all_of(response.begin(), response.end(), [](double value) {
-      return std::isfinite(value) && value >= 0 && value <= 1;
-    });
-  }
-
-  // The caller has validated the immutable table once, before transport.
-  [[nodiscard]] std::optional<double> at_unchecked(double wavelength, double angle_deg = 0) const {
-    if (!std::isfinite(wavelength) || wavelength < wavelength_nm.front() ||
-        wavelength > wavelength_nm.back() || !std::isfinite(angle_deg) || angle_deg < 0 ||
-        angle_deg > 90)
-      return std::nullopt;
-    const auto bracket = [](const std::vector<double> &axis, double value) {
-      const auto upper = std::upper_bound(axis.begin(), axis.end(), value);
-      return std::min(static_cast<std::size_t>(upper - axis.begin()), axis.size() - 1);
-    };
-    const auto w = bracket(wavelength_nm, wavelength);
-    const double wf =
-        (wavelength - wavelength_nm[w - 1]) / (wavelength_nm[w] - wavelength_nm[w - 1]);
-    const std::size_t angles = incidence_angle_deg.empty() ? 1 : incidence_angle_deg.size();
-    const auto spectral = [&](std::size_t a) {
-      return response[(w - 1) * angles + a] * (1 - wf) + response[w * angles + a] * wf;
-    };
-    if (incidence_angle_deg.empty())
-      return spectral(0);
-    if (angle_deg < incidence_angle_deg.front() || angle_deg > incidence_angle_deg.back())
-      return std::nullopt;
-    const auto a = bracket(incidence_angle_deg, angle_deg);
-    const double af = (angle_deg - incidence_angle_deg[a - 1]) /
-                      (incidence_angle_deg[a] - incidence_angle_deg[a - 1]);
-    return spectral(a - 1) * (1 - af) + spectral(a) * af;
-  }
-
-  [[nodiscard]] std::optional<double> at(double wavelength, double angle_deg = 0) const {
-    return is_valid() ? at_unchecked(wavelength, angle_deg) : std::nullopt;
-  }
-};
-
 struct ImportedSegmentedOpticalModel {
   ModelProvenance provenance;
   std::vector<ImportedFacet> primary_facets;
   std::vector<ImportedDetectorSurface> detector_surfaces;
   std::vector<ImportedCylinderObscurer> cylinder_obscurers;
   std::optional<SpectralResponse> primary_reflectivity;
+  std::optional<MirrorScatter> primary_scatter{};
+  std::optional<CameraResponse> camera_response{};
 
   ImportedSegmentedOpticalModel(
       ModelProvenance imported_provenance, std::vector<ImportedFacet> imported_facets,
@@ -132,12 +80,18 @@ struct ImportedSegmentedOpticalModel {
         primary_reflectivity(std::move(imported_reflectivity)) {}
 };
 
+class CompiledDetectorPlanes;
+
 struct CompiledSegmentedOpticalModel {
   ModelProvenance provenance;
   std::vector<ImportedFacet> primary_facets;
   std::vector<ImportedDetectorSurface> detector_surfaces;
   std::vector<ImportedCylinderObscurer> cylinder_obscurers;
   std::optional<SpectralResponse> primary_reflectivity;
+  std::optional<MirrorScatter> primary_scatter{};
+  std::optional<CameraResponse> camera_response{};
+
+  std::shared_ptr<const CompiledDetectorPlanes> detector_planes{};
 
   CompiledSegmentedOpticalModel(
       ModelProvenance compiled_provenance, std::vector<ImportedFacet> compiled_facets,
@@ -214,7 +168,9 @@ struct CompiledSegmentedOpticalModel {
     if (!is_valid(obscurer) || !ids.insert(obscurer.id).second)
       return false;
   }
-  if (optical_model.primary_reflectivity && !optical_model.primary_reflectivity->is_valid())
+  if ((optical_model.primary_reflectivity && !optical_model.primary_reflectivity->is_valid()) ||
+      (optical_model.primary_scatter && !optical_model.primary_scatter->is_valid()) ||
+      (optical_model.camera_response && !optical_model.camera_response->is_valid()))
     return false;
   return true;
 }
@@ -241,11 +197,16 @@ compile_segmented_optical_model(const ImportedSegmentedOpticalModel &input) {
     if (!is_valid(obscurer) || !ids.insert(obscurer.id).second)
       return std::nullopt;
   }
-  if (input.primary_reflectivity && !input.primary_reflectivity->is_valid())
+  if ((input.primary_reflectivity && !input.primary_reflectivity->is_valid()) ||
+      (input.primary_scatter && !input.primary_scatter->is_valid()) ||
+      (input.camera_response && !input.camera_response->is_valid()))
     return std::nullopt;
-  return CompiledSegmentedOpticalModel{input.provenance, input.primary_facets,
-                                       input.detector_surfaces, input.cylinder_obscurers,
-                                       input.primary_reflectivity};
+  auto result =
+      CompiledSegmentedOpticalModel{input.provenance, input.primary_facets, input.detector_surfaces,
+                                    input.cylinder_obscurers, input.primary_reflectivity};
+  result.primary_scatter = input.primary_scatter;
+  result.camera_response = input.camera_response;
+  return result;
 }
 
 // A planar, finite panel hit.  The mirror-list diameter convention is kept

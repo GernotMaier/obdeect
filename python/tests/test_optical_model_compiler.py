@@ -10,10 +10,12 @@ from obdeect.model_import import resolve_model
 from obdeect.optical_model_compiler import (
     OpticalModelCompileError,
     _dual_reflector_surfaces,
+    _secondary_segment_frame,
     build_plot_geometry,
     build_trace_model,
     compile_optical_model,
     derive_nominal_single_reflector,
+    parse_model_segmentation,
     parse_obscuration_cylinders,
     parse_simtel_mirror_list,
     parse_simtel_segmentation,
@@ -166,8 +168,8 @@ class TestOpticalModelCompiler(unittest.TestCase):
         sag = 16 - math.sqrt(16**2 - 2**2)
         centre_z = sag + 1
         self.assertAlmostEqual(facets[0]["nominal_centre_m"][2], centre_z)
-        focal_distance = math.hypot(2, 16 - centre_z)
-        outgoing = [-2 / focal_distance, 0.0, (16 - centre_z) / focal_distance]
+        focal_distance = math.hypot(2, 17 - centre_z)
+        outgoing = [-2 / focal_distance, 0.0, (17 - centre_z) / focal_distance]
         normal_length = math.hypot(outgoing[0], outgoing[2] + 1)
         self.assertAlmostEqual(facets[0]["nominal_normal"][0], outgoing[0] / normal_length)
         self.assertAlmostEqual(facets[0]["nominal_normal"][2], (outgoing[2] + 1) / normal_length)
@@ -179,7 +181,7 @@ class TestOpticalModelCompiler(unittest.TestCase):
             mirror_contents
             or "# x y diameter focal shape z source metadata\n0 100 120 0 1 20 # id=M01\n"
         )
-        (asset.parent / "filter.dat").write_text("300 0.8\n400 0.9\n")
+        (asset.parent / "filter.dat").write_text("wavelength transmission\n300 0.8\n400 0.9\n")
         production = root / "productions/1.0.0/GENERIC.json"
         production.parent.mkdir(parents=True)
         versions = {
@@ -303,6 +305,34 @@ class TestOpticalModelCompiler(unittest.TestCase):
             trace_model["secondary_reflectivity"], optical_model["secondary"]["reflectivity"]
         )
 
+    def test_structured_segments_preserve_units_counts_and_secondary_gap_edge(self):
+        parameter = {
+            "value": [
+                {
+                    "kind": "ring",
+                    "count": 2,
+                    "r_min": {"value": 100, "unit": "cm"},
+                    "r_max": {"value": 2, "unit": "m"},
+                    "dphi": {"value": 40, "unit": "deg"},
+                    "phi0": {"value": -10, "unit": "deg"},
+                    "gap": {"value": 10, "unit": "mm"},
+                }
+            ]
+        }
+        segments = parse_model_segmentation(parameter)
+        self.assertEqual(segments, parse_simtel_segmentation("ring 2 100 200 40 -10 1"))
+        secondary = _secondary_segment_frame(segments)
+        self.assertEqual([item["start_deg"] for item in secondary], [150, 110])
+        self.assertTrue(all(item["gap_at_start"] for item in secondary))
+        hexagon = parse_simtel_segmentation("hex 1 100 20 40 15")
+        reflected = _secondary_segment_frame(hexagon)[0]
+        self.assertEqual(reflected["centre_xy_m"], [-1.0, 0.2])
+        self.assertEqual(reflected["rotation_deg"], 165)
+        for key, value in (("count", True), ("extra", 1), ("kind", "unsupported")):
+            invalid = {"value": [{**parameter["value"][0], key: value}]}
+            with self.subTest(key=key), self.assertRaises(OpticalModelCompileError):
+                parse_model_segmentation(invalid)
+
     def test_incidence_response_preserves_full_grid_and_rejects_missing_knots(self):
         header = "wavelength incidence_angle reflectivity\n"
         body = "500 20 0.6\n300 0 0.8\n500 0 0.9\n300 20 0.7\n"
@@ -325,6 +355,20 @@ class TestOpticalModelCompiler(unittest.TestCase):
         trace = build_trace_model(model)
         self.assertEqual(trace["primary_reflectivity"], response)
         self.assertEqual(trace["secondary_reflectivity"], response)
+        measured = [{**row, "reflectivity_rms": 0.02} for row in response]
+        model["primary"]["reflectivity"] = measured
+        model["secondary"]["reflectivity"] = measured
+        trace = build_trace_model(model)
+        self.assertEqual(trace["primary_reflectivity"], response)
+        self.assertEqual(trace["secondary_reflectivity"], response)
+        self.assertEqual(model["primary"]["reflectivity"][0]["reflectivity_rms"], 0.02)
+        model["camera"] = {"filter_response": response}
+        camera_response = build_trace_model(model)["camera_response"]
+        self.assertEqual(camera_response["camera_filter"], response)
+        self.assertEqual(camera_response["camera_transmission"], 1.0)
+        self.assertNotIn("lightguide_efficiency", camera_response)
+        model["camera"] = {"transmission": 0.9}
+        self.assertEqual(build_trace_model(model)["camera_response"]["camera_transmission"], 0.9)
         for invalid in (
             body.replace("500 20 0.6\n", ""),
             body + "500 20 0.6\n",
@@ -445,7 +489,9 @@ class TestOpticalModelCompiler(unittest.TestCase):
             (root / "model_parameters/Files/filter.dat").write_text("300 0.1\n")
             with self.assertRaisesRegex(OpticalModelCompileError, "IR assets differs"):
                 compile_optical_model(ir, root)
-            (root / "model_parameters/Files/filter.dat").write_text("300 0.8\n400 0.9\n")
+            (root / "model_parameters/Files/filter.dat").write_text(
+                "wavelength transmission\n300 0.8\n400 0.9\n"
+            )
             ir["parameters"]["camera_body_diameter"]["value"] = 999.0
             with self.assertRaisesRegex(OpticalModelCompileError, "IR parameters differs"):
                 compile_optical_model(ir, root)

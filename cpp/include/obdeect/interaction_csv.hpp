@@ -29,8 +29,9 @@ public:
     bytes_written_ = header.size();
   }
 
+  template <std::size_t Capacity>
   void write(const PhotonBatchContext &context, const OpticalPhoton &photon,
-             const PathRecord &path) {
+             const BasicPathRecord<Capacity> &path) {
     double cumulative = 0, previous_throughput = 1;
     for (std::size_t i = 0; i + 1 < path.point_count; ++i) {
       const double segment = norm(path.points_m[i + 1] - path.points_m[i]);
@@ -46,7 +47,8 @@ public:
       const auto kind = path.interaction_kinds[i];
       const char *name = kind == OpticalInteractionKind::mirror     ? "mirror"
                          : kind == OpticalInteractionKind::detector ? "detector"
-                                                                    : "obscurer";
+                         : kind == OpticalInteractionKind::obscurer ? "obscurer"
+                                                                    : "refractive_interface";
       std::ostringstream record;
       record << std::setprecision(17) << "obdeect-interaction-v1,telescope_local," << context.run_id
              << ',' << context.event_id << ',' << context.array_id << ',' << context.telescope_id
@@ -55,8 +57,10 @@ public:
              << ',' << point.z << ',' << normal.x << ',' << normal.y << ',' << normal.z << ','
              << incoming.x << ',' << incoming.y << ',' << incoming.z << ',' << outgoing.x << ','
              << outgoing.y << ',' << outgoing.z << ',' << segment << ',' << cumulative << ','
-             << cumulative << ',' << photon.time_ns + cumulative / kSpeedOfLightMPerNs << ','
-             << photon.wavelength_nm << ',' << photon.weight * previous_throughput << ','
+             << (path.material_transport ? path.interaction_optical_path_m[i] : cumulative) << ','
+             << photon.time_ns + (path.material_transport ? path.interaction_group_delay_ns[i]
+                                                          : cumulative / kSpeedOfLightMPerNs)
+             << ',' << photon.wavelength_nm << ',' << photon.weight * previous_throughput << ','
              << (kind == OpticalInteractionKind::obscurer
                      ? 0
                      : photon.weight * path.interaction_throughput[i])

@@ -27,8 +27,12 @@ struct Table1DView {
   }
 
   [[nodiscard]] std::optional<double> interpolate(double coordinate) const {
-    if (!is_valid() || !std::isfinite(coordinate) || coordinate < axis.front() ||
-        coordinate > axis.back()) {
+    return is_valid() ? interpolate_unchecked(coordinate) : std::nullopt;
+  }
+
+  // Immutable table validity is established at the model compilation boundary.
+  [[nodiscard]] std::optional<double> interpolate_unchecked(double coordinate) const {
+    if (!std::isfinite(coordinate) || coordinate < axis.front() || coordinate > axis.back()) {
       return std::nullopt;
     }
     const auto upper = std::upper_bound(axis.begin(), axis.end(), coordinate);

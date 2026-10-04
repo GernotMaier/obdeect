@@ -1,5 +1,6 @@
 #pragma once
 
+#include "obdeect/detector_planes.hpp"
 #include "obdeect/interactions.hpp"
 #include "obdeect/photon_buffer.hpp"
 #include "obdeect/segmented_optical_model.hpp"
@@ -77,7 +78,11 @@ trace_segmented_path(const Ray &input, std::uint64_t photon_id, double wavelengt
           std::acos(
               std::clamp(std::abs(obdeect::dot(*direction, primary_hit->unit_normal)), 0.0, 1.0)) *
           180.0 / std::numbers::pi;
-      const auto reflected = obdeect::reflect_specular(*direction, primary_hit->unit_normal);
+      const auto reflected = optical_model.primary_scatter
+                                 ? reflect_with_scatter(*direction, primary_hit->unit_normal,
+                                                        {1, 0, 0}, *optical_model.primary_scatter,
+                                                        photon_id, primary_hit->facet_id)
+                                 : obdeect::reflect_specular(*direction, primary_hit->unit_normal);
       if (!reflected) {
         path.status = obdeect::PhotonStatus::invalid_input;
       } else {
@@ -93,8 +98,11 @@ trace_segmented_path(const Ray &input, std::uint64_t photon_id, double wavelengt
         }
         path.surviving_throughput = *response;
         path.interaction_throughput[0] = *response;
-        const auto detector_hit = obdeect::intersect_detector_surfaces_unchecked(
-            obdeect::Ray{primary_hit->point_m, *reflected}, optical_model);
+        const obdeect::Ray detector_ray{primary_hit->point_m, *reflected};
+        const auto detector_hit =
+            optical_model.detector_planes
+                ? optical_model.detector_planes->intersect(detector_ray)
+                : obdeect::intersect_detector_surfaces_unchecked(detector_ray, optical_model);
         const obdeect::Ray reflected_ray{primary_hit->point_m, *reflected};
         const auto outgoing_obscurer =
             obdeect::intersect_cylinder_obscurers_unchecked(reflected_ray, optical_model);
@@ -134,6 +142,15 @@ trace_segmented_path(const Ray &input, std::uint64_t photon_id, double wavelengt
                                    0.0, 1.0)) *
               180.0 / std::numbers::pi;
           path.status = obdeect::PhotonStatus::detected;
+          if (optical_model.camera_response) {
+            const auto response = optical_model.camera_response->at_unchecked(
+                wavelength_nm, path.incidence_focal_deg);
+            if (!response)
+              path.status = PhotonStatus::invalid_input;
+            else
+              path.surviving_throughput *= *response;
+            path.interaction_throughput[1] = path.surviving_throughput;
+          }
         }
       }
     }

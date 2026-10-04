@@ -1,3 +1,4 @@
+import csv
 from pathlib import Path
 
 import pytest
@@ -160,3 +161,32 @@ def test_optical_loss_ledger_retains_response_loss_before_geometric_loss(tmp_pat
     assert arrival.response_loss_fraction * arrival.source_weight == 0.4
     assert arrival.terminal_loss_fraction * arrival.source_weight == 1.6
     assert arrival.interaction_surface_ids == (3,)
+
+
+def test_bounded_material_paths_retain_phase_and_group_observables(tmp_path):
+    path = tmp_path / "material.csv"
+    row = dict(
+        contract_version="obdeect-arrival-v1",
+        photon_id=1,
+        source_kind="replay",
+        wavelength_nm=400,
+        emission_time_ns=0,
+        source_weight=1,
+        throughput=1,
+        status="detected",
+        point_count=65,
+        path_length_m=64,
+        optical_path_m=70,
+        arrival_time_ns=300,
+    )
+    for index in range(65):
+        row.update({f"x{index}_m": 0, f"y{index}_m": 0, f"z{index}_m": index})
+    with path.open("w", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=row)
+        writer.writeheader()
+        writer.writerow(row)
+    arrival = read_arrivals(path)[0]
+    assert len(arrival.interaction_points_m) == 65
+    assert arrival.optical_path_m == 70
+    assert arrival.arrival_time_ns == 300
+    assert arrival.path_length_m == 64

@@ -87,6 +87,49 @@ class DiagnosticTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     plot.load_plot_optical_model(self.model)
 
+    def test_dual_camera_draws_actual_compiled_entrances(self):
+        from obdeect.optical_model_compiler import build_plot_geometry
+
+        surface = {
+            "vertex_z_m": 0,
+            "inner_radius_m": 0,
+            "outer_radius_m": 100,
+            "radial_scale_m": 1,
+            "coefficient_m": [0] * 13,
+        }
+        plane = {
+            "id": 10,
+            "source_pixel_id": 42,
+            "shape": "square",
+            "centre_m": [1, 2, 3],
+            "normal": [0, 0, 1],
+            "tangent": [0, 1, 0],
+            "diameter_m": 0.4,
+        }
+        fixture = model_fixture()
+        trace = {
+            "kind": "axisymmetric",
+            "primary": surface,
+            "secondary": surface,
+            "detector": surface,
+            "detector_surfaces": [plane],
+        }
+        fixture["trace_model"] = trace
+        fixture["camera"] = {"entrance_surfaces": [plane]}
+        fixture["plot_geometry"] = build_plot_geometry(trace, {"trace_blockers": []})
+        self.model.write_text(json.dumps(fixture))
+        compiled = plot.load_plot_optical_model(self.model)
+        self.assertEqual(
+            [surface.role for surface in compiled.axisymmetric_surfaces], ["primary", "secondary"]
+        )
+        self.assertEqual(compiled.polygons[0].identifier, 10)
+        self.assertEqual(compiled.camera_pixels[0].identifier, 42)
+        self.assertEqual(
+            compiled.camera_pixels[0].vertices_xy_m,
+            tuple((p[0], p[1]) for p in compiled.polygons[0].vertices_m),
+        )
+        self.assertLess(plot.compiled_focal_plane_extent(self.model), 3)
+
     def test_surface_ids_reject_fractional_boolean_and_reserved_values(self):
         for identifier in (4.5, True, -1, 4294967295):
             with self.subTest(identifier=identifier):
@@ -196,6 +239,16 @@ class DiagnosticTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "missing columns"):
             analyse_trace_csv(self.csv)
+
+    def test_bounded_material_diagnostics_keep_all_recorded_vertices(self):
+        row = {"point_count": "65"}
+        row.update({f"{axis}{index}_m": str(index) for index in range(65) for axis in "xyz"})
+        points = plot._parse_path_row(self.csv, row)
+        self.assertEqual(len(points), 65)
+        self.assertEqual(points[-1], (64.0, 64.0, 64.0))
+        row["point_count"] = "66"
+        with self.assertRaisesRegex(ValueError, "between 1 and 65"):
+            plot._parse_path_row(self.csv, row)
 
     def test_native_readers_use_validated_arrivals_and_keep_extra_metadata(self):
         self.csv.write_text(

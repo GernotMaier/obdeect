@@ -1,0 +1,238 @@
+{
+  "build_record": {
+    "commands": [
+      [
+        "cc",
+        "-O2",
+        "-Dlint",
+        "-DHESS_DEFAULTS",
+        "-DHAVE_EVENTIO_FUNCTIONS",
+        "-DNO_CFORTRAN",
+        "-DDEBUG_TRACE_99",
+        "-I.",
+        "-Icommon",
+        "-Ihess",
+        "-I/private/tmp/simtel-modularization.vqSTXi/hessio/include",
+        "-Icorsika",
+        "-c",
+        "/Users/maierg/DESYCloud/CTA/Pipelines/MC-Pipeline/gammasim-tools/ray_tracing/obdeect/build/simtel-reference/simtel_replay_main.c",
+        "-o",
+        "/Users/maierg/DESYCloud/CTA/Pipelines/MC-Pipeline/gammasim-tools/ray_tracing/obdeect/build/simtel-reference/main.o"
+      ],
+      [
+        "cc",
+        "-O2",
+        "-Dlint",
+        "-DHESS_DEFAULTS",
+        "-DHAVE_EVENTIO_FUNCTIONS",
+        "-DNO_CFORTRAN",
+        "-DDEBUG_TRACE_99",
+        "-I.",
+        "-Icommon",
+        "-Ihess",
+        "-I/private/tmp/simtel-modularization.vqSTXi/hessio/include",
+        "-Icorsika",
+        "-c",
+        "/Users/maierg/DESYCloud/CTA/Pipelines/MC-Pipeline/gammasim-tools/ray_tracing/obdeect/build/simtel-reference/simtel_replay_imaging.c",
+        "-o",
+        "/Users/maierg/DESYCloud/CTA/Pipelines/MC-Pipeline/gammasim-tools/ray_tracing/obdeect/build/simtel-reference/imaging.o"
+      ],
+      [
+        "c++",
+        "-std=c++20",
+        "-O2",
+        "-I/Users/maierg/DESYCloud/CTA/Pipelines/MC-Pipeline/gammasim-tools/ray_tracing/obdeect/cpp/include",
+        "-c",
+        "/Users/maierg/DESYCloud/CTA/Pipelines/MC-Pipeline/gammasim-tools/ray_tracing/obdeect/tools/simtel_replay.cpp",
+        "-o",
+        "/Users/maierg/DESYCloud/CTA/Pipelines/MC-Pipeline/gammasim-tools/ray_tracing/obdeect/build/simtel-reference/driver.o"
+      ],
+      [
+        "c++",
+        "/Users/maierg/DESYCloud/CTA/Pipelines/MC-Pipeline/gammasim-tools/ray_tracing/obdeect/build/simtel-reference/main.o",
+        "/Users/maierg/DESYCloud/CTA/Pipelines/MC-Pipeline/gammasim-tools/ray_tracing/obdeect/build/simtel-reference/imaging.o",
+        "/Users/maierg/DESYCloud/CTA/Pipelines/MC-Pipeline/gammasim-tools/ray_tracing/obdeect/build/simtel-reference/driver.o",
+        "/Users/maierg/DESYCloud/CTA/Pipelines/MC-Pipeline/gammasim-tools/ray_tracing/sim_telarray/common/sim_config.o",
+        "/Users/maierg/DESYCloud/CTA/Pipelines/MC-Pipeline/gammasim-tools/ray_tracing/sim_telarray/common/sim_optical_backend.o",
+        "/Users/maierg/DESYCloud/CTA/Pipelines/MC-Pipeline/gammasim-tools/ray_tracing/sim_telarray/common/sim_absorb.o",
+        "/Users/maierg/DESYCloud/CTA/Pipelines/MC-Pipeline/gammasim-tools/ray_tracing/sim_telarray/common/sim_histograms.o",
+        "/Users/maierg/DESYCloud/CTA/Pipelines/MC-Pipeline/gammasim-tools/ray_tracing/sim_telarray/common/sim_signal.o",
+        "/Users/maierg/DESYCloud/CTA/Pipelines/MC-Pipeline/gammasim-tools/ray_tracing/sim_telarray/common/rndm2.o",
+        "/Users/maierg/DESYCloud/CTA/Pipelines/MC-Pipeline/gammasim-tools/ray_tracing/sim_telarray/common/rndm_table.o",
+        "/Users/maierg/DESYCloud/CTA/Pipelines/MC-Pipeline/gammasim-tools/ray_tracing/sim_telarray/common/rpolator.o",
+        "/Users/maierg/DESYCloud/CTA/Pipelines/MC-Pipeline/gammasim-tools/ray_tracing/sim_telarray/corsika/atmo.o",
+        "/Users/maierg/DESYCloud/CTA/Pipelines/MC-Pipeline/gammasim-tools/ray_tracing/sim_telarray/hess/sim_conv2hess.o",
+        "-L/private/tmp/simtel-modularization.vqSTXi/hessio/lib",
+        "-lhessio",
+        "-lm",
+        "-o",
+        "/Users/maierg/DESYCloud/CTA/Pipelines/MC-Pipeline/gammasim-tools/ray_tracing/obdeect/build/simtel-reference/simtel-replay"
+      ]
+    ],
+    "cwd": "/Users/maierg/DESYCloud/CTA/Pipelines/MC-Pipeline/gammasim-tools/ray_tracing/sim_telarray",
+    "executable_sha256": "00e27cb1bc4db7f1795b8e63f3b8d1e1fef74ca782b0150744a4bee5674982e3",
+    "input_sha256": {
+      "/Users/maierg/DESYCloud/CTA/Pipelines/MC-Pipeline/gammasim-tools/ray_tracing/obdeect/tools/simtel_replay.cpp": "1191d639f4d930bc5db68fc572c499c7e088647b2d520fe82755f1fcd6fff05d",
+      "/Users/maierg/DESYCloud/CTA/Pipelines/MC-Pipeline/gammasim-tools/ray_tracing/sim_telarray/common/rndm2.o": "7ac079305b3fd8c311cb8ecf1bc7c9fe19ce208547c4051a02e40f0bbf955329",
+      "/Users/maierg/DESYCloud/CTA/Pipelines/MC-Pipeline/gammasim-tools/ray_tracing/sim_telarray/common/rndm_table.o": "5db90882ab700a3cc54db9c41246859a46cc875853f97a910ff5bf6b565b06dd",
+      "/Users/maierg/DESYCloud/CTA/Pipelines/MC-Pipeline/gammasim-tools/ray_tracing/sim_telarray/common/rpolator.o": "a8d633cd515c61ec508c8a5b5ece0c389c83051a015be52685ac54746786523f",
+      "/Users/maierg/DESYCloud/CTA/Pipelines/MC-Pipeline/gammasim-tools/ray_tracing/sim_telarray/common/sim_absorb.o": "484d5365441525e1fcdb7069590e83800f272778d08deb11a4de242c16816d2e",
+      "/Users/maierg/DESYCloud/CTA/Pipelines/MC-Pipeline/gammasim-tools/ray_tracing/sim_telarray/common/sim_config.o": "dc0a0f76dbea5d689933da7604a5314ba78921c24231540d9df0689890bae8fb",
+      "/Users/maierg/DESYCloud/CTA/Pipelines/MC-Pipeline/gammasim-tools/ray_tracing/sim_telarray/common/sim_histograms.o": "b77d70e0ed6dbaccfceee1234096ddb732471654b87d62bc1058506af0eb0926",
+      "/Users/maierg/DESYCloud/CTA/Pipelines/MC-Pipeline/gammasim-tools/ray_tracing/sim_telarray/common/sim_imaging.c": "c7ca5c0dd0963f32c938f6049f510f489269e0ffa769cd6e9f3a39cd50c1024f",
+      "/Users/maierg/DESYCloud/CTA/Pipelines/MC-Pipeline/gammasim-tools/ray_tracing/sim_telarray/common/sim_optical_backend.o": "14524136fc9cd41769b3e976446b3831b41a93833d144d9fa9455664d7b6d4aa",
+      "/Users/maierg/DESYCloud/CTA/Pipelines/MC-Pipeline/gammasim-tools/ray_tracing/sim_telarray/common/sim_signal.o": "872a66ef5d367f0efbcee047a406fe9ffbf318342ddf1a4ecfeb048d68f6ca20",
+      "/Users/maierg/DESYCloud/CTA/Pipelines/MC-Pipeline/gammasim-tools/ray_tracing/sim_telarray/common/sim_telarray.c": "f4ff3a271427037072a5f109ebcb807258bb3f8c4de408e3e42b89fd3c25bb0c",
+      "/Users/maierg/DESYCloud/CTA/Pipelines/MC-Pipeline/gammasim-tools/ray_tracing/sim_telarray/corsika/atmo.o": "10a914e7e2f77741a39ed4a4a80372b4573c87359349e83f791c6f45de8bdc4b",
+      "/Users/maierg/DESYCloud/CTA/Pipelines/MC-Pipeline/gammasim-tools/ray_tracing/sim_telarray/hess/sim_conv2hess.o": "eb561a68267a0f50a8f77c963639b625734b45fd93b741774eb7fc789587b1b5",
+      "/private/tmp/simtel-modularization.vqSTXi/hessio/lib/libhessio.dylib": "19af078a118fd61fa2691234904117ce6c574d3e7001b556b9de977b8e08620c"
+    },
+    "production_normalized": false,
+    "schema_version": 1
+  },
+  "cwd": "/Users/maierg/DESYCloud/CTA/Pipelines/MC-Pipeline/gammasim-tools/ray_tracing/sim_telarray",
+  "input_rows": 1000,
+  "preprocessor_sha256": "0035cc3372b2aa653c1d539fa3a54e64b3ad81c3d5c40bad38e99908cf5a14e2",
+  "purpose": "Actual shared-photon sim_telarray diagnostic replay; not CTAO production qualification or a normalized optical equivalence result",
+  "runs": [
+    {
+      "argv": [
+        "/Users/maierg/DESYCloud/CTA/Pipelines/MC-Pipeline/gammasim-tools/ray_tracing/obdeect/build/simtel-reference/simtel-replay",
+        "--quiet",
+        "-c",
+        "/Users/maierg/DESYCloud/CTA/Pipelines/MC-Pipeline/gammasim-tools/ray_tracing/sim_telarray/TestCases/optical_legacy.cfg",
+        "/dev/null"
+      ],
+      "byte_identical": true,
+      "counts": {
+        "hit_camera": 771,
+        "lost_unclassified": 229
+      },
+      "environment": {
+        "OBDEECT_REPLAY_INPUT": "/Users/maierg/DESYCloud/CTA/Pipelines/MC-Pipeline/gammasim-tools/ray_tracing/obdeect/build/simtel-reference/common-photons.csv",
+        "OBDEECT_REPLAY_OUTPUT": "/Users/maierg/DESYCloud/CTA/Pipelines/MC-Pipeline/gammasim-tools/ray_tracing/obdeect/build/simtel-reference/segmented-1.csv",
+        "OBDEECT_REPLAY_TELESCOPE_INDEX": "0",
+        "SIMTEL_CONFIG_PREPROCESSOR": "/Users/maierg/DESYCloud/CTA/Pipelines/MC-Pipeline/gammasim-tools/ray_tracing/sim_telarray/bin/pfp -v -I."
+      },
+      "mirror_class": "segmented",
+      "output_sha256": "a8438eed24b4cc6dae94a1951fa2a510437670cd25dc86c03e52f6762dcdec69",
+      "repetitions": 2
+    },
+    {
+      "argv": [
+        "/Users/maierg/DESYCloud/CTA/Pipelines/MC-Pipeline/gammasim-tools/ray_tracing/obdeect/build/simtel-reference/simtel-replay",
+        "--quiet",
+        "-c",
+        "/Users/maierg/DESYCloud/CTA/Pipelines/MC-Pipeline/gammasim-tools/ray_tracing/sim_telarray/TestCases/optical_legacy.cfg",
+        "-C",
+        "MIRROR_CLASS=1",
+        "-C",
+        "MIRROR_LIST=none",
+        "-C",
+        "PRIMARY_DIAMETER=1200",
+        "/dev/null"
+      ],
+      "byte_identical": true,
+      "counts": {
+        "hit_camera": 941,
+        "lost_unclassified": 59
+      },
+      "environment": {
+        "OBDEECT_REPLAY_INPUT": "/Users/maierg/DESYCloud/CTA/Pipelines/MC-Pipeline/gammasim-tools/ray_tracing/obdeect/build/simtel-reference/common-photons.csv",
+        "OBDEECT_REPLAY_OUTPUT": "/Users/maierg/DESYCloud/CTA/Pipelines/MC-Pipeline/gammasim-tools/ray_tracing/obdeect/build/simtel-reference/paraboloid-1.csv",
+        "OBDEECT_REPLAY_TELESCOPE_INDEX": "0",
+        "SIMTEL_CONFIG_PREPROCESSOR": "/Users/maierg/DESYCloud/CTA/Pipelines/MC-Pipeline/gammasim-tools/ray_tracing/sim_telarray/bin/pfp -v -I."
+      },
+      "mirror_class": "paraboloid",
+      "output_sha256": "c9d47392997691fceb61ac183a1c64e45ea978b13763cbc30f222114a4dc4bda",
+      "repetitions": 2
+    },
+    {
+      "argv": [
+        "/Users/maierg/DESYCloud/CTA/Pipelines/MC-Pipeline/gammasim-tools/ray_tracing/obdeect/build/simtel-reference/simtel-replay",
+        "--quiet",
+        "-c",
+        "/Users/maierg/DESYCloud/CTA/Pipelines/MC-Pipeline/gammasim-tools/ray_tracing/sim_telarray/TestCases/optical_legacy.cfg",
+        "-C",
+        "MIRROR_CLASS=3",
+        "-C",
+        "MIRROR_LIST=none",
+        "-C",
+        "PRIMARY_DIAMETER=1200",
+        "/dev/null"
+      ],
+      "byte_identical": true,
+      "counts": {
+        "hit_camera": 800,
+        "lost_unclassified": 200
+      },
+      "environment": {
+        "OBDEECT_REPLAY_INPUT": "/Users/maierg/DESYCloud/CTA/Pipelines/MC-Pipeline/gammasim-tools/ray_tracing/obdeect/build/simtel-reference/common-photons.csv",
+        "OBDEECT_REPLAY_OUTPUT": "/Users/maierg/DESYCloud/CTA/Pipelines/MC-Pipeline/gammasim-tools/ray_tracing/obdeect/build/simtel-reference/fresnel-1.csv",
+        "OBDEECT_REPLAY_TELESCOPE_INDEX": "0",
+        "SIMTEL_CONFIG_PREPROCESSOR": "/Users/maierg/DESYCloud/CTA/Pipelines/MC-Pipeline/gammasim-tools/ray_tracing/sim_telarray/bin/pfp -v -I."
+      },
+      "mirror_class": "fresnel",
+      "output_sha256": "4657d812c2fcf942be92ee402de026f5643a11afc22efd5a00fbb4de96b496b5",
+      "repetitions": 2
+    },
+    {
+      "argv": [
+        "/Users/maierg/DESYCloud/CTA/Pipelines/MC-Pipeline/gammasim-tools/ray_tracing/obdeect/build/simtel-reference/simtel-replay",
+        "--quiet",
+        "-c",
+        "/Users/maierg/DESYCloud/CTA/Pipelines/MC-Pipeline/gammasim-tools/ray_tracing/sim_telarray/TestCases/optical_legacy.cfg",
+        "-DOPTICAL_SECONDARY=1",
+        "/dev/null"
+      ],
+      "byte_identical": true,
+      "counts": {
+        "hit_camera": 82,
+        "lost_unclassified": 918
+      },
+      "environment": {
+        "OBDEECT_REPLAY_INPUT": "/Users/maierg/DESYCloud/CTA/Pipelines/MC-Pipeline/gammasim-tools/ray_tracing/obdeect/build/simtel-reference/common-photons.csv",
+        "OBDEECT_REPLAY_OUTPUT": "/Users/maierg/DESYCloud/CTA/Pipelines/MC-Pipeline/gammasim-tools/ray_tracing/obdeect/build/simtel-reference/secondary-1.csv",
+        "OBDEECT_REPLAY_TELESCOPE_INDEX": "0",
+        "SIMTEL_CONFIG_PREPROCESSOR": "/Users/maierg/DESYCloud/CTA/Pipelines/MC-Pipeline/gammasim-tools/ray_tracing/sim_telarray/bin/pfp -v -I."
+      },
+      "mirror_class": "secondary",
+      "output_sha256": "60c49cfb2a13f0732c2ef1ee9a58b20fc7285c0f5fd96088d4518c938e79f412",
+      "repetitions": 2
+    }
+  ],
+  "source_generator": {
+    "direction": [
+      0,
+      0,
+      -1
+    ],
+    "identity": {
+      "array": 0,
+      "bunch": 10,
+      "event": 2,
+      "photon_range": [
+        0,
+        999
+      ],
+      "run": 1,
+      "telescope": 7
+    },
+    "position_m": {
+      "x_uniform": [
+        -5,
+        5
+      ],
+      "y_uniform": [
+        -5,
+        5
+      ],
+      "z": 20
+    },
+    "seed": 21,
+    "time_ns": 8,
+    "wavelength_nm": 400,
+    "weight": 1
+  },
+  "source_sha256": "e6aff25814cfc282c5640d8ce343d2e046f04595e04e5149fdb3c603cae61bfb"
+}

@@ -1,3 +1,4 @@
+#include "obdeect/material_path.hpp"
 #include "obdeect/optical_model_file.hpp"
 #include "obdeect/segmented_path.hpp"
 #include "obdeect/sources.hpp"
@@ -17,14 +18,14 @@ using Ids = nb::ndarray<nb::numpy, const std::uint64_t, nb::ndim<1>, nb::c_conti
 
 namespace {
 struct Output {
-  std::vector<double> position, direction, path, time, weight, throughput, response_loss,
-      terminal_loss;
+  std::vector<double> position, direction, path, optical_path, time, weight, throughput,
+      response_loss, terminal_loss;
   std::vector<std::uint64_t> ids;
   std::vector<std::uint32_t> surfaces;
   std::vector<std::uint8_t> status;
   explicit Output(std::size_t n)
-      : position(3 * n), direction(3 * n), path(n), time(n), weight(n), throughput(n),
-        response_loss(n), terminal_loss(n), ids(n), surfaces(n), status(n) {}
+      : position(3 * n), direction(3 * n), path(n), optical_path(n), time(n), weight(n),
+        throughput(n), response_loss(n), terminal_loss(n), ids(n), surfaces(n), status(n) {}
 };
 
 template <class T>
@@ -42,12 +43,16 @@ public:
     if (!segmented_)
       axisymmetric_ = obdeect::read_axisymmetric_optical_model(path);
     if (!segmented_ && !axisymmetric_)
+      if (auto model = obdeect::read_nonsequential_optical_model(path))
+        nonsequential_.emplace(std::move(*model));
+    if (!segmented_ && !axisymmetric_ && !nonsequential_)
       throw nb::value_error("Cannot load optical model: invalid schema, content hash or geometry");
   }
 
   std::string hash() const {
-    return segmented_ ? segmented_->provenance.content_hash
-                      : axisymmetric_->provenance.content_hash;
+    return segmented_      ? segmented_->provenance.content_hash
+           : axisymmetric_ ? axisymmetric_->provenance.content_hash
+                           : nonsequential_->provenance().content_hash;
   }
 
   nb::dict trace(Coordinates positions, Coordinates directions, Scalars wavelengths, Scalars times,
@@ -78,29 +83,41 @@ public:
       for (std::size_t i = 0; i < count; ++i) {
         const obdeect::Ray ray{{positions(i, 0), positions(i, 1), positions(i, 2)},
                                {directions(i, 0), directions(i, 1), directions(i, 2)}};
-        const auto result =
-            segmented_ ? obdeect::trace_segmented_path(ray, ids(i), wavelengths(i), *segmented_)
-                       : obdeect::trace_axisymmetric_optical_model(ray, ids(i), *axisymmetric_,
-                                                                   wavelengths(i));
-        const auto point = result.points_m[result.point_count - 1];
-        output->position[3 * i] = point.x;
-        output->position[3 * i + 1] = point.y;
-        output->position[3 * i + 2] = point.z;
-        output->direction[3 * i] = result.final_direction.x;
-        output->direction[3 * i + 1] = result.final_direction.y;
-        output->direction[3 * i + 2] = result.final_direction.z;
-        output->path[i] = result.path_length_m;
-        output->time[i] = times(i) + result.path_length_m / obdeect::kSpeedOfLightMPerNs;
-        output->throughput[i] =
-            result.status == obdeect::PhotonStatus::detected ? result.surviving_throughput : 0;
-        output->weight[i] = weights(i) * output->throughput[i];
-        output->response_loss[i] = weights(i) * (1 - result.surviving_throughput);
-        output->terminal_loss[i] = result.status == obdeect::PhotonStatus::detected
-                                       ? 0
-                                       : weights(i) * result.surviving_throughput;
-        output->ids[i] = ids(i);
-        output->surfaces[i] = result.terminal_surface_id;
-        output->status[i] = static_cast<std::uint8_t>(result.status);
+        const auto store_result = [&](const auto &result) {
+          const auto point = result.points_m[result.point_count - 1];
+          output->position[3 * i] = point.x;
+          output->position[3 * i + 1] = point.y;
+          output->position[3 * i + 2] = point.z;
+          output->direction[3 * i] = result.final_direction.x;
+          output->direction[3 * i + 1] = result.final_direction.y;
+          output->direction[3 * i + 2] = result.final_direction.z;
+          output->path[i] = result.path_length_m;
+          output->optical_path[i] =
+              result.material_transport ? result.optical_path_m : result.path_length_m;
+          output->time[i] = times(i) + (result.material_transport
+                                            ? result.group_delay_ns
+                                            : result.path_length_m / obdeect::kSpeedOfLightMPerNs);
+          output->throughput[i] =
+              result.status == obdeect::PhotonStatus::detected ? result.surviving_throughput : 0;
+          output->weight[i] = weights(i) * output->throughput[i];
+          output->response_loss[i] = weights(i) * (1 - result.surviving_throughput);
+          output->terminal_loss[i] = result.status == obdeect::PhotonStatus::detected
+                                         ? 0
+                                         : weights(i) * result.surviving_throughput;
+          output->ids[i] = ids(i);
+          output->surfaces[i] = result.terminal_surface_id;
+          output->status[i] = static_cast<std::uint8_t>(result.status);
+        };
+        if (nonsequential_)
+          store_result(
+              obdeect::trace_material_path<false>(ray, ids(i), wavelengths(i), *nonsequential_));
+        else {
+          const auto result =
+              segmented_ ? obdeect::trace_segmented_path(ray, ids(i), wavelengths(i), *segmented_)
+                         : obdeect::trace_axisymmetric_optical_model(ray, ids(i), *axisymmetric_,
+                                                                     wavelengths(i));
+          store_result(result);
+        }
       }
     }
     Output *storage = output.get();
@@ -111,6 +128,7 @@ public:
     result["position_m"] = array(storage->position, owner, count, true);
     result["direction"] = array(storage->direction, owner, count, true);
     result["path_length_m"] = array(storage->path, owner, count);
+    result["optical_path_m"] = array(storage->optical_path, owner, count);
     result["arrival_time_ns"] = array(storage->time, owner, count);
     result["optical_weight"] = array(storage->weight, owner, count);
     result["throughput"] = array(storage->throughput, owner, count);
@@ -125,6 +143,7 @@ public:
 private:
   std::optional<obdeect::CompiledSegmentedOpticalModel> segmented_;
   std::optional<obdeect::AxisymmetricOpticalModel> axisymmetric_;
+  std::optional<obdeect::CompiledOpticalModel> nonsequential_;
 };
 } // namespace
 

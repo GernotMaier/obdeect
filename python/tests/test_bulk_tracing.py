@@ -2,6 +2,7 @@
 
 import csv
 import gc
+import hashlib
 import importlib
 import json
 import runpy
@@ -124,6 +125,110 @@ def test_empty_bulk_batch(model_path):
     result = core.OpticalModel(str(model_path)).trace(*photons(0))
     assert result["position_m"].shape == (0, 3)
     assert all(len(value) == 0 for value in result.values())
+
+
+def test_bulk_material_window_and_strict_fields(tmp_path):
+    """Synthetic analytic window: phase/group timing and native loader parity."""
+
+    def surface(identifier, z, role, **extra):
+        return {
+            "id": identifier,
+            "shape": "circle",
+            "diameter_m": 4,
+            "role": role,
+            "frame": {
+                "origin_m": [0, 0, z],
+                "x_axis": [1, 0, 0],
+                "y_axis": [0, 1, 0],
+                "z_axis": [0, 0, 1],
+            },
+            **extra,
+        }
+
+    def curve(value):
+        return [{"wavelength_nm": wavelength, "value": value} for wavelength in (300, 500)]
+
+    model = {
+        "format": "obdeect.compiled-optical-model.v1",
+        "provenance": {"model": "synthetic-window", "model_version": "1"},
+        "trace_model": {
+            "kind": "nonsequential",
+            "max_interactions": 8,
+            "entrance_medium_id": 4294967295,
+            "materials": [
+                {
+                    "id": 1,
+                    "phase_index": curve(1.5),
+                    "group_index": curve(1.8),
+                    "absorption_per_m": curve(0.2),
+                }
+            ],
+            "surfaces": [
+                surface(1, 2, "refractive_interface", front_medium_id=4294967295, back_medium_id=1),
+                surface(2, 1, "refractive_interface", front_medium_id=1, back_medium_id=4294967295),
+                surface(3, 0, "detector"),
+            ],
+        },
+    }
+    path = tmp_path / "window.json"
+
+    def write():
+        data = {key: value for key, value in model.items() if key != "optical_model_sha256"}
+        model["optical_model_sha256"] = hashlib.sha256(
+            json.dumps(data, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+        path.write_text(json.dumps(model, sort_keys=True))
+
+    write()
+    arrays = list(photons(1))
+    arrays[0][0] = [0, 0, 3]
+    arrays[3][0] = 5
+    result = core.OpticalModel(str(path)).trace(*arrays)
+    assert core.STATUS_NAMES[result["status"][0]] == "detected"
+    assert result["path_length_m"][0] == 3
+    assert result["optical_path_m"][0] == 3.5
+    assert result["arrival_time_ns"][0] == pytest.approx(5 + 3.8 / 0.299792458)
+    assert result["throughput"][0] == pytest.approx(0.96**2 * np.exp(-0.2))
+    model["trace_model"]["surfaces"][0]["unimplemented_coating"] = 0.8
+    write()
+    with pytest.raises(ValueError, match="invalid schema"):
+        core.OpticalModel(str(path))
+
+
+def test_bulk_measured_camera_response_and_keyed_scatter(model_path):
+    data = json.loads(model_path.read_text())
+    data.pop("optical_model_sha256")
+    trace = data["trace_model"]
+    trace["camera_response"] = {
+        "semantics": "measured_complete_response",
+        "camera_transmission": 0.5,
+        "camera_filter": [{"wavelength_nm": w, "response": 0.8} for w in (300, 500)],
+        "lightguide_efficiency": [{"incidence_angle_deg": a, "response": 0.9} for a in (0, 90)],
+    }
+    trace["primary_scatter"] = {
+        "sigma1_rad": 0.001,
+        "sigma2_rad": 0.002,
+        "fraction2": 0.2,
+        "method": "outgoing_angles",
+        "seed": 123,
+    }
+    data["optical_model_sha256"] = hashlib.sha256(
+        json.dumps(data, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    model_path.write_text(json.dumps(data, sort_keys=True))
+    tracer = core.OpticalModel(str(model_path))
+    arrays = photons()
+    result = tracer.trace(*arrays)
+    np.testing.assert_allclose(result["throughput"], 0.8 * 0.5 * 0.8 * 0.9)
+    reversed_result = tracer.trace(*(np.ascontiguousarray(array[::-1]) for array in arrays))
+    for key, values in result.items():
+        np.testing.assert_array_equal(values, reversed_result[key][::-1])
+    pieces = [
+        tracer.trace(*(array[start : start + 3] for array in arrays))
+        for start in range(0, len(arrays[0]), 3)
+    ]
+    for key, values in result.items():
+        np.testing.assert_array_equal(values, np.concatenate([piece[key] for piece in pieces]))
 
 
 def test_bulk_matches_installed_native_photon_replay(model_path, tmp_path):

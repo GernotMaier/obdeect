@@ -30,8 +30,8 @@ def _parse_path_row(path: Path, row: dict[str, str]) -> list[tuple[float, float,
     points = []
     try:
         count = int(row["point_count"])
-        if not 1 <= count <= 4:
-            raise ValueError("point_count must be between 1 and 4")
+        if not 1 <= count <= 65:
+            raise ValueError("point_count must be between 1 and 65")
         for index in range(count):
             point = tuple(float(row[f"{axis}{index}_m"]) for axis in "xyz")
             if not all(math.isfinite(value) for value in point):
@@ -124,7 +124,9 @@ def compiled_focal_plane_extent(path: Path) -> float:
     try:
         optical_model = json.loads(path.read_text(encoding="utf-8"))
         trace_model = optical_model["trace_model"]
-        if trace_model["kind"] == "segmented":
+        if trace_model["kind"] == "segmented" or (
+            trace_model["kind"] == "axisymmetric" and trace_model.get("detector_surfaces")
+        ):
             surfaces = trace_model["detector_surfaces"]
             if not isinstance(surfaces, list) or not surfaces:
                 raise ValueError("segmented model requires detector surfaces")
@@ -430,6 +432,22 @@ def _camera_pixel_polygons(optical_model: dict) -> tuple[PlotPixel, ...]:
     import conventions, not telescope-dependent drawing rules.
     """
     camera = optical_model.get("camera", {})
+    if camera.get("entrance_surfaces"):
+        return tuple(
+            PlotPixel(
+                plane["source_pixel_id"],
+                tuple(
+                    (point[0], point[1])
+                    for point in _polygon_from_surface(
+                        plane,
+                        identifier=plane["source_pixel_id"],
+                        role="detector",
+                        description="compiled pixel entrance",
+                    ).vertices_m
+                ),
+            )
+            for plane in camera["entrance_surfaces"]
+        )
     types = {item["id"]: item for item in camera.get("pixel_types", [])}
     if not types:
         return ()
@@ -508,7 +526,9 @@ def load_plot_optical_model(path: Path) -> PlotOpticalModel:
             expected = {
                 "primary": "primary_facets" if kind == "segmented" else "primary",
                 "secondary": "secondary",
-                "detector": "detector_surfaces" if kind == "segmented" else "detector",
+                "detector": "detector_surfaces"
+                if kind == "segmented" or trace_model.get("detector_surfaces")
+                else "detector",
                 "opaque_cylinder": "cylinder_obscurers",
             }.get(role)
             if expected is None or component.get("source") != f"trace_model.{expected}":
@@ -599,12 +619,21 @@ def load_plot_optical_model(path: Path) -> PlotOpticalModel:
                 ("secondary", "secondary"),
                 ("detector", "detector"),
             )
+            if role != "detector" or not trace_model.get("detector_surfaces")
         )
         mask_polygons = tuple(
             _aspheric_mask_polygon(mask, surface)
             for surface in surfaces
             if surface.role != "detector"
             for mask in trace_model.get(f"{surface.role}_segments", [])
+        ) + tuple(
+            _polygon_from_surface(
+                plane,
+                identifier=plane["id"],
+                role="detector",
+                description="compiled entrance",
+            )
+            for plane in trace_model.get("detector_surfaces", [])
         )
         mask_ids = [polygon.identifier for polygon in mask_polygons]
         if len(mask_ids) != len(set(mask_ids)):
@@ -1478,6 +1507,10 @@ def clip_recorded_path(points, radius: float):
 _STATUS_COLOURS = {
     "detected": "#0072b2",
     "blocked_obscurer": "#d55e00",
+    "absorbed_material": "#d55e00",
+    "escaped_material": "#999999",
+    "missed_secondary": "#cc79a7",
+    "intersection_failure": "#000000",
     "blocked_camera": "#d55e00",
     "blocked_mast": "#d55e00",
     "missed_primary": "#777777",

@@ -1,0 +1,1 @@
+Compile generic finite detector entrance planes into an immutable contiguous bounding-volume index, preserving real aperture gaps, translated/tilted frames, nearest surface IDs and deterministic equal-distance ties without per-photon allocations.

@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstdint>
 #include <fstream>
+#include <iomanip>
 #include <limits>
 #include <optional>
 #include <span>
@@ -36,6 +37,31 @@ struct PhotonReadResult {
   std::size_t count{};
   bool eof{};
 };
+
+// Boundary output, before tracing. Optional emission metadata stays unavailable
+// when the source does not specify it; it is never reconstructed from detections.
+inline void write_photon_csv_header(std::ostream &output) {
+  output << "run_id,event_id,array_id,telescope_id,photon_id,x_m,y_m,z_m,dx,dy,dz,"
+            "wavelength_nm,time_ns,weight,bunch_id,emission_height_m,emission_distance_m,"
+            "telescope_x_m,telescope_y_m,telescope_z_m,array_reuse_weight\n";
+}
+
+inline void write_photon_csv(std::ostream &output, const PhotonBatchContext &context,
+                             const OpticalPhoton &photon) {
+  output << std::setprecision(17) << context.run_id << ',' << context.event_id << ','
+         << context.array_id << ',' << context.telescope_id << ',' << photon.photon_id << ','
+         << photon.ray.position_m.x << ',' << photon.ray.position_m.y << ','
+         << photon.ray.position_m.z << ',' << photon.ray.direction.x << ','
+         << photon.ray.direction.y << ',' << photon.ray.direction.z << ',' << photon.wavelength_nm
+         << ',' << photon.time_ns << ',' << photon.weight << ',' << photon.bunch_id << ',';
+  for (const auto value : {photon.emission_height_m, photon.emission_distance_m}) {
+    if (std::isfinite(value))
+      output << value;
+    output << ',';
+  }
+  output << context.telescope_position_m.x << ',' << context.telescope_position_m.y << ','
+         << context.telescope_position_m.z << ',' << context.array_reuse_weight << '\n';
+}
 
 [[nodiscard]] inline bool valid_photon(const OpticalPhoton &photon) {
   const double direction_length = norm(photon.ray.direction);
@@ -199,6 +225,8 @@ private:
       if (found == header_index_.end())
         return fallback;
       const auto &text = fields.at(found->second);
+      if (text.empty() && std::isnan(fallback))
+        return fallback; // Explicitly unavailable optional emission metadata.
       std::size_t consumed{};
       try {
         const double value = std::stod(text, &consumed);

@@ -46,6 +46,7 @@ std::vector<std::string> fields(const std::string &line) {
 int main(int argc, char **argv) {
   require(argc == 2, "native executable argument required");
   const auto directory = std::filesystem::current_path() / "native-replay-test";
+  std::filesystem::remove_all(directory);
   std::filesystem::create_directories(directory);
   const auto model = directory / "model.json", photons = directory / "photons.csv";
   auto root =
@@ -188,17 +189,46 @@ int main(int argc, char **argv) {
   const auto generated_full = directory / "generated-full.csv";
   const auto generated_blocked = directory / "generated-blocked.csv";
   const auto generated_subset = directory / "generated-subset.csv";
+  const auto resolved_source = directory / "resolved-source.csv";
+  const auto replayed_source = directory / "replayed-source.csv";
   for (const auto &options :
        {std::string(" --source star --wavelength-nm 350,450 --pulse-width-ns 3"),
         std::string(" --source star --star-mode finite --distance-m 60 --entrance-z-m 50"),
         std::string(" --source laser --beam-radius-m 0.05 --divergence-deg 1"),
         std::string(
             " --source illuminator --emitted-weight 200 --source-normalization-photons 17")}) {
-    require(generate(generated_full, 17, 17, 0, options) == 0 &&
+    require(generate(generated_full, 17, 17, 0,
+                     options + " --photon-output " + quoted(resolved_source.string())) == 0 &&
                 generate(generated_blocked, 17, 2, 0, options) == 0,
             "explicit source mode generates reusable blocks");
     require(contents(generated_full) == contents(generated_blocked),
             "source geometry/time/spectrum/weights independent of generation blocks");
+    const std::string source = options.find("--source laser") != std::string::npos ? "laser"
+                               : options.find("--source illuminator") != std::string::npos
+                                   ? "illuminator"
+                                   : "star";
+    const auto replay_command = quoted(argv[1]) + " --optical-model " + quoted(model.string()) +
+                                " --photon-input " + quoted(resolved_source.string()) +
+                                " --source " + source + " --input-block-size 3 --output " +
+                                quoted(replayed_source.string());
+    require(std::system(replay_command.c_str()) == 0, "resolved photon replay succeeds");
+    std::ifstream generated_rows(generated_full), replayed_rows(replayed_source);
+    std::string generated_line, replayed_line;
+    require(std::getline(generated_rows, generated_line) &&
+                std::getline(replayed_rows, replayed_line) && generated_line == replayed_line,
+            "generated and replayed arrival headers agree");
+    for (int row = 0; row < 17; ++row) {
+      require(std::getline(generated_rows, generated_line) &&
+                  std::getline(replayed_rows, replayed_line),
+              "every resolved photon is replayed");
+      auto generated_fields = fields(generated_line), replayed_fields = fields(replayed_line);
+      require(generated_fields.at(2) == source && replayed_fields.at(2) == "replay",
+              "source provenance distinguishes generation from resolved replay");
+      generated_fields.at(2) = "replay";
+      require(generated_fields == replayed_fields,
+              "resolved replay exactly preserves all physical results and identities");
+    }
+    require(!std::getline(replayed_rows, replayed_line), "replay has no extra photons");
     require(generate(generated_subset, 7, 2, 5, options) == 0,
             "source partition with explicit photon identities succeeds");
     std::ifstream full(generated_full), subset(generated_subset);
@@ -214,6 +244,10 @@ int main(int argc, char **argv) {
           "fixed source identity preserves complete optical result across count/partition changes");
     }
   }
+  require(run(2, directory / "source-protected.csv", false,
+              " --photon-output " + quoted(photons.string())) != 0 &&
+              contents(photons) == original_photons,
+          "resolved photon output cannot overwrite its input");
   require(run(2, directory / "gated.csv", true) != 0, "production gate rejects nominal model");
   const auto screen = directory / "screen.csv";
   require(run(2, screen, false,
@@ -238,5 +272,46 @@ int main(int argc, char **argv) {
   require(run(2, directory / "modified-screen.csv", true,
               " --screen-x-m 0 --screen-y-m 0 --screen-z-m 3 --screen-radius-m 1") != 0,
           "qualification does not carry over to a custom detector screen");
+  // Native and sidecar paths use phase optical distance and group delay for a
+  // declared finite window; vacuum distance is retained separately.
+  const auto window_root =
+      obdeect::json::Parser{
+          R"({"format":"obdeect.compiled-optical-model.v1","optical_model_sha256":"","provenance":{"model":"synthetic-finite-window","model_version":"1"},"trace_model":{"kind":"nonsequential","max_interactions":8,"entrance_medium_id":4294967295,"materials":[{"id":1,"phase_index":[{"wavelength_nm":300,"value":1.5},{"wavelength_nm":500,"value":1.5}],"group_index":[{"wavelength_nm":300,"value":1.8},{"wavelength_nm":500,"value":1.8}],"absorption_per_m":[{"wavelength_nm":300,"value":0.2},{"wavelength_nm":500,"value":0.2}]}],"surfaces":[{"id":1,"role":"refractive_interface","shape":"circle","diameter_m":4,"front_medium_id":4294967295,"back_medium_id":1,"frame":{"origin_m":[0,0,2],"x_axis":[1,0,0],"y_axis":[0,1,0],"z_axis":[0,0,1]}},{"id":2,"role":"refractive_interface","shape":"circle","diameter_m":4,"front_medium_id":1,"back_medium_id":4294967295,"frame":{"origin_m":[0,0,1],"x_axis":[1,0,0],"y_axis":[0,1,0],"z_axis":[0,0,1]}},{"id":3,"role":"detector","shape":"circle","diameter_m":4,"frame":{"origin_m":[0,0,0],"x_axis":[1,0,0],"y_axis":[0,1,0],"z_axis":[0,0,1]}}]}})"}
+          .parse();
+  require(window_root.has_value(), "synthetic finite window schema parses");
+  const_cast<obdeect::json::Value *>(window_root->find("optical_model_sha256"))->string =
+      obdeect::detail::sha256(obdeect::detail::canonical_json_without_hash(*window_root));
+  {
+    std::string json;
+    obdeect::detail::append_canonical_json(*window_root, json);
+    std::ofstream output(model);
+    output << json;
+  }
+  require(obdeect::read_nonsequential_optical_model(model.string()).has_value(),
+          "explicit finite-window optical model loads");
+  const auto window_csv = directory / "window.csv",
+             window_interactions = directory / "window-interactions.csv";
+  require(run(2, window_csv, false,
+              " --interactions-output " + quoted(window_interactions.string())) == 0,
+          "native finite-window replay succeeds");
+  std::ifstream window_input(window_csv);
+  std::getline(window_input, line);
+  const auto window_header = fields(line);
+  std::getline(window_input, line);
+  const auto window_row = fields(line);
+  const auto window_value = [&](const char *name) {
+    const auto found = std::find(window_header.begin(), window_header.end(), name);
+    require(found != window_header.end(), "window CSV field exists");
+    return window_row.at(found - window_header.begin());
+  };
+  require(window_value("status") == "detected" &&
+              window_value("interaction_surface_ids") == "1;2;3" &&
+              std::abs(std::stod(window_value("path_length_m")) - 5) < 1.e-12 &&
+              std::abs(std::stod(window_value("optical_path_m")) - 5.5) < 1.e-12 &&
+              std::abs(std::stod(window_value("arrival_time_ns")) -
+                       (7 + 5.8 / obdeect::kSpeedOfLightMPerNs)) < 1.e-12,
+          "native window preserves geometric, phase and group transport separately");
+  require(contents(window_interactions).find("refractive_interface") != std::string::npos,
+          "actual finite refractive interactions are recorded");
   std::filesystem::remove_all(directory);
 }

@@ -1,0 +1,118 @@
+"""Compile explicit pixel entrance and cathode planes in the telescope frame."""
+
+import math
+from collections import defaultdict
+from typing import Any
+
+from obdeect.camera_config import CameraConfigError
+
+_SHAPES = {0: "circle", 1: "hexagon_flat_y", 2: "square", 3: "hexagon_flat_x"}
+
+
+def compile_camera_surfaces(
+    camera: dict[str, Any], focal: dict[str, Any], orientation_mode: int, *, reflected: bool
+) -> dict[str, list[dict[str, Any]]]:
+    """Follow simtel camera_setup_inclined_pixels, retaining finite physical planes.
+
+    Modes 0/1 place pixels individually; modes 2/3 place their module fronts in
+    one plane. Modes 1/3 keep all normals parallel to the optical axis. A prime
+    focus camera's pi rotation about y reflects x and the normal's z component.
+    The focal polynomial already includes its telescope-frame vertex placement.
+    """
+    if isinstance(orientation_mode, bool) or orientation_mode not in (0, 1, 2, 3):
+        raise CameraConfigError("unsupported pixel orientation mode")
+    types = {entry["id"]: entry for entry in camera["pixel_types"]}
+    pixels = camera["pixels"]
+    required = {"z_offset_m", "rotation_deg", "normal_slopes", "module", "enabled"}
+    if any(not required.issubset(pixel) for pixel in pixels):
+        raise CameraConfigError("physical pixel placement requires offsets, normals and modules")
+    coefficients = focal["coefficient_m"]
+    scale = focal["radial_scale_m"]
+
+    def sag(x: float, y: float) -> float:
+        q = math.hypot(x, y) / scale
+        return sum(coefficient * q ** (2 * index) for index, coefficient in enumerate(coefficients))
+
+    def slopes(x: float, y: float) -> tuple[float, float]:
+        radius = math.hypot(x, y)
+        if radius == 0:
+            return 0.0, 0.0
+        q = radius / scale
+        derivative = sum(
+            2 * index * coefficient * q ** (2 * index - 1) / scale
+            for index, coefficient in enumerate(coefficients)
+            if index
+        )
+        return -derivative * x / radius, -derivative * y / radius
+
+    modules = defaultdict(list)
+    for pixel in pixels:
+        modules[pixel["module"]].append(pixel)
+    module_planes = {}
+    if orientation_mode in (2, 3):
+        for identifier, members in modules.items():
+            x = sum(pixel["centre_xy_m"][0] for pixel in members) / len(members)
+            y = sum(pixel["centre_xy_m"][1] for pixel in members) / len(members)
+            z = sum(sag(*pixel["centre_xy_m"]) for pixel in members) / len(members)
+            nx, ny = slopes(x, y) if orientation_mode == 2 else (0.0, 0.0)
+            module_planes[identifier] = nx, ny, x * nx + y * ny + z
+    entrances, cathodes = [], []
+    for pixel in pixels:
+        x, y = pixel["centre_xy_m"]
+        nx, ny = pixel["normal_slopes"]
+        rotation = math.radians(pixel["rotation_deg"])
+        if orientation_mode in (1, 3) and (nx != 0 or ny != 0 or rotation != 0):
+            raise CameraConfigError("manual pixel alignment conflicts with parallel orientation")
+        if orientation_mode in (2, 3):
+            nx, ny, plane = module_planes[pixel["module"]]
+            z = plane - x * nx - y * ny
+        else:
+            z = sag(x, y)
+            if orientation_mode == 0 and nx == 0 and ny == 0:
+                nx, ny = slopes(x, y)
+        z += (-1 if reflected else 1) * pixel["z_offset_m"]
+        norm_xy = math.hypot(nx, ny)
+        norm = math.sqrt(1 + norm_xy * norm_xy)
+        normal = [nx / norm, ny / norm, 1 / norm]
+        if norm_xy:
+            squared = norm_xy * norm_xy
+            u = [
+                nx * nx / (squared * norm) + ny * ny / squared,
+                nx * ny / (squared * norm) - nx * ny / squared,
+                -nx / norm,
+            ]
+            v = [u[1], ny * ny / (squared * norm) + nx * nx / squared, -ny / norm]
+        else:
+            u, v = [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]
+        tangent = [
+            math.cos(rotation) * a + math.sin(rotation) * b for a, b in zip(u, v, strict=True)
+        ]
+        if reflected:
+            x = -x
+            normal = [-normal[0], normal[1], -normal[2]]
+            tangent = [-tangent[0], tangent[1], -tangent[2]]
+        pixel_type = types[pixel["type_id"]]
+        centre = [x, y, z]
+        metadata = {
+            "source_pixel_id": pixel["id"],
+            "source_type_id": pixel["type_id"],
+            "enabled": pixel["enabled"],
+            "normal": normal,
+            "tangent": tangent,
+        }
+        entrances.append({
+            **metadata,
+            "centre_m": centre,
+            "shape": _SHAPES[pixel_type["funnel_shape_code"]],
+            "diameter_m": pixel_type["funnel_diameter_m"],
+        })
+        cathodes.append({
+            **metadata,
+            "centre_m": [
+                value - pixel_type["funnel_depth_m"] * component
+                for value, component in zip(centre, normal, strict=True)
+            ],
+            "shape": _SHAPES[pixel_type["cathode_shape_code"]],
+            "diameter_m": pixel_type["cathode_diameter_m"],
+        })
+    return {"entrance_surfaces": entrances, "cathode_surfaces": cathodes}

@@ -54,8 +54,7 @@ adapter before claiming a comparison result.
 Record each executable and script, full argv, working directory, environment
 settings, model/source hashes, and all input files with
 [REFERENCE_RUN.md](REFERENCE_RUN.md). The reference executor runs those recorded
-commands and preserves stdout/stderr and failures. A missing simulator adapter
-is an explicit remaining requirement, not an implicit approximation.
+commands and preserves stdout/stderr and failures. The [shared-photon reference adapter](SIMTEL_REPLAY.md) exercises all four real optical classes, with stable input identities and explicit raw lost rows. It still needs complete terminal-loss instrumentation and downstream response before production normalization; it does not provide qualified comparison data.
 
 ## Declare acceptance before measuring residuals
 

@@ -70,6 +70,7 @@ jobs:
           flavor: latest=false
           tags: |
             type=raw,value=${{ env.BASE_TAG }}-${{ matrix.arch }}-${{ env.RUN_TAG }}
+            type=raw,value=build-cache-${{ matrix.arch }},enable=${{ github.event_name == 'release' }}
 
       - name: Build and push image
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc  # v7
@@ -88,8 +89,9 @@ jobs:
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.version=${{ env.OBDEECT_VERSION }}
-          cache-from: type=gha,scope=obdeect-${{ matrix.arch }}
-          cache-to: type=gha,mode=min,scope=obdeect-${{ matrix.arch }}
+          # Store reusable layers with released images, outside Actions cache storage.
+          cache-from: type=registry,ref=${{ env.IMAGE }}:build-cache-${{ matrix.arch }}
+          cache-to: type=inline
 
   build-macos:
     strategy:

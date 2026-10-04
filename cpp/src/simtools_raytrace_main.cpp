@@ -3,6 +3,7 @@
 #include "obdeect/ctao_trace.hpp"
 #include "obdeect/interaction_csv.hpp"
 #include "obdeect/interactions.hpp"
+#include "obdeect/material_path.hpp"
 #include "obdeect/optical_model_file.hpp"
 #include "obdeect/photon_input.hpp"
 #include "obdeect/segmented_optical_model.hpp"
@@ -33,10 +34,12 @@ void usage() {
       << "  --require-production-ready  reject optical models lacking a completed production "
          "report\n"
       << "  --photon-input FILE --input-block-size N  replay telescope-local CSV photons\n"
+      << "  --photon-output FILE  save every resolved input photon before optical tracing\n"
       << "  --interactions-output FILE --interaction-record-limit N --interaction-byte-limit N\n"
       << "  --source star|illuminator|laser  (default: star)\n"
       << "  --photons N --output FILE --field-x-deg D --field-y-deg D\n"
       << "  --distance-m D --wavelength-nm N[,N...] --divergence-deg D --panel-id N\n"
+      << "  --pupil-radius-m D  explicit launch disk for generic optical models\n"
       << "  --source-x-m D --source-y-m D --source-z-m D\n"
       << "  --screen-x-m D --screen-y-m D --screen-z-m D --screen-radius-m D\n"
       << "  --direction-x D --direction-y D --direction-z D  (laser axis)\n"
@@ -79,11 +82,14 @@ int main(int argc, char **argv) {
   std::string star_mode = "plane-wave";
   double beam_radius_m = 0, entrance_z_m = 50;
   bool beam_radius_set = false, first_id_set = false;
+  double launch_pupil_radius_m = 0;
+  bool launch_pupil_radius_set = false;
   bool require_production_ready = false;
   bool production_ready = false;
   std::string interactions_output_path;
   std::size_t interaction_record_limit = 10000, interaction_byte_limit = 4 * 1024 * 1024;
   std::string photon_input_path;
+  std::string photon_output_path;
   std::size_t input_block_size = 4096;
   std::string telescope;
   std::string optical_model_path;
@@ -107,6 +113,7 @@ int main(int argc, char **argv) {
         value(index, argc, argv, "--source", source) ||
         value(index, argc, argv, "--interactions-output", interactions_output_path) ||
         value(index, argc, argv, "--photon-input", photon_input_path) ||
+        value(index, argc, argv, "--photon-output", photon_output_path) ||
         value(index, argc, argv, "--output", output_path)) {
       continue;
     }
@@ -180,7 +187,8 @@ int main(int argc, char **argv) {
         *provided = true;
       return true;
     };
-    if (number("--emitted-weight", emitted_weight, &emitted_weight_set) ||
+    if (number("--pupil-radius-m", launch_pupil_radius_m, &launch_pupil_radius_set) ||
+        number("--emitted-weight", emitted_weight, &emitted_weight_set) ||
         number("--beam-radius-m", beam_radius_m, &beam_radius_set) ||
         number("--entrance-z-m", entrance_z_m) || number("--field-x-deg", field_x_deg) ||
         number("--field-y-deg", field_y_deg) || number("--distance-m", distance_m) ||
@@ -205,7 +213,16 @@ int main(int argc, char **argv) {
   const auto axisymmetric_optical_model =
       optical_model_path.empty() ? std::optional<obdeect::AxisymmetricOpticalModel>{}
                                  : obdeect::read_axisymmetric_optical_model(optical_model_path);
-  if ((!model && !imported_optical_model && !axisymmetric_optical_model) ||
+  const auto nonsequential_optical_model =
+      optical_model_path.empty() ? std::optional<obdeect::CompiledOpticalModel>{}
+                                 : obdeect::read_nonsequential_optical_model(optical_model_path);
+  if (nonsequential_optical_model && photon_input_path.empty() && !launch_pupil_radius_set) {
+    std::cerr
+        << "nonsequential optical models require --photon-input or an explicit --pupil-radius-m\n";
+    return 2;
+  }
+  if ((!model && !imported_optical_model && !axisymmetric_optical_model &&
+       !nonsequential_optical_model) ||
       (source != "star" && source != "illuminator" && source != "laser") || distance_m <= 0.0 ||
       divergence_deg < 0.0 || divergence_deg >= 90.0 || pulse_width_ns < 0.0 ||
       (panel_id && !imported_optical_model) ||
@@ -232,7 +249,10 @@ int main(int argc, char **argv) {
   if (aliases(output_path, photon_input_path) || aliases(output_path, optical_model_path) ||
       aliases(interactions_output_path, photon_input_path) ||
       aliases(interactions_output_path, optical_model_path) ||
-      aliases(output_path, interactions_output_path)) {
+      aliases(output_path, interactions_output_path) ||
+      aliases(photon_output_path, photon_input_path) ||
+      aliases(photon_output_path, optical_model_path) || aliases(photon_output_path, output_path) ||
+      aliases(photon_output_path, interactions_output_path)) {
     std::cerr << "output files must not alias each other, the photon input, or the optical model\n";
     return 2;
   }
@@ -253,7 +273,7 @@ int main(int argc, char **argv) {
     return 2;
   }
   if (!interactions_output_path.empty() &&
-      ((!imported_optical_model && !axisymmetric_optical_model) ||
+      ((!imported_optical_model && !axisymmetric_optical_model && !nonsequential_optical_model) ||
        interactions_output_path == output_path)) {
     std::cerr
         << "interaction diagnostics require a compiled optical model and a separate output file\n";
@@ -292,8 +312,15 @@ int main(int argc, char **argv) {
                                                   obdeect::FacetShape::circle,
                                                   {1.0, 0.0, 0.0}}};
   }
+  if (screen_x_set) {
+    auto planes = obdeect::compile_detector_planes(imported_optical_model->detector_surfaces);
+    if (!planes)
+      return 2;
+    imported_optical_model->detector_planes =
+        std::make_shared<const obdeect::CompiledDetectorPlanes>(std::move(*planes));
+  }
   const double radians_per_degree = std::numbers::pi / 180.0;
-  const double pupil_radius = imported_optical_model
+  const double pupil_radius = launch_pupil_radius_set ? launch_pupil_radius_m : imported_optical_model
                                   ? [&] {
                                       double radius = 0.0;
                                       for (const auto& facet : imported_optical_model->primary_facets)
@@ -302,7 +329,7 @@ int main(int argc, char **argv) {
                                       return radius;
                                     }()
                                   : axisymmetric_optical_model ? axisymmetric_optical_model->primary.outer_radius_m
-                                                       : model->primary_outer_radius_m;
+                                                       : nonsequential_optical_model ? 1.0 : model->primary_outer_radius_m;
   if (!std::isfinite(pupil_radius) || pupil_radius <= 0.0)
     return 1;
   std::vector<obdeect::OpticalPhoton> input;
@@ -353,15 +380,26 @@ int main(int argc, char **argv) {
     std::cerr << "cannot write " << output_path << '\n';
     return 1;
   }
+  std::ofstream photon_output;
+  if (!photon_output_path.empty()) {
+    photon_output.open(photon_output_path);
+    if (!photon_output) {
+      std::cerr << "cannot write " << photon_output_path << '\n';
+      return 1;
+    }
+    obdeect::write_photon_csv_header(photon_output);
+  }
   output << std::setprecision(17)
          << "contract_version,photon_id,source_kind,wavelength_nm,emission_time_ns,source_weight,"
             "throughput,status,point_count,path_length_m,"
             "incidence_primary_deg,incidence_secondary_deg,incidence_focal_deg,";
-  for (int point = 0; point < 4; ++point)
+  const int point_capacity =
+      nonsequential_optical_model ? obdeect::kMaximumOpticalModelInteractions + 1 : 4;
+  for (int point = 0; point < point_capacity; ++point)
     output << "x" << point << "_m,y" << point << "_m,z" << point << "_m" << ',';
   output << "run_id,event_id,array_id,telescope_id,bunch_id,arrival_time_ns,terminal_surface_id,"
             "final_dx,final_dy,final_dz,interaction_surface_ids,response_loss_fraction,terminal_"
-            "loss_fraction\n";
+            "loss_fraction,optical_path_m\n";
   std::size_t detected = 0;
   std::size_t traced_count = 0;
   std::unique_ptr<obdeect::CsvPhotonReader> reader;
@@ -445,64 +483,89 @@ int main(int argc, char **argv) {
       complete = true;
     traced_count += input.size();
     for (const auto &photon : input) {
-      obdeect::PathRecord path{};
-      path.photon_id = photon.photon_id;
-      path.wavelength_nm = photon.wavelength_nm;
-      path.points_m[0] = photon.ray.position_m;
-      path.point_count = 1;
-      if (imported_optical_model) {
-        path = obdeect::trace_segmented_path(photon.ray, photon.photon_id, photon.wavelength_nm,
-                                             *imported_optical_model);
-      } else if (axisymmetric_optical_model) {
-        path = obdeect::trace_axisymmetric_optical_model(photon.ray, photon.photon_id,
-                                                         *axisymmetric_optical_model);
-        path.wavelength_nm = photon.wavelength_nm;
-      } else {
-        path = obdeect::trace_ctao_reference(photon.ray, photon.photon_id, *model);
-        path.wavelength_nm = photon.wavelength_nm;
-      }
-      double throughput = path.status == obdeect::PhotonStatus::detected ? 1.0 : 0.0;
-      if (path.status == obdeect::PhotonStatus::detected && imported_optical_model)
-        throughput = path.surviving_throughput;
-      if (path.status == obdeect::PhotonStatus::detected && axisymmetric_optical_model)
-        throughput = path.surviving_throughput;
-      if (interaction_writer) {
-        try {
-          interaction_writer->write(context, photon, path);
-        } catch (const std::exception &error) {
-          std::cerr << error.what() << '\n';
+      if (!photon_output_path.empty()) {
+        obdeect::write_photon_csv(photon_output, context, photon);
+        if (!photon_output) {
+          std::cerr << "resolved photon output write failed\n";
           return 1;
         }
       }
-      detected += path.status == obdeect::PhotonStatus::detected;
-      output << "obdeect-arrival-v1," << path.photon_id << ',' << source << ','
-             << photon.wavelength_nm << ',' << photon.time_ns << ',' << photon.weight << ','
-             << throughput << ',' << obdeect::to_string(path.status) << ','
-             << static_cast<int>(path.point_count) << ',' << path.path_length_m << ','
-             << path.incidence_primary_deg << ',' << path.incidence_secondary_deg << ','
-             << path.incidence_focal_deg;
-      for (const auto &point : path.points_m)
-        output << ',' << point.x << ',' << point.y << ',' << point.z;
-      output << ',' << context.run_id << ',' << context.event_id << ',' << context.array_id << ','
-             << context.telescope_id << ',' << photon.bunch_id << ','
-             << photon.time_ns + path.path_length_m / obdeect::kSpeedOfLightMPerNs << ','
-             << path.terminal_surface_id << ',' << path.final_direction.x << ','
-             << path.final_direction.y << ',' << path.final_direction.z << ',';
-      for (std::size_t interaction = 0; interaction + 1 < path.point_count; ++interaction) {
-        if (interaction != 0)
-          output << ';';
-        output << path.interaction_surface_ids[interaction];
+      const auto emit_path = [&](const auto &path) {
+        const double throughput =
+            path.status == obdeect::PhotonStatus::detected ? path.surviving_throughput : 0.0;
+        if (interaction_writer) {
+          try {
+            interaction_writer->write(context, photon, path);
+          } catch (const std::exception &error) {
+            std::cerr << error.what() << '\n';
+            return false;
+          }
+        }
+        detected += path.status == obdeect::PhotonStatus::detected;
+        output << "obdeect-arrival-v1," << path.photon_id << ',' << source << ','
+               << photon.wavelength_nm << ',' << photon.time_ns << ',' << photon.weight << ','
+               << throughput << ',' << obdeect::to_string(path.status) << ','
+               << static_cast<int>(path.point_count) << ',' << path.path_length_m << ','
+               << path.incidence_primary_deg << ',' << path.incidence_secondary_deg << ','
+               << path.incidence_focal_deg;
+        for (const auto &point : path.points_m)
+          output << ',' << point.x << ',' << point.y << ',' << point.z;
+        output << ',' << context.run_id << ',' << context.event_id << ',' << context.array_id << ','
+               << context.telescope_id << ',' << photon.bunch_id << ','
+               << photon.time_ns + (path.material_transport
+                                        ? path.group_delay_ns
+                                        : path.path_length_m / obdeect::kSpeedOfLightMPerNs)
+               << ',' << path.terminal_surface_id << ',' << path.final_direction.x << ','
+               << path.final_direction.y << ',' << path.final_direction.z << ',';
+        for (std::size_t interaction = 0; interaction + 1 < path.point_count; ++interaction) {
+          if (interaction != 0)
+            output << ';';
+          output << path.interaction_surface_ids[interaction];
+        }
+        output << ',' << 1.0 - path.surviving_throughput << ','
+               << (path.status == obdeect::PhotonStatus::detected ? 0.0 : path.surviving_throughput)
+               << ',' << (path.material_transport ? path.optical_path_m : path.path_length_m)
+               << '\n';
+        return true;
+      };
+      if (nonsequential_optical_model) {
+        if (!emit_path(obdeect::trace_material_path(
+                photon.ray, photon.photon_id, photon.wavelength_nm, *nonsequential_optical_model)))
+          return 1;
+      } else {
+        obdeect::PathRecord path{};
+        path.photon_id = photon.photon_id;
+        path.wavelength_nm = photon.wavelength_nm;
+        path.points_m[0] = photon.ray.position_m;
+        path.point_count = 1;
+        if (imported_optical_model) {
+          path = obdeect::trace_segmented_path(photon.ray, photon.photon_id, photon.wavelength_nm,
+                                               *imported_optical_model);
+        } else if (axisymmetric_optical_model) {
+          path = obdeect::trace_axisymmetric_optical_model(
+              photon.ray, photon.photon_id, *axisymmetric_optical_model, photon.wavelength_nm);
+          path.wavelength_nm = photon.wavelength_nm;
+        } else {
+          path = obdeect::trace_ctao_reference(photon.ray, photon.photon_id, *model);
+          path.wavelength_nm = photon.wavelength_nm;
+        }
+        if (!emit_path(path))
+          return 1;
       }
-      output << ',' << 1.0 - path.surviving_throughput << ','
-             << (path.status == obdeect::PhotonStatus::detected ? 0.0 : path.surviving_throughput)
-             << '\n';
     }
   }
   photons_count = traced_count;
+  output.flush();
+  if (!photon_output_path.empty())
+    photon_output.flush();
+  if (!output || (!photon_output_path.empty() && !photon_output)) {
+    std::cerr << "optical result or resolved photon output write failed\n";
+    return 1;
+  }
   if (interaction_writer)
     std::cout << "interaction diagnostics: " << interaction_writer->records_written() << " records"
               << (interaction_writer->truncated() ? " (storage cap reached)" : "") << '\n';
-  if (imported_optical_model || axisymmetric_optical_model) {
+  if (imported_optical_model || axisymmetric_optical_model || nonsequential_optical_model) {
     std::cout << "optical model " << optical_model_path << ": " << photons_count << " " << source
               << " photons, detected " << detected
               << (production_ready ? ", production readiness declared"

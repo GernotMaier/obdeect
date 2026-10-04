@@ -21,6 +21,12 @@ Python result consumers, diagnostic plots, and installed package boundary.
 | Legacy timing and unavailable interactions could acquire production provenance. | Hash-bound normalization requires recorded timing and preserves missing interaction information. |
 | Telescope and ray views repeated overlay drawing. | One renderer handles deterministic selection, interaction markers, status colours, and model provenance. |
 | SVG images moved out-of-frame hits into detector edge bins. | Hits outside the displayed focal region are excluded from those bins. |
+| Physical pixel entrances and dual-reflector segment masks were omitted. | Compiled finite pixel planes use an immutable stackless BVH; dual models retain explicit primary and secondary masks. |
+| Camera and reflector offsets mixed coordinate origins. | Prescriptions, facet normals, focus offsets and physical camera planes share the optical reference frame. |
+| Generic interfaces lacked material path and group timing. | One bounded transport records geometry, phase path, group delay, absorption, Fresnel transmission and TIR in native and bulk APIs. |
+| Measured camera response and mirror scatter could be silently ignored. | Strict native schemas apply declared camera response once and keyed scatter independently of ordering and blocks. |
+| Generated source batches were not reusable as reference input. | Resolved source export preserves photon context and every physical input at round-trip precision. |
+| Docker cache entries accumulated in Actions storage. | Reusable layers now use release registry images and inline cache; 151 obsolete entries were removed. |
 | Bulk API tests assumed a local build executable. | Installed wheel tests resolve the packaged native command and exercise native/bulk agreement. |
 
 ## Code retained deliberately

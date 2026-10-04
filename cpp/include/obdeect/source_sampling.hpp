@@ -1,22 +1,12 @@
 #pragma once
 
+#include "obdeect/random.hpp"
 #include "obdeect/sources.hpp"
 
 #include <optional>
 #include <span>
 
 namespace obdeect {
-
-// Counter-based dimensions: changing order, batch size or total count does not
-// change a ray with the same identity and seed. No mutable random engine exists.
-[[nodiscard]] inline double source_uniform(std::uint64_t id, std::uint64_t seed,
-                                           std::uint64_t dimension) {
-  std::uint64_t value = id ^ (seed + 0x9e3779b97f4a7c15ULL * (dimension + 1));
-  value = (value ^ (value >> 30)) * 0xbf58476d1ce4e5b9ULL;
-  value = (value ^ (value >> 27)) * 0x94d049bb133111ebULL;
-  value ^= value >> 31;
-  return static_cast<double>(value >> 11) * 0x1.0p-53;
-}
 
 [[nodiscard]] inline Vec3 sampled_pupil(std::uint64_t id, std::uint64_t seed, double radius_m) {
   const double radius = radius_m * std::sqrt(source_uniform(id, seed, 0));

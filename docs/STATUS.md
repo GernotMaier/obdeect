@@ -27,9 +27,9 @@ The present implementation is suitable for optical-kernel studies, model-import 
 
 ## Verification currently recorded
 
-- Debug CMake build and native tests: 17 configured tests pass, including installed CMake consumer, replay/chunk invariance, source sampling, optics, model hashes, and interaction diagnostics.
-- EventIO-enabled source build and tests: 18 configured tests pass locally.
-- Python source suite: 163 tests and 42 subtests pass; one optional installed-simtools test is skipped when its dependencies are absent. The installed-native integration itself has passed both simtools workflows in the simtools environment.
+- Debug CMake build and native tests: 20 configured tests pass, including installed CMake consumer, replay/chunk invariance, source sampling, optics, model hashes, and interaction diagnostics.
+- EventIO-enabled source build and tests: 21 configured tests pass locally.
+- Python source suite: 185 tests and 45 subtests pass; one optional installed-simtools test is skipped when its dependencies are absent. The installed-native integration itself has passed both simtools workflows in the simtools environment.
 - Python formatting, linting, Towncrier fragment validation, and the repository pre-commit hooks pass after the current edits.
 - An installed wheel smoke test invokes every public command and traces a tiny hashed generic optical model. It verifies an arriving mirror weight of 0.8.
 - No matched sim_telarray photon-by-photon CTAO comparison has passed yet. Archived 7.0.0 PSF products remain diagnostic references, not acceptance data.
@@ -38,19 +38,19 @@ The present implementation is suitable for optical-kernel studies, model-import 
 
 The [five-model smoke record](review/nominal-optics.json) retains exact commands,
 model-source revision and hashes, compiled optical-model hashes, and terminal
-counts for 1,000 seeded photons per 7.0.0 model. Detected counts are LST 784,
-MST FlashCam 633, MST NectarCam 694, SST 750, and SCT 683. These exercise the
+counts for 1,000 seeded photons per 7.0.0 model. Detected counts are LST 727,
+MST FlashCam 336, MST NectarCam 691, SST 115, and SCT 599. These exercise the
 nominal workflow; they are not sim_telarray acceptance results. Model compilation
 retains measured reflectivity metadata; uncertainty columns are not applied as
 random optical perturbations or interpreted as propagated errors.
 
 1. Bind complete production optics for every telescope family: alignment and degradation, finite mechanical obscurers and baffles, physical pixel and concentrator boundaries, camera housing, windows, filters, and angle-dependent responses. Avoid applying a compatibility response together with the same physical loss.
-2. Complete refractive transport for model-derived curved windows and bounded concentrator paths. The tested slab kernel has explicit measured-response semantics, but it is not connected to imported telescope models.
+2. Bind model-derived window and concentrator geometry to the generic material transport. Native and bulk tracing support bounded curved dielectric interfaces, phase/group indices, absorption and TIR; imported telescope models still lack the required finite geometry and material tables.
 3. Establish the SCT prescription and frame convention with independent reference rays, then compare a full SCT field map separately from SST.
-4. Provide a sim_telarray adapter that replays the identical resolved photon batch and records stable identities, terminal surfaces, interactions, weights, directions and timing. A detected-photon imaging list cannot supply this.
+4. Extend the shared-photon sim_telarray diagnostic adapter to record complete terminal losses and downstream pixel/concentrator response. Its four real optical classes replay identically across repeated runs, but raw lost rows explicitly lack unavailable terminal fields. See [SIMTEL_REPLAY.md](SIMTEL_REPLAY.md) and its retained run record.
 5. Run and retain the predeclared validation matrix for LST, both MST cameras, SST and SCT: on/off-axis two-dimensional fields, panel/gap/shadow scans, spectral and timing scans, finite sources, effective area, and loss closure.
 6. Perform independent detailed-geometry checks with ROBAST for windows and structures. Report residuals, uncertainty studies, source/model hashes and first divergent interactions.
-7. Measure performance only after optical equivalence: ten or more repetitions, matched physics and outputs, kernel/I/O separation, memory limits and block/thread reproducibility. No sim_telarray throughput-parity claim exists yet.
+7. Execute the hash-bound [benchmark harness](BENCHMARK.md) only after optical equivalence: ten or more repetitions, matched physics and outputs, kernel/I/O separation, memory limits and block/thread reproducibility. No sim_telarray throughput-parity claim exists yet.
 
 ## Required comparison record
 

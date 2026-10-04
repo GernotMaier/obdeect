@@ -1,0 +1,1 @@
+Structured production mirror segmentation is now imported into finite native masks, including physical units and reflected secondary coordinates. Secondary annular masks preserve the original one-sided gap after the coordinate transform instead of tracing continuous mirrors across panel gaps.

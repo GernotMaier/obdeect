@@ -19,6 +19,7 @@ _FIELDS = (
     "focal_x_m",
     "focal_y_m",
     "path_length_m",
+    "optical_path_m",
     "arrival_time_ns",
     "incidence_primary_deg",
     "incidence_secondary_deg",
@@ -57,6 +58,9 @@ def comparison_row(arrival: OpticalArrival) -> dict[str, float | int | str]:
         "focal_x_m": arrival.focal_x_m if arrival.detected else last_point[0],
         "focal_y_m": arrival.focal_y_m if arrival.detected else last_point[1],
         "path_length_m": arrival.path_length_m,
+        **(
+            {"optical_path_m": arrival.optical_path_m} if arrival.optical_path_m is not None else {}
+        ),
         "arrival_time_ns": arrival.arrival_time_ns
         if arrival.arrival_time_ns is not None
         else arrival.emission_time_ns + arrival.path_length_m / 0.299792458,
@@ -117,6 +121,8 @@ def normalize_arrivals(
     try:
         with output_path.open("w", newline="", encoding="utf-8") as handle:
             fields = list(_FIELDS)
+            if not all(arrival.optical_path_m is not None for arrival in arrivals):
+                fields.remove("optical_path_m")
             if not all(arrival.interaction_surface_ids is not None for arrival in arrivals):
                 fields.remove("interaction_surface_ids")
             if not all(arrival.final_direction is not None for arrival in arrivals):

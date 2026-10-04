@@ -60,6 +60,7 @@ class ComparisonRow:
     interaction_surface_ids: tuple[int, ...] | None = None
     response_loss_fraction: float | None = None
     terminal_loss_fraction: float | None = None
+    optical_path_m: float | None = None
 
 
 def _number(row: dict[str, str], column: str, path: Path, line: int) -> float:
@@ -110,7 +111,7 @@ def read_comparison_table(path: Path) -> dict[PhotonIdentity, ComparisonRow]:
                 raise ProductionValidationError(f"{path}:{line}: invalid status")
             values = tuple(_number(row, column, path, line) for column in _REQUIRED_COLUMNS[2:])
             extra = {}
-            for column in ("wavelength_nm", "source_weight", "throughput"):
+            for column in ("wavelength_nm", "source_weight", "throughput", "optical_path_m"):
                 if column in row:
                     extra[column] = _number(row, column, path, line)
             loss_fields = ("response_loss_fraction", "terminal_loss_fraction")
@@ -206,6 +207,10 @@ def _validate_comparison_row(row: ComparisonRow) -> None:
     ):
         raise ProductionValidationError("invalid output direction")
 
+    if row.optical_path_m is not None and (
+        not math.isfinite(row.optical_path_m) or row.optical_path_m < 0
+    ):
+        raise ProductionValidationError("invalid phase optical path")
     losses = (row.response_loss_fraction, row.terminal_loss_fraction)
     if any(value is not None for value in losses):
         if (
@@ -317,6 +322,7 @@ def compare(
     status_mismatches = []
     focal_residuals = []
     path_residuals = []
+    optical_path_residuals = []
     time_residuals = []
     incidence_residuals = []
     first_divergence = None
@@ -448,6 +454,17 @@ def compare(
                     "field": "final_direction",
                     "residual": direction_residual,
                 }
+        if left.optical_path_m is not None or right.optical_path_m is not None:
+            if left.optical_path_m is None or right.optical_path_m is None:
+                raise ProductionValidationError(f"photon {photon_id}: missing phase optical path")
+            phase_path = abs(left.optical_path_m - right.optical_path_m)
+            optical_path_residuals.append(phase_path)
+            if phase_path > tolerances["path_length_m"] and first_divergence is None:
+                first_divergence = {
+                    "photon_id": photon_id,
+                    "field": "optical_path_m",
+                    "residual": phase_path,
+                }
         focal = math.hypot(left.focal_x_m - right.focal_x_m, left.focal_y_m - right.focal_y_m)
         path = abs(left.path_length_m - right.path_length_m)
         arrival_time = abs(left.arrival_time_ns - right.arrival_time_ns)
@@ -480,6 +497,7 @@ def compare(
         "status_mismatch_count": len(status_mismatches),
         "max_focal_position_residual_m": _maximum(focal_residuals),
         "max_path_length_residual_m": _maximum(path_residuals),
+        "max_optical_path_residual_m": _maximum(optical_path_residuals),
         "max_arrival_time_residual_ns": _maximum(time_residuals),
         "max_incidence_residual_deg": _maximum(incidence_residuals),
         "first_divergence": first_divergence,

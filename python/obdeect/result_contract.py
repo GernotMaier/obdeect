@@ -48,6 +48,7 @@ class OpticalArrival:
     interaction_surface_ids: tuple[int, ...] | None = None
     response_loss_fraction: float | None = None
     terminal_loss_fraction: float | None = None
+    optical_path_m: float | None = None
 
     @property
     def detected(self) -> bool:
@@ -88,6 +89,8 @@ TERMINAL_STATUSES = frozenset({
     "escaped_optical_model",
     "interaction_limit",
     "intersection_failure",
+    "absorbed_material",
+    "escaped_material",
 })
 
 
@@ -137,7 +140,7 @@ def iter_arrivals(path: Path) -> Iterator[OpticalArrival]:
                 point_count = int(row["point_count"])
             except (TypeError, ValueError) as error:
                 raise ArrivalContractError(f"{path}:{line}: invalid integer field") from error
-            if photon_id < 0 or point_count < 1 or point_count > 4:
+            if photon_id < 0 or point_count < 1 or point_count > 65:
                 raise ArrivalContractError(f"{path}:{line}: invalid photon_id or point_count")
             context_names = ("run_id", "event_id", "array_id", "telescope_id", "bunch_id")
             if any(name in fields for name in context_names) and not all(
@@ -199,6 +202,11 @@ def iter_arrivals(path: Path) -> Iterator[OpticalArrival]:
             arrival_time = (
                 _number(row, "arrival_time_ns", path, line) if "arrival_time_ns" in fields else None
             )
+            optical_path = (
+                _number(row, "optical_path_m", path, line) if "optical_path_m" in fields else None
+            )
+            if optical_path is not None and optical_path < 0:
+                raise ArrivalContractError(f"{path}:{line}: negative optical_path_m")
             terminal_surface = None
             if "terminal_surface_id" in fields:
                 try:
@@ -252,6 +260,7 @@ def iter_arrivals(path: Path) -> Iterator[OpticalArrival]:
                 direction,
                 surface_ids,
                 *losses,
+                optical_path,
             )
 
 
