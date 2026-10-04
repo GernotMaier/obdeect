@@ -44,6 +44,10 @@ sdist.include = [ "cpp/**", "cmake/**", "CMakeLists.txt", "python/**", "README.m
 wheel.packages = [ "python/obdeect" ]
 wheel.platlib = true
 
+[tool.cibuildwheel]
+# libc++ floating-point to_chars is available from macOS 13.3.
+macos.environment = { MACOSX_DEPLOYMENT_TARGET = "13.3" }
+
 [tool.ruff]
 target-version = "py314"
 line-length = 100

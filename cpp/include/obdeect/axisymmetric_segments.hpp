@@ -2,6 +2,7 @@
 
 #include "obdeect/axisymmetric_optics.hpp"
 
+#include <cstdint>
 #include <numbers>
 #include <optional>
 #include <span>
