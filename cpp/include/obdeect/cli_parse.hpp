@@ -35,6 +35,8 @@ inline bool parse_finite_double(std::string_view text, double &output) {
 // wavelengths.  Keeping the parsing at the CLI boundary avoids hidden spectral
 // assumptions in the tracing kernel.
 inline bool parse_wavelengths_nm(std::string_view text, std::vector<double> &output) {
+  if (text.empty() || text.back() == ',')
+    return false;
   std::vector<double> parsed;
   std::size_t begin = 0;
   while (begin < text.size()) {

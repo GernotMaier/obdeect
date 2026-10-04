@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <limits>
 #include <stdexcept>
 #include <string>
 
@@ -171,6 +172,36 @@ int main() {
     rejected = true;
   }
   require(rejected, "negative unsigned identifiers are rejected rather than wrapped");
+
+  for (const auto id : {" -5", "+5", "5 ", "18446744073709551616"}) {
+    TemporaryFile malformed_id{std::string{kHeader} + "1,2,3,4," + id +
+                               ",0,0,0,0,0,-1,400,0,1,0,0,0,0,0,0,1\n"};
+    rejected = false;
+    try {
+      CsvPhotonReader invalid(malformed_id.path());
+      (void)invalid.read(batch);
+    } catch (const std::invalid_argument &) {
+      rejected = true;
+    }
+    require(rejected, "identifiers must be unsigned decimal values without whitespace or wrapping");
+  }
+  TemporaryFile unknown_header{std::string{kHeader}.substr(0, std::string{kHeader}.size() - 1) +
+                               ",unapplied_polarization\n"};
+  rejected = false;
+  try {
+    CsvPhotonReader invalid(unknown_header.path());
+  } catch (const std::invalid_argument &) {
+    rejected = true;
+  }
+  require(rejected, "unknown photon fields cannot be silently discarded");
+  auto metadata_photon = expected_photons[0];
+  metadata_photon.emission_height_m = std::numeric_limits<double>::infinity();
+  require(!valid_photon(metadata_photon), "infinite emission metadata is invalid");
+  metadata_photon.emission_height_m = std::numeric_limits<double>::quiet_NaN();
+  metadata_photon.emission_distance_m = -1;
+  require(!valid_photon(metadata_photon), "negative emission distance is invalid");
+  metadata_photon.emission_distance_m = std::numeric_limits<double>::quiet_NaN();
+  require(valid_photon(metadata_photon), "explicit unavailable emission metadata remains valid");
 
   std::cout << "photon input tests passed\n";
 }

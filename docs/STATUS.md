@@ -29,7 +29,7 @@ The present implementation is suitable for optical-kernel studies, model-import 
 
 - Debug CMake build and native tests: 20 configured tests pass, including installed CMake consumer, replay/chunk invariance, source sampling, optics, model hashes, and interaction diagnostics.
 - EventIO-enabled source build and tests: 21 configured tests pass locally.
-- Python source suite: 185 tests and 45 subtests pass; one optional installed-simtools test is skipped when its dependencies are absent. The installed-native integration itself has passed both simtools workflows in the simtools environment.
+- Python source suite: 189 tests and 58 subtests pass; one optional installed-simtools test is skipped when its dependencies are absent. The installed-native integration itself has passed both simtools workflows in the simtools environment.
 - Python formatting, linting, Towncrier fragment validation, and the repository pre-commit hooks pass after the current edits.
 - An installed wheel smoke test invokes every public command and traces a tiny hashed generic optical model. It verifies an arriving mirror weight of 0.8.
 - No matched sim_telarray photon-by-photon CTAO comparison has passed yet. Archived 7.0.0 PSF products remain diagnostic references, not acceptance data.

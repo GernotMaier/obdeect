@@ -4,9 +4,7 @@ import math
 from collections import defaultdict
 from typing import Any
 
-from obdeect.camera_config import CameraConfigError
-
-_SHAPES = {0: "circle", 1: "hexagon_flat_y", 2: "square", 3: "hexagon_flat_x"}
+from obdeect.camera_config import PIXEL_APERTURE_SHAPES, CameraConfigError
 
 
 def compile_camera_surfaces(
@@ -103,7 +101,7 @@ def compile_camera_surfaces(
         entrances.append({
             **metadata,
             "centre_m": centre,
-            "shape": _SHAPES[pixel_type["funnel_shape_code"]],
+            "shape": PIXEL_APERTURE_SHAPES[pixel_type["funnel_shape_code"]],
             "diameter_m": pixel_type["funnel_diameter_m"],
         })
         cathodes.append({
@@ -112,7 +110,7 @@ def compile_camera_surfaces(
                 value - pixel_type["funnel_depth_m"] * component
                 for value, component in zip(centre, normal, strict=True)
             ],
-            "shape": _SHAPES[pixel_type["cathode_shape_code"]],
+            "shape": PIXEL_APERTURE_SHAPES[pixel_type["cathode_shape_code"]],
             "diameter_m": pixel_type["cathode_diameter_m"],
         })
     return {"entrance_surfaces": entrances, "cathode_surfaces": cathodes}

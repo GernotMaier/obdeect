@@ -64,10 +64,12 @@ axisymmetric_segment_id(std::span<const AxisymmetricSegment> segments,
                         std::uint32_t continuous_surface_id) {
   if (segments.empty())
     return continuous_surface_id;
+  std::optional<std::uint32_t> nearest_id;
   for (const auto &segment : segments)
-    if (contains_axisymmetric_segment(segment, mirror, point))
-      return segment.id;
-  return std::nullopt;
+    if (contains_axisymmetric_segment(segment, mirror, point) &&
+        (!nearest_id || segment.id < *nearest_id))
+      nearest_id = segment.id;
+  return nearest_id;
 }
 
 [[nodiscard]] inline std::optional<AxisymmetricHit>

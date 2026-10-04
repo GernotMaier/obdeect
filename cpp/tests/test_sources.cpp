@@ -1,3 +1,4 @@
+#include "obdeect/cli_parse.hpp"
 #include "obdeect/photon_input.hpp"
 #include "obdeect/sources.hpp"
 #include <algorithm>
@@ -21,6 +22,11 @@ void require(bool condition, const char *message) {
 
 int main() {
   using namespace obdeect;
+  std::vector<double> spectrum{400};
+  for (const auto input : {"300,", ",300", "300,,400", ""}) {
+    require(!parse_wavelengths_nm(input, spectrum), "empty spectral entries are rejected");
+    require(spectrum == std::vector<double>{400}, "invalid spectra do not modify caller data");
+  }
 
   // T-SRC-011: a zenith star is a parallel 400-nm source over the pupil.
   const auto star = star_photons(128, 6.0, {});

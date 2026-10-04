@@ -10,6 +10,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from obdeect import plotting as plot
+from obdeect.camera_surfaces import compile_camera_surfaces
 
 
 def model_fixture():
@@ -289,6 +290,42 @@ class DiagnosticTests(unittest.TestCase):
         fixture["camera"].pop("pixel_types")
         self.model.write_text(json.dumps(fixture))
         self.assertEqual(plot.load_plot_optical_model(self.model).camera_pixels, ())
+
+    def test_legacy_hexagonal_footprints_agree_with_compiled_entrances(self):
+        for shape in (1, 3):
+            with self.subTest(shape=shape):
+                camera = {
+                    "pixel_types": [
+                        {
+                            "id": 1,
+                            "funnel_shape_code": shape,
+                            "cathode_shape_code": shape,
+                            "funnel_diameter_m": 0.1,
+                            "cathode_diameter_m": 0.1,
+                            "funnel_depth_m": 0,
+                        }
+                    ],
+                    "pixels": [
+                        {
+                            "id": 9,
+                            "type_id": 1,
+                            "centre_xy_m": [0, 0],
+                            "z_offset_m": 0,
+                            "rotation_deg": 0,
+                            "normal_slopes": [0, 0],
+                            "module": 0,
+                            "enabled": True,
+                        }
+                    ],
+                }
+                legacy = plot._camera_pixel_polygons({"camera": camera})
+                camera.update(
+                    compile_camera_surfaces(
+                        camera, {"coefficient_m": [0], "radial_scale_m": 1}, 1, reflected=False
+                    )
+                )
+                compiled = plot._camera_pixel_polygons({"camera": camera})
+                self.assertEqual(legacy, compiled)
 
     def test_finite_aspheric_masks_keep_gap_and_tangent_orientation(self):
         surface = plot.AxisymmetricSurface("primary", 2, 0, 3, 2, (0, 4) + (0,) * 11)

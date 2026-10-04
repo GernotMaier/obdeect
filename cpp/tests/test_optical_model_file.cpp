@@ -17,6 +17,36 @@ std::string with_valid_hash(std::string document) {
   return document;
 }
 
+template <class Reader>
+void assert_unknown_fields_rejected(const char *path, Reader read,
+                                    std::initializer_list<std::string_view> components) {
+  std::ifstream input(path);
+  const std::string original((std::istreambuf_iterator<char>(input)),
+                             std::istreambuf_iterator<char>());
+  for (const auto component : components) {
+    auto root = obdeect::json::Parser{original}.parse();
+    assert(root);
+    auto *target = const_cast<obdeect::json::Value *>(root->find("trace_model"));
+    if (!component.empty())
+      target = const_cast<obdeect::json::Value *>(target->find(component));
+    assert(target);
+    if (target->kind == obdeect::json::Value::Kind::array)
+      target = &target->array.front();
+    target->object.emplace_back("unsupported_loss", obdeect::json::Value{});
+    auto *hash = const_cast<obdeect::json::Value *>(root->find("optical_model_sha256"));
+    hash->string = obdeect::detail::sha256(obdeect::detail::canonical_json_without_hash(*root));
+    std::string document;
+    obdeect::detail::append_canonical_json(*root, document);
+    {
+      std::ofstream output(path);
+      output << document;
+    }
+    assert(!read(path));
+  }
+  std::ofstream output(path);
+  output << original;
+}
+
 int main() {
   assert(obdeect::detail::sha256("") ==
          "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
@@ -41,6 +71,8 @@ int main() {
         R"({"format":"obdeect.compiled-optical-model.v1","optical_model_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","provenance":{"model":"LSTN-design","model_version":"7.0.0"},"trace_model":{"kind":"segmented","primary_facets":[{"id":0,"shape":"circle","centre_m":[0,0,0],"normal":[0,0,1],"tangent":[1,0,0],"diameter_m":1,"focal_length_m":10}],"detector_surfaces":[{"id":1,"shape":"circle","centre_m":[0,0,10],"normal":[0,0,1],"tangent":[1,0,0],"diameter_m":1}],"cylinder_obscurers":[{"id":2,"first_endpoint_m":[0,0,2],"second_endpoint_m":[0,0,3],"diameter_m":0.1}],"primary_reflectivity":[{"wavelength_nm":300,"response":0.8},{"wavelength_nm":500,"response":0.9}]}})");
   }
   const auto segmented = obdeect::read_segmented_optical_model(segmented_path);
+  assert_unknown_fields_rejected(segmented_path, obdeect::read_segmented_optical_model,
+                                 {"", "primary_facets", "detector_surfaces", "cylinder_obscurers"});
   if (!segmented || segmented->primary_facets.size() != 1 ||
       segmented->detector_surfaces.size() != 1 || segmented->cylinder_obscurers.size() != 1 ||
       !segmented->primary_reflectivity ||
@@ -90,6 +122,8 @@ int main() {
         R"({"format":"obdeect.compiled-optical-model.v1","optical_model_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","provenance":{"model":"SSTS-design","model_version":"7.0.0"},"trace_model":{"kind":"axisymmetric","primary":{"vertex_z_m":0,"inner_radius_m":0,"outer_radius_m":2,"radial_scale_m":1,"coefficient_m":[0,0,0,0,0,0,0,0,0,0,0,0,0]},"secondary":{"vertex_z_m":2,"inner_radius_m":0,"outer_radius_m":2,"radial_scale_m":1,"coefficient_m":[0,0,0,0,0,0,0,0,0,0,0,0,0]},"detector":{"vertex_z_m":1,"inner_radius_m":0,"outer_radius_m":2,"radial_scale_m":1,"coefficient_m":[0,0,0,0,0,0,0,0,0,0,0,0,0]},"primary_reflectivity":[{"wavelength_nm":300,"response":0.8},{"wavelength_nm":500,"response":0.9}],"secondary_reflectivity":[{"wavelength_nm":300,"response":0.8},{"wavelength_nm":500,"response":0.9}]}})");
   }
   const auto axisymmetric = obdeect::read_axisymmetric_optical_model(axisymmetric_path);
+  assert_unknown_fields_rejected(axisymmetric_path, obdeect::read_axisymmetric_optical_model,
+                                 {"", "primary", "secondary", "detector"});
   if (!axisymmetric) {
     std::remove(axisymmetric_path);
     return 1;
@@ -113,6 +147,12 @@ int main() {
   sector.outer_radius_m = 2;
   sector.span_rad = std::numbers::pi / 2;
   masked.primary_segments = {sector};
+  auto overlapping_sector = sector;
+  overlapping_sector.id = 20;
+  const std::array sectors{sector, overlapping_sector};
+  const std::array reversed_sectors{overlapping_sector, sector};
+  assert(obdeect::axisymmetric_segment_id(sectors, masked.primary, {1, 0, 0}, 10) == 20);
+  assert(obdeect::axisymmetric_segment_id(reversed_sectors, masked.primary, {1, 0, 0}, 10) == 20);
   auto mask_hit = obdeect::trace_axisymmetric_optical_model({{1, 0, 10}, {0, 0, -1}}, 2, masked);
   assert(mask_hit.status == obdeect::PhotonStatus::detected &&
          mask_hit.interaction_surface_ids[0] == 21 && mask_hit.interaction_surface_ids[1] == 11 &&

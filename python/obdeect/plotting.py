@@ -11,6 +11,8 @@ from pathlib import Path
 from typing import Literal
 from xml.sax.saxutils import escape
 
+from obdeect.camera_config import PIXEL_APERTURE_SHAPES
+
 
 def _save_figure(figure, output: Path, **options):
     """Make vector exports reproducible by removing date and random ID metadata."""
@@ -455,11 +457,10 @@ def _camera_pixel_polygons(optical_model: dict) -> tuple[PlotPixel, ...]:
     if not math.isfinite(angle):
         raise ValueError("camera rotation must be finite")
     cosine, sine = math.cos(angle), math.sin(angle)
-    shapes = {0: "circle", 1: "hexagon_flat_x", 2: "square", 3: "hexagon_flat_y"}
     result = []
     for pixel in camera.get("pixels", []):
         pixel_type = types[pixel["type_id"]]
-        shape = shapes[pixel_type["funnel_shape_code"]]
+        shape = PIXEL_APERTURE_SHAPES[pixel_type["funnel_shape_code"]]
         diameter = float(pixel_type["funnel_diameter_m"])
         x, y = (float(value) for value in pixel["centre_xy_m"])
         if not math.isfinite(x) or not math.isfinite(y):

@@ -445,6 +445,12 @@ detector_fields(const json::Value &trace) {
     return std::nullopt;
   std::vector<ImportedDetectorSurface> result;
   for (const auto &entry : entries->array) {
+    if (!fields_supported(entry, {"id", "centre_m", "normal", "tangent", "diameter_m", "shape",
+                                  "enabled", "source_pixel_id", "source_type_id"}))
+      return std::nullopt;
+    for (const auto name : {"source_pixel_id", "source_type_id"})
+      if (entry.find(name) && !uint_field(entry, name))
+        return std::nullopt;
     if (const auto *enabled = entry.find("enabled"))
       if (enabled->kind != json::Value::Kind::boolean || !enabled->boolean)
         return std::nullopt;
@@ -464,6 +470,9 @@ detector_fields(const json::Value &trace) {
 
 [[nodiscard]] inline std::optional<AxisymmetricMirror>
 axisymmetric_surface(const json::Value &value) {
+  if (!fields_supported(value, {"vertex_z_m", "inner_radius_m", "outer_radius_m", "radial_scale_m",
+                                "coefficient_m"}))
+    return std::nullopt;
   const auto vertex = number_field(value, "vertex_z_m");
   const auto inner = number_field(value, "inner_radius_m");
   const auto outer = number_field(value, "outer_radius_m");
@@ -503,6 +512,8 @@ segment_fields(const json::Value &trace, std::string_view name) {
     segment.id = *id;
     constexpr double radians_per_degree = std::numbers::pi / 180;
     if (*shape == "hexagon") {
+      if (!fields_supported(entry, {"id", "shape", "centre_xy_m", "diameter_m", "rotation_deg"}))
+        return std::nullopt;
       const auto *centre = entry.find("centre_xy_m");
       const auto diameter = number_field(entry, "diameter_m");
       const auto rotation = number_field(entry, "rotation_deg");
@@ -517,6 +528,9 @@ segment_fields(const json::Value &trace, std::string_view name) {
       segment.diameter_m = *diameter;
       segment.rotation_rad = *rotation * radians_per_degree;
     } else if (*shape == "annular_sector") {
+      if (!fields_supported(entry, {"id", "shape", "inner_radius_m", "outer_radius_m", "start_deg",
+                                    "span_deg", "gap_m", "gap_at_start"}))
+        return std::nullopt;
       const auto inner = number_field(entry, "inner_radius_m"),
                  outer = number_field(entry, "outer_radius_m");
       const auto start = number_field(entry, "start_deg"), span = number_field(entry, "span_deg");
@@ -578,7 +592,11 @@ read_segmented_optical_model(const std::string &path) {
   const auto model_provenance = detail::provenance(*root);
   const auto *trace = detail::field(*root, "trace_model");
   if (!model_provenance || !trace || trace->kind != json::Value::Kind::object ||
-      !detail::string_field(*trace, "kind") || *detail::string_field(*trace, "kind") != "segmented")
+      !detail::string_field(*trace, "kind") ||
+      *detail::string_field(*trace, "kind") != "segmented" ||
+      !detail::fields_supported(*trace, {"kind", "primary_facets", "detector_surfaces",
+                                         "cylinder_obscurers", "primary_reflectivity",
+                                         "primary_scatter", "camera_response"}))
     return std::nullopt;
   const auto *facet_values = detail::field(*trace, "primary_facets");
   const auto *detector_values = detail::field(*trace, "detector_surfaces");
@@ -590,7 +608,8 @@ read_segmented_optical_model(const std::string &path) {
     return std::nullopt;
   std::vector<ImportedFacet> facets;
   for (const auto &value : facet_values->array) {
-    if (value.kind != json::Value::Kind::object)
+    if (!detail::fields_supported(value, {"id", "centre_m", "normal", "tangent", "diameter_m",
+                                          "focal_length_m", "shape"}))
       return std::nullopt;
     const auto id = detail::uint_field(value, "id");
     const auto centre = detail::vec3_field(value, "centre_m");
@@ -610,7 +629,8 @@ read_segmented_optical_model(const std::string &path) {
     return std::nullopt;
   std::vector<ImportedCylinderObscurer> obscurers;
   for (const auto &value : obscurer_values->array) {
-    if (value.kind != json::Value::Kind::object)
+    if (!detail::fields_supported(value,
+                                  {"id", "first_endpoint_m", "second_endpoint_m", "diameter_m"}))
       return std::nullopt;
     const auto id = detail::uint_field(value, "id");
     const auto first = detail::vec3_field(value, "first_endpoint_m");
@@ -653,7 +673,13 @@ read_axisymmetric_optical_model(const std::string &path) {
   const auto *trace = detail::field(*root, "trace_model");
   if (!model_provenance || !trace || trace->kind != json::Value::Kind::object ||
       !detail::string_field(*trace, "kind") ||
-      *detail::string_field(*trace, "kind") != "axisymmetric")
+      *detail::string_field(*trace, "kind") != "axisymmetric" ||
+      !detail::fields_supported(
+          *trace,
+          {"kind", "primary", "secondary", "detector", "primary_segments", "secondary_segments",
+           "primary_surface_id", "secondary_surface_id", "detector_surface_id",
+           "block_incoming_secondary", "detector_surfaces", "primary_reflectivity",
+           "secondary_reflectivity", "primary_scatter", "secondary_scatter", "camera_response"}))
     return std::nullopt;
   const auto *primary = detail::field(*trace, "primary");
   const auto *secondary = detail::field(*trace, "secondary");

@@ -340,7 +340,9 @@ intersect_segmented_primary_unchecked(const Ray &ray,
   std::optional<SegmentedFacetHit> nearest;
   for (const auto &facet : optical_model.primary_facets) {
     const auto candidate = intersect_segmented_facet_unchecked(ray, facet);
-    if (candidate && (!nearest || candidate->distance_m < nearest->distance_m))
+    if (candidate &&
+        (!nearest || candidate->distance_m < nearest->distance_m ||
+         (candidate->distance_m == nearest->distance_m && candidate->facet_id < nearest->facet_id)))
       nearest = candidate;
   }
   return nearest;
@@ -372,7 +374,8 @@ intersect_cylinder_obscurers_unchecked(const Ray &ray,
   for (const auto &obscurer : optical_model.cylinder_obscurers) {
     const auto distance_m = intersect_closed_finite_cylinder(
         ray, obscurer.first_endpoint_m, obscurer.second_endpoint_m, obscurer.diameter_m * 0.5);
-    if (distance_m && (!nearest || *distance_m < nearest->distance_m))
+    if (distance_m && (!nearest || *distance_m < nearest->distance_m ||
+                       (*distance_m == nearest->distance_m && obscurer.id < nearest->surface_id)))
       nearest = CylinderObscurerHit{obscurer.id, *distance_m};
   }
   return nearest;
@@ -413,7 +416,9 @@ intersect_detector_surfaces_unchecked(const Ray &ray,
   std::optional<DetectorSurfaceHit> nearest;
   for (const auto &surface : optical_model.detector_surfaces) {
     const auto candidate = intersect_detector_surface_unchecked(ray, surface);
-    if (candidate && (!nearest || candidate->distance_m < nearest->distance_m))
+    if (candidate && (!nearest || candidate->distance_m < nearest->distance_m ||
+                      (candidate->distance_m == nearest->distance_m &&
+                       candidate->surface_id < nearest->surface_id)))
       nearest = candidate;
   }
   return nearest;

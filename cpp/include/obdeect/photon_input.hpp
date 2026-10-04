@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <fstream>
 #include <iomanip>
+#include <iterator>
 #include <limits>
 #include <optional>
 #include <span>
@@ -69,7 +70,10 @@ inline void write_photon_csv(std::ostream &output, const PhotonBatchContext &con
          std::isfinite(photon.ray.position_m.z) && std::isfinite(direction_length) &&
          std::abs(direction_length - 1.0) <= 1e-12 && std::isfinite(photon.wavelength_nm) &&
          photon.wavelength_nm >= 0.0 && std::isfinite(photon.time_ns) &&
-         std::isfinite(photon.weight) && photon.weight >= 0.0;
+         std::isfinite(photon.weight) && photon.weight >= 0.0 &&
+         (std::isnan(photon.emission_height_m) || std::isfinite(photon.emission_height_m)) &&
+         (std::isnan(photon.emission_distance_m) ||
+          (std::isfinite(photon.emission_distance_m) && photon.emission_distance_m >= 0.0));
 }
 
 [[nodiscard]] inline bool valid_context(const PhotonBatchContext &context) {
@@ -171,6 +175,9 @@ private:
   static constexpr std::string_view kRequiredColumns[] = {
       "run_id", "event_id", "array_id", "telescope_id", "photon_id",     "x_m",     "y_m",
       "z_m",    "dx",       "dy",       "dz",           "wavelength_nm", "time_ns", "weight"};
+  static constexpr std::string_view kOptionalColumns[] = {
+      "bunch_id",      "emission_height_m", "emission_distance_m", "telescope_x_m",
+      "telescope_y_m", "telescope_z_m",     "array_reuse_weight"};
 
   void initialise_header() {
     std::string header;
@@ -178,6 +185,11 @@ private:
       throw std::invalid_argument("photon CSV is missing a header");
     const auto columns = split(header);
     for (std::size_t index = 0; index < columns.size(); ++index) {
+      if (std::find(std::begin(kRequiredColumns), std::end(kRequiredColumns), columns[index]) ==
+              std::end(kRequiredColumns) &&
+          std::find(std::begin(kOptionalColumns), std::end(kOptionalColumns), columns[index]) ==
+              std::end(kOptionalColumns))
+        throw std::invalid_argument("photon CSV has unsupported column: " + columns[index]);
       if (columns[index].empty() || !header_index_.emplace(columns[index], index).second)
         throw std::invalid_argument("photon CSV has an empty or duplicate column name");
     }
@@ -210,7 +222,7 @@ private:
       try {
         // std::stoull accepts a leading minus sign and converts it modulo the
         // unsigned range. IDs must fail closed instead of silently wrapping.
-        if (text.empty() || text.front() == '-')
+        if (text.empty() || text.find_first_not_of("0123456789") != std::string::npos)
           throw invalid("invalid integer in " + std::string{name});
         const auto value = std::stoull(text, &consumed);
         if (consumed != text.size())

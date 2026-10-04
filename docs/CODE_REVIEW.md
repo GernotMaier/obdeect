@@ -27,6 +27,11 @@ Python result consumers, diagnostic plots, and installed package boundary.
 | Measured camera response and mirror scatter could be silently ignored. | Strict native schemas apply declared camera response once and keyed scatter independently of ordering and blocks. |
 | Generated source batches were not reusable as reference input. | Resolved source export preserves photon context and every physical input at round-trip precision. |
 | Docker cache entries accumulated in Actions storage. | Reusable layers now use release registry images and inline cache; 151 obsolete entries were removed. |
+| Unknown trace and photon fields could be discarded silently. | Strict transport schemas reject unsupported fields, malformed identities and invalid emission metadata before tracing. |
+| Coincident boundaries changed identity with input order. | Facets, detectors, obscurers and overlapping segment masks select the lowest surface ID on exact ties. |
+| Benchmark acceptance errors were found after launching commands. | Shared fixture validation runs before execution and instrumentation flags require actual booleans. |
+| Normalization could overwrite an aliased source arrival file. | Path, symbolic-link and hard-link aliases are rejected before writing. |
+| Legacy pixel plots exchanged hexagonal orientations. | Plotting and camera compilation share the physical pixel-shape mapping and agree in a focused footprint test. |
 | Bulk API tests assumed a local build executable. | Installed wheel tests resolve the packaged native command and exercise native/bulk agreement. |
 
 ## Code retained deliberately

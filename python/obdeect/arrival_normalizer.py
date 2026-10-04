@@ -103,6 +103,10 @@ def normalize_arrivals(
     source_sha256: str | None = None,
 ) -> int:
     """Write one normalized row per obdeect arrival and return its count."""
+    if input_path.resolve() == output_path.resolve() or (
+        output_path.exists() and input_path.samefile(output_path)
+    ):
+        raise ArrivalContractError("normalized output must not alias the input arrival file")
     for name, value in (
         ("optical_model_sha256", optical_model_sha256),
         ("source_sha256", source_sha256),

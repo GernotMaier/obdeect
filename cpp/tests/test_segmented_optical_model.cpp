@@ -85,6 +85,33 @@ int main() {
   require(hit.has_value() && hit->facet_id == far.id && std::abs(hit->distance_m - 3.0) < 1.e-12,
           "nearest finite panel is selected");
 
+  // Coincident edges must select the same physical identity for any input order.
+  auto overlapping_facet = far;
+  overlapping_facet.id = 12;
+  const ImportedDetectorSurface detector_a{20, {0, 0, 4}, {0, 0, 1}, 2, FacetShape::circle};
+  auto detector_b = detector_a;
+  detector_b.id = 21;
+  const ImportedCylinderObscurer cylinder_a{30, {0, 0, 3}, {0, 0, 4}, 1};
+  auto cylinder_b = cylinder_a;
+  cylinder_b.id = 31;
+  for (const bool reverse : {false, true}) {
+    const auto tied = compile_segmented_optical_model(
+        {provenance,
+         reverse ? std::vector<ImportedFacet>{overlapping_facet, far}
+                 : std::vector<ImportedFacet>{far, overlapping_facet},
+         reverse ? std::vector<ImportedDetectorSurface>{detector_b, detector_a}
+                 : std::vector<ImportedDetectorSurface>{detector_a, detector_b},
+         reverse ? std::vector<ImportedCylinderObscurer>{cylinder_b, cylinder_a}
+                 : std::vector<ImportedCylinderObscurer>{cylinder_a, cylinder_b}});
+    require(tied.has_value(), "coincident-boundary optical model compiles");
+    require(intersect_segmented_primary(on_axis, *tied)->facet_id == far.id,
+            "coincident facets select lowest ID independent of ordering");
+    require(intersect_detector_surfaces(on_axis, *tied)->surface_id == detector_a.id,
+            "coincident detectors select lowest ID independent of ordering");
+    require(intersect_cylinder_obscurers_unchecked(on_axis, *tied)->surface_id == cylinder_a.id,
+            "coincident obscurers select lowest ID independent of ordering");
+  }
+
   const std::vector<Vec3> positions{{0.0, 0.0, 5.0}, {3.0, 0.0, 5.0}};
   const std::vector<Vec3> directions{{0.0, 0.0, -1.0}, {0.0, 0.0, -1.0}};
   const std::vector<double> wavelength{400.0, 400.0};

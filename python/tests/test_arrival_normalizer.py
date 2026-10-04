@@ -1,6 +1,7 @@
 """Tests for conversion from the arrival contract to comparison rows."""
 
 import csv
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -10,6 +11,19 @@ from obdeect.result_contract import ArrivalContractError
 
 
 class TestArrivalNormalizer(unittest.TestCase):
+    def test_output_aliases_cannot_overwrite_frozen_arrivals(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "arrivals.csv"
+            source.write_text("frozen input must remain untouched\n")
+            symlink, hardlink = source.with_name("symlink.csv"), source.with_name("hardlink.csv")
+            symlink.symlink_to(source)
+            os.link(source, hardlink)
+            for output in (source, symlink, hardlink):
+                with self.subTest(output=output.name):
+                    with self.assertRaisesRegex(ArrivalContractError, "alias"):
+                        normalize_arrivals(source, output)
+                    self.assertEqual(source.read_text(), "frozen input must remain untouched\n")
+
     def test_normalizes_detected_and_loss_rows(self):
         """Detected positions and terminal loss positions remain distinguishable."""
         header = (

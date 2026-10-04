@@ -168,6 +168,20 @@ class BenchmarkTests(unittest.TestCase):
         with self.assertRaisesRegex(BenchmarkError, "multiple thread"):
             freeze(self.config)
 
+    def test_rejects_invalid_acceptance_before_execution(self):
+        for value in (None, True, -1, 0):
+            with self.subTest(minimum=value):
+                self.config["fixture"]["minimum_detected"] = value
+                with self.assertRaisesRegex(BenchmarkError, "coverage"):
+                    freeze(self.config)
+
+    def test_instrumentation_requires_an_actual_boolean(self):
+        for value in (0, 1, "true", None):
+            with self.subTest(value=value):
+                self.config["engines"]["candidate"]["timing_metrics"] = value
+                with self.assertRaisesRegex(BenchmarkError, "timing_metrics"):
+                    freeze(self.config)
+
 
 if __name__ == "__main__":
     unittest.main()

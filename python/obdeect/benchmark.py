@@ -24,6 +24,7 @@ from obdeect.production_validation import (
     ProductionValidationError,
     compare,
     read_comparison_table,
+    validate_comparison_fixture,
     validate_optical_model,
 )
 
@@ -77,6 +78,7 @@ def freeze(configuration: dict) -> dict:
         raise BenchmarkError("optical_model must contain a JSON object")
     try:
         validate_optical_model(model, "generic")
+        validate_comparison_fixture(config["fixture"])
     except ProductionValidationError as error:
         raise BenchmarkError(str(error)) from error
     fixture = config["fixture"]
@@ -148,7 +150,7 @@ def freeze(configuration: dict) -> dict:
         paths.add(str(_file(argv[0], "engine executable")))
         if not any("{output}" in arg for arg in argv):
             raise BenchmarkError("engine argv must use {output} for a new comparison CSV")
-        if engine["timing_metrics"] not in (True, False) or (
+        if not isinstance(engine["timing_metrics"], bool) or (
             engine["timing_metrics"] and not any("{metrics}" in arg for arg in argv)
         ):
             raise BenchmarkError("timing_metrics requires a {metrics} output argument")

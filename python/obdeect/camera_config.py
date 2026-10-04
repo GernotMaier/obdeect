@@ -7,6 +7,8 @@ import shlex
 from collections import Counter
 from typing import Any
 
+PIXEL_APERTURE_SHAPES = {0: "circle", 1: "hexagon_flat_y", 2: "square", 3: "hexagon_flat_x"}
+
 
 class CameraConfigError(ValueError):
     """Camera geometry is malformed or uses an unsupported directive."""

@@ -276,6 +276,32 @@ def validate_optical_model(optical_model: dict[str, Any], telescope_family: str)
         )
 
 
+def validate_comparison_fixture(fixture: dict[str, Any]) -> tuple[int, set[str]]:
+    """Validate declared acceptance coverage before any simulator is executed."""
+    if not isinstance(fixture, dict):
+        raise ProductionValidationError("fixture must declare detection and surface coverage")
+    minimum = fixture.get("minimum_detected")
+    surfaces = fixture.get("required_surfaces")
+    if (
+        isinstance(minimum, bool)
+        or not isinstance(minimum, int)
+        or minimum < 0
+        or (minimum == 0 and fixture.get("allow_all_loss") is not True)
+        or not isinstance(surfaces, list)
+        or any(not isinstance(surface, str) or not surface for surface in surfaces)
+    ):
+        raise ProductionValidationError("fixture must declare detection and surface coverage")
+    for column in ("optical_model_sha256", "source_sha256"):
+        expected = fixture.get(column)
+        if (
+            not isinstance(expected, str)
+            or len(expected) != 64
+            or any(character not in "0123456789abcdef" for character in expected)
+        ):
+            raise ProductionValidationError(f"fixture lacks valid {column}")
+    return minimum, set(surfaces)
+
+
 def compare(
     obdeect: dict[PhotonIdentity, ComparisonRow],
     simtel: dict[PhotonIdentity, ComparisonRow],
@@ -329,26 +355,7 @@ def compare(
     minimum = 1
     required_surfaces: set[str] = set()
     if fixture is not None:
-        minimum = fixture.get("minimum_detected")
-        surfaces = fixture.get("required_surfaces")
-        if (
-            isinstance(minimum, bool)
-            or not isinstance(minimum, int)
-            or minimum < 0
-            or (minimum == 0 and fixture.get("allow_all_loss") is not True)
-            or not isinstance(surfaces, list)
-            or any(not isinstance(surface, str) or not surface for surface in surfaces)
-        ):
-            raise ProductionValidationError("fixture must declare detection and surface coverage")
-        required_surfaces = set(surfaces)
-        for column in ("optical_model_sha256", "source_sha256"):
-            expected = fixture.get(column)
-            if (
-                not isinstance(expected, str)
-                or len(expected) != 64
-                or any(character not in "0123456789abcdef" for character in expected)
-            ):
-                raise ProductionValidationError(f"fixture lacks valid {column}")
+        minimum, required_surfaces = validate_comparison_fixture(fixture)
         for engine, rows in (("obdeect", obdeect), ("sim_telarray", simtel)):
             for photon in rows.values():
                 for column in (
