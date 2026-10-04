@@ -1,95 +1,52 @@
-# Consolidated project status
+# Review of optical transport changes
 
-Read [STATUS.md](STATUS.md) for the current implementation, reviewed gaps,
-and ordered tasks with acceptance criteria. Maintain that single document.
+This review covers the native transport, compiled optical-model loading,
+Python result consumers, diagnostic plots, and installed package boundary.
+[STATUS.md](STATUS.md) records the remaining production requirements.
 
-## Fixed here
+## Corrections and simplifications
 
-- The focal plot changed an explicit zero throughput into unit throughput.
-- The mirror-list parser silently treated malformed optional height as zero.
-- The path plot accepted non-finite vertices and invalid vertex counts.
-- The README repeated its quick start, had an unclosed shell fence, and mixed
-  build locations. It now points to short, runnable tutorials.
-- Ray plots showed the long source flight at equal scale, hiding interactions
-  near the mirror and camera. They now focus on the telescope region.
+| Finding | Result |
+| --- | --- |
+| Native command and library repeated segmented transport. | Both use `trace_segmented_path`, including actual terminal intersections and optical loss weights. |
+| Root iteration could skip finite asphere intersections. | Bounded polynomial isolation selects the nearest accepted root and records numerical failures separately from physical misses. |
+| A custom detector could reuse an obscurer ID or retain production qualification. | IDs include every component; panel and detector overrides invalidate production readiness. |
+| Response and terminal losses were mixed with photon counts. | Independent arriving, response-loss, and terminal-loss weights close to incident weight. |
+| Dual-reflector response export read the wrong primary object. | Compiler exports the primary mirror response and preserves complete wavelength/incidence grids. |
+| The secondary polynomial used its local sag sign in the telescope frame. | The importer applies sim_telarray's secondary frame rotation; nominal SST and SCT rays now reach the detector. |
+| Output paths could alias frozen inputs or each other. | Native commands reject path, symlink and hardlink aliases before opening output files. |
+| Python consumers validated a complete arrival list before reparsing it. | Streaming arrival validation supports PSF analysis without retaining that list. |
+| Direct comparison adapters bypassed some CSV invariants. | Both comparison paths share identity, optical scalar, direction, and loss checks. |
+| Frozen comparison commands could modify their final input and still succeed. | Inputs are verified before and after each command; failures retain logs and a report. |
+| Legacy timing and unavailable interactions could acquire production provenance. | Hash-bound normalization requires recorded timing and preserves missing interaction information. |
+| Telescope and ray views repeated overlay drawing. | One renderer handles deterministic selection, interaction markers, status colours, and model provenance. |
+| SVG images moved out-of-frame hits into detector edge bins. | Hits outside the displayed focal region are excluded from those bins. |
+| Bulk API tests assumed a local build executable. | Installed wheel tests resolve the packaged native command and exercise native/bulk agreement. |
 
-## Open design work
+## Code retained deliberately
 
-- The  reference, segmented, and general optical optical models each have separate trace
-  loops. They cannot be deduplicated safely until they share one interaction
-  record and terminal-status contract.
-- Both native executables repeat CLI parsing and CSV writing. A common I/O
-  layer would help when the trace output schema is stabilized.
-- CTAO reference plots have no physical structure data. Full structure plots
-  need a trace-ready compiled optical model with supports, camera, and mirror panels.
-- The general optical optical model lacks curved surfaces, material bindings, and
-  complete interaction diagnostics. See [STATUS.md](STATUS.md) for the
-  validation plan and production blockers.
+The analytic demonstrators remain independent test references. They do not
+supply production telescope defaults. The generic nonsequential kernel and
+slab primitive retain their analytic tests; their existence does not imply
+that imported telescope windows or concentrators use them.
 
-## September 2026 audit
+Model import, plotting, CSV diagnostics, and nanobind remain boundary code.
+Transport uses the C++ standard library, immutable optical-model inputs, and
+fixed interaction storage without per-photon allocation.
 
-This audit traced the installed commands through their C++ entry points, optical model
-compiler, arrival readers, PSF analysis, tests, and the available
-`simulation-models` 7.0.0 production tables. The five-model smoke test below
-uses 1,000 deterministic on-axis star samples per model. It checks that the
-workflow runs; it is not a physical comparison against `sim_telarray`.
+## Verification and limits
 
-| Model | Import and native export | Detected / 1,000 | PSF derivation |
-| --- | --- | ---: | --- |
-| LSTN-design | Succeeded | 767 | Succeeded |
-| MSTx-FlashCam | Succeeded | 686 | Succeeded |
-| MSTx-NectarCam | Succeeded | 684 | Succeeded |
-| SSTS-design | Succeeded | 123 | Succeeded |
-| SCTS-design | Succeeded | 0 | Failed with no detected optical weight |
+Focused tests exercise analytic intersections, angular response interpolation,
+weight closure, model integrity, identity preservation, replay blocks, concurrent
+bulk calls, frozen-input mutation, and plotted geometry. Full checks include
+Debug and EventIO builds, the Python source suite, installed wheel smoke tests,
+formatting, linting, and pre-commit hooks. Current measured results belong in
+[STATUS.md](STATUS.md), rather than a second completion ledger here.
 
-An additional SCT hit count found 794 M1 hits and 794 M2 hits, but no focal
-hits. Sampled post-M2 rays crossed the focal vertex plane outside the exported
-0.422 m focal radius. The next step is to verify the SCT prescription and
-coordinate conventions against a frozen `sim_telarray` photon block. No SCT
-acceptance claim follows from the successful export. All five compiled optical models have `native_trace_ready=false`
-and nonempty `trace_blockers`; the production gate rejects them as designed.
+No matched production sim_telarray comparison or validated speed advantage is
+established by these changes. See [PRODUCTION_VALIDATION.md](PRODUCTION_VALIDATION.md)
+for the required common inputs, acceptance criteria, and evidence.
 
-### Execution and duplication map
-
-| Path | Current use | Review conclusion |
-| --- | --- | --- |
-| `simtools_raytrace_main.cpp` with `optical_model_file.hpp` | Model-derived command used by the README | Active nominal path. It has a separate segmented and dual-asphere trace loop. |
-| `reference_main.cpp` and `artificial_mst.hpp` | Developer demo and analytic tests | Retain as a diagnostic; keep it out of production claims. |
-| `ctao_main.cpp`, `ctao_trace.hpp`, `ctao_models.hpp` | Analytic developer command; also the no-optical model branch of the simtools tracer | Duplicate analytic route. Consolidate when the public command no longer needs that branch. |
-| `optical_model.hpp` and its `trace.hpp` overload | Generic nonsequential kernel and tests | No model importer or public command currently supplies it. Do not advertise its material/obscurer capabilities as active CTAO support. |
-| `materials.hpp`, `atmosphere.hpp`, EventIO readers | Primitive tests and optional adapters | Not bound into the model-derived native CLI. Their presence does not imply coating, atmosphere, or EventIO support in that workflow. |
-| `analysis.py`, `result_contract.py`, `plotting.py` | Three separate CSV consumers | Keep one versioned arrival contract and migrate consumers to it before changing the output schema. PSF analysis now rejects missing or impossible optical weights. |
-
-The segmented primary and detector had duplicate aperture-containment code.
-They now use one primitive; circular containment uses squared distance. The
-star phase is covered by a common-wavefront test. For camera configuration
-files with pixel entrance diameters, the circular native focal bound now
-includes the outer edge of each known entrance. ECSV layouts that carry only
-pixel centres still give a centre-only bound; their physical edge remains
-unknown.
-
-### Use-case gate
-
-| Requested study | Native state | Missing before a CTAO production claim |
-| --- | --- | --- |
-| LST/MST star and PSF | Runnable with nominal planar panels | Panel curvature, optical response, structures, alignment, and matched reference observables. |
-| SST/SCT star and PSF | Continuous dual-asphere export; SST smoke trace works, SCT smoke trace has no detections | Segment/structure geometry and a validated focal mapping; SCT requires its own first-hit and acceptance study. |
-| Nearby illuminator | Generic finite point source runnable | Model-defined source position, pointing, angular/spectral/temporal distribution, and atmosphere. |
-| Calibration laser | Generic geometric beam runnable | Model-defined laser configuration, attenuation, scattering, and response. |
-| Throughput, shadows, incident-angle scans | Partial output fields, no qualified production workflow | Material bindings, obscurers, interaction identities, common photon blocks, and frozen comparison fixtures. |
-
-### Next engineering steps
-
-1. Introduce a shared interaction and terminal-result record before merging
-   the three trace loops. Include surface IDs, normals, incoming/outgoing
-   directions, path and time per interaction, and a reason for each loss.
-2. Compile actual panel curvature and pixel/detector boundaries, then bind
-   structures and wavelength/incidence response from the selected model.
-   Keep unavailable fields as explicit trace blockers.
-3. Feed an identical checksummed photon block to native and `sim_telarray`
-   traces. Investigate the SCT zero-detection case at the first divergent
-   surface. Record residuals and predeclared tolerances for each telescope and
-   source class.
-4. Only after those contracts are stable, consolidate the CLI parsers and CSV
-   writers, remove the duplicate analytic branch from the public tracer, and
-   benchmark photons/s and peak memory on the same optical model and photon block.
+The [nominal five-model smoke record](review/nominal-optics.json) retains the
+model hashes, commands and terminal counts for the corrected importer. Large
+CSV outputs are reproducible from those commands and are not bundled here.

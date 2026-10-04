@@ -36,9 +36,10 @@ jobs:
       - name: Build and smoke-test wheels
         env:
           CIBW_BUILD: "cp314-*"
+          CIBW_TEST_REQUIRES: "pytest"
           CIBW_TEST_COMMAND: >-
-            obdeect-simtools-raytrace --telescope MST --photons 8
-            --output {project}/wheel-smoke.csv
+            python {project}/tools/installed_smoke.py
+            && python -m pytest {project}/python/tests/test_bulk_tracing.py -q
         run: python -m cibuildwheel --output-dir wheelhouse
       - uses: actions/upload-artifact@v7
         with:

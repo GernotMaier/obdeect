@@ -80,6 +80,45 @@ class TestPsfAnalysis(unittest.TestCase):
         self.assertEqual(result.terminal_count, {"blocked_camera": 1, "detected": 2})
         self.assertEqual(result.terminal_input_weight, {"blocked_camera": 1.0, "detected": 1.8})
 
+    def test_arrival_contract_preserves_psf_and_validates_loss_rows(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            legacy = self._trace(root)
+            expected = analyse_trace_csv(legacy)
+            with legacy.open(newline="") as handle:
+                rows = list(csv.DictReader(handle))
+            for photon_id, row in enumerate(rows):
+                row.update(
+                    contract_version="obdeect-arrival-v1",
+                    photon_id=photon_id,
+                    source_kind="replay",
+                    wavelength_nm=400,
+                    emission_time_ns=0,
+                    path_length_m=1,
+                    z0_m=0,
+                    z1_m=1 if row["status"] == "detected" else "",
+                )
+            modern = root / "arrivals.csv"
+
+            def write_arrivals():
+                with modern.open("w", newline="") as handle:
+                    writer = csv.DictWriter(handle, fieldnames=rows[0])
+                    writer.writeheader()
+                    writer.writerows(rows)
+
+            write_arrivals()
+            self.assertEqual(analyse_trace_csv(modern), expected)
+            # Contract validation covers terminal losses too, after the detections.
+            rows[-1]["z0_m"] = "nan"
+            write_arrivals()
+            with self.assertRaisesRegex(ValueError, "non-finite z0_m"):
+                analyse_trace_csv(modern)
+            rows[-1]["z0_m"] = 0
+            rows[-1]["photon_id"] = 0
+            write_arrivals()
+            with self.assertRaisesRegex(ValueError, "duplicate photon_id"):
+                analyse_trace_csv(modern)
+
     def test_derivation_writes_field_angle_metrics_without_retracing(self):
         # T-VIS-016: an off-axis metric carries its configured field direction
         # and the analysis consumes the recorded detector intersection only.

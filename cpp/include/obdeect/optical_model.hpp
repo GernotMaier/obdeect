@@ -38,16 +38,16 @@ struct ImportedOpticalModel {
 };
 
 class CompiledOpticalModel {
- public:
-  CompiledOpticalModel(CompiledOpticalModel&&) = default;
-  CompiledOpticalModel(const CompiledOpticalModel&) = default;
+public:
+  CompiledOpticalModel(CompiledOpticalModel &&) = default;
+  CompiledOpticalModel(const CompiledOpticalModel &) = default;
 
-  [[nodiscard]] const ModelProvenance& provenance() const { return provenance_; }
-  [[nodiscard]] const std::vector<OpticalSurfaceRecord>& surfaces() const { return surfaces_; }
+  [[nodiscard]] const ModelProvenance &provenance() const { return provenance_; }
+  [[nodiscard]] const std::vector<OpticalSurfaceRecord> &surfaces() const { return surfaces_; }
   [[nodiscard]] std::uint32_t max_interactions() const { return max_interactions_; }
 
- private:
-  friend std::optional<CompiledOpticalModel> compile_optical_model(const ImportedOpticalModel&);
+private:
+  friend std::optional<CompiledOpticalModel> compile_optical_model(const ImportedOpticalModel &);
   CompiledOpticalModel(ModelProvenance provenance, std::vector<OpticalSurfaceRecord> surfaces,
                        std::uint32_t max_interactions)
       : provenance_(std::move(provenance)), surfaces_(std::move(surfaces)),
@@ -58,17 +58,17 @@ class CompiledOpticalModel {
   std::uint32_t max_interactions_{};
 };
 
-[[nodiscard]] inline std::optional<CompiledOpticalModel> compile_optical_model(
-    const ImportedOpticalModel& input) {
-  if (!has_valid_provenance(input.provenance) || input.surfaces.empty() || input.max_interactions == 0 ||
-      input.max_interactions > kMaximumOpticalModelInteractions)
+[[nodiscard]] inline std::optional<CompiledOpticalModel>
+compile_optical_model(const ImportedOpticalModel &input) {
+  if (!has_valid_provenance(input.provenance) || input.surfaces.empty() ||
+      input.max_interactions == 0 || input.max_interactions > kMaximumOpticalModelInteractions)
     return std::nullopt;
   std::unordered_set<std::uint32_t> ids;
   ids.reserve(input.surfaces.size());
-  for (const auto& surface : input.surfaces) {
-    if (!surface.frame.is_valid() || !std::isfinite(surface.diameter_m) || surface.diameter_m <= kEpsilon ||
-        surface.shape > FacetShape::hexagon_flat_x || surface.role > SurfaceRole::obscurer ||
-        !ids.insert(surface.id).second)
+  for (const auto &surface : input.surfaces) {
+    if (!surface.frame.is_valid() || !std::isfinite(surface.diameter_m) ||
+        surface.diameter_m <= kEpsilon || surface.shape > FacetShape::hexagon_flat_x ||
+        surface.role > SurfaceRole::obscurer || !ids.insert(surface.id).second)
       return std::nullopt;
     if (!std::isfinite(surface.inner_radius_m) || surface.inner_radius_m < 0.0 ||
         (surface.sag && (surface.shape != FacetShape::circle ||
@@ -88,10 +88,10 @@ struct OpticalSurfaceHit {
   Vec3 normal{};
 };
 
-[[nodiscard]] inline std::optional<OpticalSurfaceHit> intersect_nearest_surface(
-    const Ray& ray, const CompiledOpticalModel& optical_model) {
+[[nodiscard]] inline std::optional<OpticalSurfaceHit>
+intersect_nearest_surface(const Ray &ray, const CompiledOpticalModel &optical_model) {
   std::optional<OpticalSurfaceHit> nearest;
-  for (const auto& surface : optical_model.surfaces()) {
+  for (const auto &surface : optical_model.surfaces()) {
     std::optional<OpticalSurfaceHit> candidate;
     if (surface.sag) {
       const auto local_hit = intersect_axisymmetric_mirror(
@@ -102,19 +102,20 @@ struct OpticalSurfaceHit {
                                       surface.frame.point_to_parent(local_hit->point_m),
                                       surface.frame.direction_to_parent(local_hit->unit_normal)};
     } else {
-      const ImportedDetectorSurface plane{surface.id, surface.frame.origin_m, surface.frame.z_axis,
-                                          surface.diameter_m, surface.shape, surface.frame.x_axis};
+      const ImportedDetectorSurface plane{surface.id,           surface.frame.origin_m,
+                                          surface.frame.z_axis, surface.diameter_m,
+                                          surface.shape,        surface.frame.x_axis};
       const auto hit = intersect_detector_surface_unchecked(ray, plane);
       if (hit)
         candidate = OpticalSurfaceHit{surface.id, surface.role, hit->distance_m, hit->point_m,
                                       hit->unit_normal};
     }
-    if (candidate && (!nearest || candidate->distance_m < nearest->distance_m ||
-                      (candidate->distance_m == nearest->distance_m &&
-                       surface.id < nearest->surface_id)))
+    if (candidate &&
+        (!nearest || candidate->distance_m < nearest->distance_m ||
+         (candidate->distance_m == nearest->distance_m && surface.id < nearest->surface_id)))
       nearest = candidate;
   }
   return nearest;
 }
 
-}  // namespace obdeect
+} // namespace obdeect

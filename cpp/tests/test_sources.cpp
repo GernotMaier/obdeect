@@ -1,5 +1,5 @@
-#include "obdeect/sources.hpp"
 #include "obdeect/photon_input.hpp"
+#include "obdeect/sources.hpp"
 #include <algorithm>
 #include <array>
 
@@ -10,14 +10,14 @@
 
 namespace {
 
-void require(bool condition, const char* message) {
+void require(bool condition, const char *message) {
   if (!condition) {
     std::cerr << "FAIL: " << message << '\n';
     std::exit(1);
   }
 }
 
-}  // namespace
+} // namespace
 
 int main() {
   using namespace obdeect;
@@ -34,11 +34,12 @@ int main() {
     for (std::size_t i = 0; i < result.count; ++i)
       require(batch[i].photon_id == consumed + i, "chunking preserves photon identity and order");
     consumed += result.count;
-    if (result.eof) break;
+    if (result.eof)
+      break;
   }
   require(consumed == star.size() && reader.read(batch).count == 0, "EOF loses no photons");
   require(star.size() == 128, "star count");
-  for (const auto& photon : star) {
+  for (const auto &photon : star) {
     require(std::abs(norm(photon.ray.direction) - 1.0) < 1e-14, "star directions are unit");
     require(std::abs(photon.ray.direction.x) < 1e-14 && std::abs(photon.ray.direction.y) < 1e-14,
             "on-axis star is parallel to z");
@@ -56,7 +57,7 @@ int main() {
   const Vec3 direction = tilted_star.front().ray.direction;
   const Vec3 reference{50.0 * direction.x / direction.z, 50.0 * direction.y / direction.z, 50.0};
   const double reference_plane = dot(direction, reference);
-  for (const auto& photon : tilted_star) {
+  for (const auto &photon : tilted_star) {
     const double distance = reference_plane - dot(direction, photon.ray.position_m);
     const double arrival_ns = photon.time_ns + distance / kSpeedOfLightMPerNs;
     require(std::abs(arrival_ns) < 1e-12, "off-axis star samples share one wavefront");
@@ -65,10 +66,10 @@ int main() {
   // T-SRC-011c: field angle changes the direction, not the telescope that
   // receives the bundle.  Even a distant source must keep its pupil samples
   // on the primary aperture rather than shifting them by distance*tan(angle).
-  const auto distant_star = star_photons(128, 6.0, {0.5 * std::numbers::pi / 180.0, -0.2 * std::numbers::pi / 180.0,
-                                                     10000.0, 400.0});
+  const auto distant_star = star_photons(
+      128, 6.0, {0.5 * std::numbers::pi / 180.0, -0.2 * std::numbers::pi / 180.0, 10000.0, 400.0});
   require(distant_star.size() == 128, "distant off-axis star count");
-  for (const auto& photon : distant_star) {
+  for (const auto &photon : distant_star) {
     const double distance = -photon.ray.position_m.z / photon.ray.direction.z;
     const Vec3 primary_plane_hit = photon.ray.position_m + photon.ray.direction * distance;
     require(std::hypot(primary_plane_hit.x, primary_plane_hit.y) <= 6.1,
@@ -86,16 +87,17 @@ int main() {
           "illuminator emission time is not preloaded with flight time");
   const double expected_weight_sum = 2.0 * 36.0 / 4.0;
   double illuminator_weight_sum = 0.0;
-  for (const auto& photon : illuminator) illuminator_weight_sum += photon.weight;
+  for (const auto &photon : illuminator)
+    illuminator_weight_sum += photon.weight;
   require(std::abs(illuminator_weight_sum - expected_weight_sum / (30.0 * 30.0)) < 2e-3,
           "illuminator weight includes projected pupil area and sample count");
 
   // T-SRC-013: laser directions stay inside configured divergence cone.
   constexpr double divergence_rad = 0.02;
-  const auto laser = laser_photons(
-      128, 6.0, {{0.0, 0.0, -1.0}, {1.5, -0.5, 50.0}, divergence_rad, 400.0});
+  const auto laser =
+      laser_photons(128, 6.0, {{0.0, 0.0, -1.0}, {1.5, -0.5, 50.0}, divergence_rad, 400.0});
   require(laser.size() == 128, "laser count");
-  for (const auto& photon : laser) {
+  for (const auto &photon : laser) {
     require(std::acos(std::clamp(-photon.ray.direction.z, -1.0, 1.0)) <= divergence_rad + 1e-12,
             "laser ray remains in divergence cone");
   }
@@ -112,7 +114,8 @@ int main() {
   require(apply_top_hat_emission_times(pulsed_star, 4.0, 8.0), "valid top-hat pulse");
   require(std::abs(pulsed_star.front().time_ns - (original_star_time + 4.0 + 8.0 / 256.0)) < 1e-14,
           "pulse adds start and deterministic width without losing star phase");
-  require(!apply_top_hat_emission_times(pulsed_star, 0.0, -1.0), "negative pulse width is rejected");
+  require(!apply_top_hat_emission_times(pulsed_star, 0.0, -1.0),
+          "negative pulse width is rejected");
 
   std::cout << "source tests passed\n";
 }

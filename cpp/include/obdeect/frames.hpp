@@ -55,4 +55,4 @@ struct RigidFrame {
   }
 };
 
-}  // namespace obdeect
+} // namespace obdeect

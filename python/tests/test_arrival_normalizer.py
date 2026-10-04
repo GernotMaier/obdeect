@@ -6,6 +6,7 @@ import unittest
 from pathlib import Path
 
 from obdeect.arrival_normalizer import normalize_arrivals
+from obdeect.result_contract import ArrivalContractError
 
 
 class TestArrivalNormalizer(unittest.TestCase):
@@ -18,7 +19,7 @@ class TestArrivalNormalizer(unittest.TestCase):
             "x0_m,y0_m,z0_m,x1_m,y1_m,z1_m\n"
         )
         detected = "obdeect-arrival-v1,4,star,400,0,1,1,detected,2,12,3.5,1.5,1,2,3,4,5,6\n"
-        lost = "obdeect-arrival-v1,5,star,400,0,1,0.4,missed_primary,1,7,,,8,9,10,,,\n"
+        lost = "obdeect-arrival-v1,5,star,400,0,1,0,missed_primary,1,7,,,8,9,10,,,\n"
         with tempfile.TemporaryDirectory() as directory:
             source = Path(directory) / "arrivals.csv"
             normalized = Path(directory) / "normalized.csv"
@@ -38,6 +39,29 @@ class TestArrivalNormalizer(unittest.TestCase):
         self.assertEqual(rows[1]["focal_x_m"], "8.0")
         self.assertEqual(rows[1]["focal_y_m"], "9.0")
         self.assertEqual(rows[1]["incidence_primary_deg"], "0.0")
+
+    def test_provenance_requires_recorded_time_and_preserves_it(self):
+        header = (
+            "contract_version,photon_id,source_kind,wavelength_nm,emission_time_ns,"
+            "source_weight,throughput,status,point_count,path_length_m,"
+            "x0_m,y0_m,z0_m,x1_m,y1_m,z1_m"
+        )
+        row = "obdeect-arrival-v1,4,star,400,0,1,1,detected,2,12,1,2,3,4,5,6"
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "arrivals.csv"
+            normalized = Path(directory) / "normalized.csv"
+            source.write_text(header + "\n" + row + "\n")
+            with self.assertRaisesRegex(ArrivalContractError, "recorded arrival time"):
+                normalize_arrivals(source, normalized, source_sha256="b" * 64)
+            self.assertFalse(normalized.exists())
+            source.write_text(header + ",arrival_time_ns\n" + row + ",99\n")
+            normalize_arrivals(source, normalized, source_sha256="b" * 64)
+            with normalized.open(newline="") as handle:
+                result = next(csv.DictReader(handle))
+            self.assertEqual(float(result["arrival_time_ns"]), 99)
+            self.assertNotIn("interaction_surface_ids", result)
+            with self.assertRaisesRegex(ArrivalContractError, "invalid source_sha256"):
+                normalize_arrivals(source, normalized, source_sha256="invalid")
 
 
 if __name__ == "__main__":

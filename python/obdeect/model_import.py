@@ -137,13 +137,12 @@ def resolve_model(root: Path, model: str, version: str) -> dict[str, Any]:
         raise ImportError("production manifest must contain exactly the requested parameter table")
 
     parameters: dict[str, Any] = {}
+    source_parameter_coverage: dict[str, Any] = {}
     records: dict[str, dict[str, str]] = {"production_manifest": record(manifest_path, root)}
     assets: dict[str, dict[str, str]] = {}
     for name, parameter_version in sorted(tables[model].items()):
         if not component(name) or not component(parameter_version):
             raise ImportError("parameter names and versions must be strings")
-        if name not in RAY_TRACING_PARAMETERS:
-            continue
         parameter_path = (
             root / "model_parameters" / model / name / f"{name}-{parameter_version}.json"
         )
@@ -156,6 +155,20 @@ def resolve_model(root: Path, model: str, version: str) -> dict[str, Any]:
             raise ImportError(f"parameter record is incomplete: {parameter_path}")
         if not isinstance(parameter["file"], bool):
             raise ImportError(f"file flag must be boolean: {parameter_path}")
+        outside_scope = name in {"fadc_noise", "fadc_pedestal", "fadc_amplitude", "trigger_pixels"}
+        source_parameter_coverage[name] = {
+            "disposition": "outside_optical_scope" if outside_scope else "unsupported",
+            "record": record(parameter_path, root),
+            "reason": "electronics or trigger setting"
+            if outside_scope
+            else "semantics not reviewed",
+        }
+        if name not in RAY_TRACING_PARAMETERS:
+            if parameter.get("required_for_trace") is True:
+                raise ImportError(f"required optical parameter is unsupported: {name}")
+            continue
+        source_parameter_coverage[name]["disposition"] = "selected"
+        source_parameter_coverage[name]["reason"] = "passed to optical-model compiler"
         parameters[name] = parameter
         records[f"parameter:{name}"] = record(parameter_path, root)
         if parameter["file"] and parameter["value"] is not None:
@@ -186,4 +199,5 @@ def resolve_model(root: Path, model: str, version: str) -> dict[str, Any]:
         "input_records": records,
         "assets": assets,
         "parameters": parameters,
+        "source_parameter_coverage": source_parameter_coverage,
     }

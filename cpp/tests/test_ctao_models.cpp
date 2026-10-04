@@ -7,13 +7,13 @@
 #include <iostream>
 
 namespace {
-void require(bool condition, const char* message) {
+void require(bool condition, const char *message) {
   if (!condition) {
     std::cerr << "FAIL: " << message << '\n';
     std::exit(1);
   }
 }
-}  // namespace
+} // namespace
 
 int main() {
   using namespace obdeect;
@@ -61,7 +61,8 @@ int main() {
   // segment/camera import is required before their production claim is made.
   const auto sst = sst_reference_model();
   const auto sct = sct_reference_model();
-  require(sst.secondary.has_value() && sct.secondary.has_value(), "SC models require secondary surfaces");
+  require(sst.secondary.has_value() && sct.secondary.has_value(),
+          "SC models require secondary surfaces");
   require(sst.secondary->outer_radius_m > 0.0 && sct.secondary->outer_radius_m > 0.0,
           "SC secondary apertures must be physical");
 

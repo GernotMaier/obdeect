@@ -26,6 +26,7 @@ class OpticalModelCompileError(ValueError):
 
 _SHAPES = {0: "circle", 1: "hexagon_flat_y", 2: "square", 3: "hexagon_flat_x"}
 _UNIT_TO_M = {"m": 1.0, "cm": 0.01, "mm": 0.001}
+_RESPONSE_METADATA = {"reflectivity_rms", "reflectivity_min", "reflectivity_max"}
 
 
 def parse_simtel_segmentation(contents: str) -> list[dict[str, Any]]:
@@ -69,7 +70,7 @@ def parse_simtel_segmentation(contents: str) -> list[dict[str, Any]]:
                 "shape": "hexagon",
                 "centre_xy_m": [x_cm * 0.01, y_cm * 0.01],
                 "diameter_m": diameter_cm * 0.01,
-                "rotation_deg": rotation_deg,
+                "rotation_deg": rotation_deg + (90.0 if kind == "yhex" else 0.0),
             })
         else:
             inner_cm, outer_cm, span_deg, start_deg, gap_cm = (*values, 0.0, 0.0)[0:5]
@@ -87,7 +88,7 @@ def parse_simtel_segmentation(contents: str) -> list[dict[str, Any]]:
                     "shape": "annular_sector",
                     "inner_radius_m": inner_cm * 0.01,
                     "outer_radius_m": outer_cm * 0.01,
-                    "start_deg": start_deg + index * 360.0 / count,
+                    "start_deg": start_deg + index * span_deg,
                     "span_deg": span_deg,
                     "gap_m": gap_cm * 0.01,
                 })
@@ -250,8 +251,53 @@ def parse_obscuration_cylinders(contents: str) -> list[dict[str, Any]]:
     return cylinders
 
 
+def _validated_mirror_response(values: object, name: str) -> list[dict[str, float]]:
+    """Validate spectral knots or a rectangular spectral/incidence grid."""
+    if not isinstance(values, list) or len(values) < 2:
+        raise OpticalModelCompileError(f"trace model requires {name} reflectivity")
+    angular = any(isinstance(entry, dict) and "incidence_angle_deg" in entry for entry in values)
+    result = []
+    for entry in values:
+        required = {"wavelength_nm", "response"} | ({"incidence_angle_deg"} if angular else set())
+        if (
+            not isinstance(entry, dict)
+            or not required.issubset(entry)
+            or set(entry) - required - _RESPONSE_METADATA
+        ):
+            raise OpticalModelCompileError(f"invalid {name} reflectivity columns")
+        parsed = {key: _number(value, f"{name} {key}") for key, value in entry.items()}
+        if (
+            parsed["wavelength_nm"] <= 0
+            or not 0 <= parsed["response"] <= 1
+            or (angular and not 0 <= parsed["incidence_angle_deg"] <= 90)
+            or any(parsed[key] < 0 for key in _RESPONSE_METADATA & parsed.keys())
+        ):
+            raise OpticalModelCompileError(f"invalid {name} reflectivity range")
+        result.append(parsed)
+    if angular:
+        wavelengths = sorted({entry["wavelength_nm"] for entry in result})
+        angles = sorted({entry["incidence_angle_deg"] for entry in result})
+        keys = {(entry["wavelength_nm"], entry["incidence_angle_deg"]) for entry in result}
+        if (
+            len(wavelengths) < 2
+            or len(angles) < 2
+            or len(keys) != len(result)
+            or len(result) != len(wavelengths) * len(angles)
+        ):
+            raise OpticalModelCompileError(
+                f"{name} requires a complete unique incidence-angle grid"
+            )
+        result.sort(key=lambda entry: (entry["wavelength_nm"], entry["incidence_angle_deg"]))
+    elif any(
+        first["wavelength_nm"] >= second["wavelength_nm"]
+        for first, second in zip(result, result[1:])
+    ):
+        raise OpticalModelCompileError(f"trace model found unordered {name} reflectivity")
+    return result
+
+
 def parse_wavelength_response(contents: str, name: str) -> list[dict[str, float]]:
-    """Read a one-dimensional model response table without discarding angle data."""
+    """Read spectral response, preserving a complete incidence-angle grid when supplied."""
     header: list[str] | None = None
     response: list[dict[str, float]] = []
     for line_number, source_line in enumerate(contents.splitlines(), start=1):
@@ -261,16 +307,18 @@ def parse_wavelength_response(contents: str, name: str) -> list[dict[str, float]
         fields = line.split()
         if header is None:
             header = fields
-            if "wavelength" not in header or "reflectivity" not in header:
+            if set(header) - _RESPONSE_METADATA not in (
+                {"wavelength", "reflectivity"},
+                {"wavelength", "incidence_angle", "reflectivity"},
+            ) or len(header) != len(set(header)):
                 raise OpticalModelCompileError(f"{name} lacks wavelength and reflectivity columns")
-            if "incidence_angle" in header:
-                raise OpticalModelCompileError(f"{name} has incidence-dependent response")
             continue
         if len(fields) != len(header):
             raise OpticalModelCompileError(f"{name} line {line_number}: wrong column count")
         row = dict(zip(header, fields, strict=True))
         try:
             wavelength, value = float(row["wavelength"]), float(row["reflectivity"])
+            metadata = {key: float(row[key]) for key in _RESPONSE_METADATA & row.keys()}
         except ValueError as error:
             raise OpticalModelCompileError(
                 f"{name} line {line_number}: invalid response"
@@ -282,7 +330,21 @@ def parse_wavelength_response(contents: str, name: str) -> list[dict[str, float]
             or not 0 <= value <= 1
         ):
             raise OpticalModelCompileError(f"{name} line {line_number}: invalid response")
-        response.append({"wavelength_nm": wavelength, "response": value})
+        entry = {"wavelength_nm": wavelength, "response": value}
+        for key, measured in metadata.items():
+            entry[key] = _number(measured, f"{name} {key}")
+            if entry[key] < 0:
+                raise OpticalModelCompileError(f"{name} line {line_number}: invalid {key}")
+        if "incidence_angle" in row:
+            try:
+                entry["incidence_angle_deg"] = float(row["incidence_angle"])
+            except ValueError as error:
+                raise OpticalModelCompileError(
+                    f"{name} line {line_number}: invalid angle"
+                ) from error
+        response.append(entry)
+    if header is not None and "incidence_angle" in header:
+        return _validated_mirror_response(response, name)
     if len(response) < 2 or any(
         left["wavelength_nm"] > right["wavelength_nm"]
         for left, right in zip(response, response[1:])
@@ -297,7 +359,9 @@ def parse_wavelength_response(contents: str, name: str) -> list[dict[str, float]
     for entry in response:
         if reduced and entry["wavelength_nm"] == reduced[-1]["wavelength_nm"]:
             samples[-1] += 1
-            reduced[-1]["response"] += (entry["response"] - reduced[-1]["response"]) / samples[-1]
+            # Metadata means describe the averaged rows, not propagated errors.
+            for key in entry.keys() - {"wavelength_nm"}:
+                reduced[-1][key] += (entry[key] - reduced[-1][key]) / samples[-1]
         else:
             reduced.append(entry)
             samples.append(1)
@@ -466,6 +530,12 @@ def _dual_reflector_surfaces(parameters: dict[str, Any]) -> dict[str, dict[str, 
 
     primary = surface("primary_mirror")
     secondary = surface("secondary_mirror")
+    # sim_imaging.c::tel_setup_secondary rotates the local mirror frame by pi.
+    # Export telescope-frame sag, retaining the vertex offset from sim_config.c.
+    secondary_coefficients = secondary["coefficient_m"]
+    if secondary_coefficients[0] < primary["coefficient_m"][0]:
+        secondary_coefficients[0] *= -1
+    secondary_coefficients[1:] = [-value for value in secondary_coefficients[1:]]
     focal_value, focal_scale = polynomial("focal_surface")
     return {
         "primary": primary,
@@ -504,7 +574,13 @@ def compile_optical_model(ir: dict[str, Any], source_root: Path) -> dict[str, An
         source_ir = resolve_model(source_root, model, version)
     except ModelImportError as error:
         raise OpticalModelCompileError(f"cannot verify source production: {error}") from error
-    for key in ("source_root", "input_records", "assets", "parameters"):
+    for key in (
+        "source_root",
+        "input_records",
+        "assets",
+        "parameters",
+        "source_parameter_coverage",
+    ):
         if ir.get(key) != source_ir[key]:
             raise OpticalModelCompileError(f"IR {key} differs from the verified source production")
     verified_assets = {name: root / entry["path"] for name, entry in assets.items()}
@@ -618,7 +694,11 @@ def compile_optical_model(ir: dict[str, Any], source_root: Path) -> dict[str, An
             if name in parameters
         )
         primary["aspheric_surface"] = dual_surfaces["primary"]
-        secondary = {"kind": "aspheric_mirror", **dual_surfaces["secondary"]}
+        secondary = {
+            "kind": "aspheric_mirror",
+            **dual_surfaces["secondary"],
+            "segments": secondary.get("segments", []) if secondary is not None else [],
+        }
         if "secondary_mirror_reflectivity" in verified_assets:
             try:
                 secondary["reflectivity"] = parse_wavelength_response(
@@ -676,15 +756,22 @@ def compile_optical_model(ir: dict[str, Any], source_root: Path) -> dict[str, An
             )
     report = {
         "trace_ready": False,
+        "native_trace_ready": False,
+        "production_trace_ready": False,
         "consumed": sorted(consumed),
         "deferred": deferred,
-        "unsupported": [],
+        "unsupported": sorted(
+            name
+            for name, entry in ir.get("source_parameter_coverage", {}).items()
+            if entry["disposition"] == "unsupported"
+        ),
+        "source_parameter_coverage": ir.get("source_parameter_coverage", {}),
         "field_coverage": {
             name: {
                 "disposition": "consumed" if name in consumed else "deferred",
                 "reason": "parsed into geometry"
                 if name in consumed
-                else "not compiled into an optical optical model",
+                else "not applied by the optical tracer",
             }
             for name in sorted(parameters)
         },
@@ -754,6 +841,8 @@ def compile_optical_model(ir: dict[str, Any], source_root: Path) -> dict[str, An
     try:
         compiled["trace_model"] = build_trace_model(compiled)
         compiled["report"]["trace_ready"] = True
+        compiled["report"]["native_trace_ready"] = True
+        compiled["plot_geometry"] = build_plot_geometry(compiled["trace_model"], report)
     except OpticalModelCompileError as error:
         compiled["report"]["trace_blockers"].append(str(error))
     canonical = json.dumps(
@@ -761,6 +850,41 @@ def compile_optical_model(ir: dict[str, Any], source_root: Path) -> dict[str, An
     ).encode()
     compiled["optical_model_sha256"] = hashlib.sha256(canonical).hexdigest()
     return compiled
+
+
+def build_plot_geometry(trace_model: dict[str, Any], report: dict[str, Any]) -> dict[str, Any]:
+    """Index only the finite geometry used by native tracing for diagnostic plots."""
+    components = []
+    if trace_model["kind"] == "segmented":
+        for role, field in (
+            ("primary", "primary_facets"),
+            ("detector", "detector_surfaces"),
+            ("opaque_cylinder", "cylinder_obscurers"),
+        ):
+            components.extend(
+                {"id": item["id"], "role": role, "source": f"trace_model.{field}"}
+                for item in trace_model.get(field, [])
+            )
+    else:
+        components = [
+            {
+                "id": trace_model.get(f"{role}_surface_id", index),
+                "role": role,
+                "source": f"trace_model.{role}",
+            }
+            for index, role in enumerate(("primary", "secondary", "detector"))
+        ]
+    unavailable = []
+    if any("physical detector surfaces and materials" in item for item in report["trace_blockers"]):
+        unavailable.append("physical_pixel_boundaries")
+    if any("quadrilateral obscurers" in item for item in report["trace_blockers"]):
+        unavailable.append("quadrilateral_obscurers")
+    return {
+        "schema_version": 1,
+        "frame": {"origin": "primary_vertex", "axes": "+x,+y,+z", "unit": "m"},
+        "components": components,
+        "unavailable_roles": unavailable,
+    }
 
 
 def require_trace_ready(optical_model: dict[str, Any]) -> None:
@@ -799,7 +923,7 @@ def _camera_extent_m(camera: dict[str, Any]) -> float:
 
 
 def trace_surface_rows(
-    optical_model: dict[str, Any],
+    optical_model: dict[str, Any], *, include_response: bool = True
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[tuple[float, float]]]:
     """Return model-derived planar surfaces for the embedded trace model.
 
@@ -904,29 +1028,16 @@ def trace_surface_rows(
             tangent_norm = math.sqrt(sum(value * value for value in tangent))
         row["tangent"] = [value / tangent_norm for value in tangent]
     reflectivity = optical_model.get("primary", {}).get("reflectivity", [])
-    if not isinstance(reflectivity, list):
-        raise OpticalModelCompileError("trace model found invalid primary reflectivity")
     trace_reflectivity = []
-    for entry in reflectivity:
-        if not isinstance(entry, dict):
-            raise OpticalModelCompileError("trace model found invalid primary reflectivity")
-        try:
-            wavelength = float(entry["wavelength_nm"])
-            value = float(entry["response"])
-        except (KeyError, TypeError, ValueError) as error:
+    if include_response and not isinstance(reflectivity, list):
+        raise OpticalModelCompileError("trace model found invalid primary reflectivity")
+    if include_response and reflectivity:
+        validated = _validated_mirror_response(reflectivity, "primary")
+        if any("incidence_angle_deg" in entry for entry in validated):
             raise OpticalModelCompileError(
-                "trace model found invalid primary reflectivity"
-            ) from error
-        if (
-            not math.isfinite(wavelength)
-            or not math.isfinite(value)
-            or wavelength <= 0
-            or not 0 <= value <= 1
-        ):
-            raise OpticalModelCompileError("trace model found invalid primary reflectivity")
-        trace_reflectivity.append((wavelength, value))
-    if any(left[0] >= right[0] for left, right in zip(trace_reflectivity, trace_reflectivity[1:])):
-        raise OpticalModelCompileError("trace model found unordered primary reflectivity")
+                "CSV export cannot represent incidence-dependent response"
+            )
+        trace_reflectivity = [(entry["wavelength_nm"], entry["response"]) for entry in validated]
     return rows, trace_obscurers, trace_reflectivity
 
 
@@ -947,7 +1058,11 @@ def build_trace_model(optical_model: dict[str, Any]) -> dict[str, Any]:
         and secondary.get("kind") == "aspheric_mirror"
     ):
         return _axisymmetric_trace_model(optical_model)
-    rows, obscurers, reflectivity = trace_surface_rows(optical_model)
+    rows, obscurers, _ = trace_surface_rows(optical_model, include_response=False)
+    response = primary.get("reflectivity", [])
+    if not isinstance(response, list):
+        raise OpticalModelCompileError("trace model found invalid primary reflectivity")
+    reflectivity = _validated_mirror_response(response, "primary") if response else []
     facets = []
     detectors = []
     for row in rows:
@@ -976,10 +1091,7 @@ def build_trace_model(optical_model: dict[str, Any]) -> dict[str, Any]:
             }
             for item in obscurers
         ],
-        "primary_reflectivity": [
-            {"wavelength_nm": wavelength, "response": response}
-            for wavelength, response in reflectivity
-        ],
+        "primary_reflectivity": reflectivity,
     }
 
 
@@ -1124,21 +1236,13 @@ def _write_native_axisymmetric_optical_model(optical_model: dict[str, Any], outp
         response = response_source.get("reflectivity", [])
         if not isinstance(response, list):
             raise OpticalModelCompileError(f"invalid {role} reflectivity")
+        response = _validated_mirror_response(response, role) if response else []
+        if any("incidence_angle_deg" in entry for entry in response):
+            raise OpticalModelCompileError(
+                "CSV export cannot represent incidence-dependent response"
+            )
         for entry in response:
-            if not isinstance(entry, dict):
-                raise OpticalModelCompileError(f"invalid {role} reflectivity")
-            try:
-                wavelength = float(entry["wavelength_nm"])
-                value = float(entry["response"])
-            except (KeyError, TypeError, ValueError) as error:
-                raise OpticalModelCompileError(f"invalid {role} reflectivity") from error
-            if (
-                not math.isfinite(wavelength)
-                or not math.isfinite(value)
-                or wavelength <= 0
-                or not 0 <= value <= 1
-            ):
-                raise OpticalModelCompileError(f"invalid {role} reflectivity")
+            wavelength, value = entry["wavelength_nm"], entry["response"]
             lines.append(f"{role}_reflectivity,{wavelength:.17g},{value:.17g}")
     output.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
@@ -1182,41 +1286,32 @@ def _axisymmetric_trace_model(optical_model: dict[str, Any]) -> dict[str, Any]:
             "coefficient_m": local,
         }
 
-    def response(source: dict[str, Any], role: str) -> list[dict[str, float]]:
-        result = source.get("reflectivity", [])
-        if not isinstance(result, list) or len(result) < 2:
-            raise OpticalModelCompileError(f"trace model requires {role} reflectivity")
-        values = []
-        for entry in result:
-            if not isinstance(entry, dict):
-                raise OpticalModelCompileError(f"invalid {role} reflectivity")
-            try:
-                wavelength = float(entry["wavelength_nm"])
-                value = float(entry["response"])
-            except (KeyError, TypeError, ValueError) as error:
-                raise OpticalModelCompileError(f"invalid {role} reflectivity") from error
-            if (
-                not math.isfinite(wavelength)
-                or not math.isfinite(value)
-                or wavelength <= 0
-                or not 0 <= value <= 1
-            ):
-                raise OpticalModelCompileError(f"invalid {role} reflectivity")
-            values.append({"wavelength_nm": wavelength, "response": value})
-        if any(
-            left["wavelength_nm"] >= right["wavelength_nm"]
-            for left, right in zip(values, values[1:])
-        ):
-            raise OpticalModelCompileError(f"trace model found unordered {role} reflectivity")
-        return values
-
+    primary_segments = optical_model["primary"].get("segments", [])
+    secondary_segments = optical_model["secondary"].get("segments", [])
+    next_id = 0
+    masks = {}
+    for role, segments in (("primary", primary_segments), ("secondary", secondary_segments)):
+        masks[role] = []
+        for segment in segments:
+            masks[role].append({**segment, "id": next_id})
+            next_id += 1
     return {
+        "primary_segments": masks["primary"],
+        "secondary_segments": masks["secondary"],
+        "primary_surface_id": next_id,
+        "secondary_surface_id": next_id + 1,
+        "detector_surface_id": next_id + 2,
+        "block_incoming_secondary": True,
         "kind": "axisymmetric",
         "primary": surface(primary, "primary"),
         "secondary": surface(secondary, "secondary"),
         "detector": surface(focal, "detector"),
-        "primary_reflectivity": response(primary, "primary"),
-        "secondary_reflectivity": response(secondary, "secondary"),
+        "primary_reflectivity": _validated_mirror_response(
+            optical_model["primary"].get("reflectivity"), "primary"
+        ),
+        "secondary_reflectivity": _validated_mirror_response(
+            secondary.get("reflectivity"), "secondary"
+        ),
     }
 
 

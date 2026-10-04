@@ -6,14 +6,14 @@
 
 namespace {
 
-void require(bool condition, const char* message) {
+void require(bool condition, const char *message) {
   if (!condition) {
     std::cerr << "FAIL: " << message << '\n';
     std::exit(1);
   }
 }
 
-}  // namespace
+} // namespace
 
 int main() {
   using namespace obdeect;
@@ -22,7 +22,8 @@ int main() {
 
   // T-REFERENCE-001: the on-axis parallel ray reaches the paraxial focal screen.
   const auto central = trace_artificial_mst({{0.0, 0.0, 20.0}, {0.0, 0.0, -1.0}}, 1, bare);
-  require(central.status == PhotonStatus::detected, "central ray must be detected without structure");
+  require(central.status == PhotonStatus::detected,
+          "central ray must be detected without structure");
   require(central.point_count == 3, "detected path has source, mirror and screen vertices");
   require(std::abs(central.points_m[2].x) < 1e-12 && std::abs(central.points_m[2].y) < 1e-12,
           "central ray must focus on the optical axis");
@@ -31,12 +32,14 @@ int main() {
   // T-OBS-001: the MST camera is a pre-M1 obstruction on the optical axis.
   ArtificialMstConfig structured{};
   const auto camera = trace_artificial_mst({{0.0, 0.0, 20.0}, {0.0, 0.0, -1.0}}, 2, structured);
-  require(camera.status == PhotonStatus::blocked_camera, "camera must shadow the central incoming ray");
+  require(camera.status == PhotonStatus::blocked_camera,
+          "camera must shadow the central incoming ray");
   require(camera.point_count == 2, "blocked path terminates at the obstruction");
 
   // T-OBS-004: camera and supports are closed solids.  This ray clears the
   // incoming camera aperture, reflects from M1, then enters the camera rear.
-  const auto post_reflection_camera = trace_artificial_mst({{0.6, 0.0, 20.0}, {0.0, 0.0, -1.0}}, 8, structured);
+  const auto post_reflection_camera =
+      trace_artificial_mst({{0.6, 0.0, 20.0}, {0.0, 0.0, -1.0}}, 8, structured);
   require(post_reflection_camera.status == PhotonStatus::blocked_camera,
           "camera must also obstruct the reflected segment");
   require(post_reflection_camera.point_count == 3,
@@ -48,9 +51,10 @@ int main() {
   // T-OBS-005: a closed cylinder catches axial hits on its end caps, which a
   // side-wall-only intersection would miss.
   const Ray axial_cylinder{{0.0, 0.0, 2.0}, {0.0, 0.0, -1.0}};
-  const auto cap_hit = intersect_closed_finite_cylinder(axial_cylinder, {0.0, 0.0, 0.0},
-                                                         {0.0, 0.0, 1.0}, 0.5);
-  require(cap_hit && std::abs(*cap_hit - 1.0) < 1e-12, "closed cylinder must intersect its end cap");
+  const auto cap_hit =
+      intersect_closed_finite_cylinder(axial_cylinder, {0.0, 0.0, 0.0}, {0.0, 0.0, 1.0}, 0.5);
+  require(cap_hit && std::abs(*cap_hit - 1.0) < 1e-12,
+          "closed cylinder must intersect its end cap");
 
   // T-OBS-002: an off-axis ray remains traceable through the MST structure.
   const auto outer = trace_artificial_mst({{2.0, 1.0, 20.0}, {0.0, 0.0, -1.0}}, 3, structured);
@@ -61,7 +65,7 @@ int main() {
   // T-SRC-001: artificial blue source emits unit, pupil-bounded directions.
   const auto rays = parallel_blue_cherenkov_rays(256, structured);
   require(rays.size() == 256, "source photon count");
-  for (const auto& ray : rays) {
+  for (const auto &ray : rays) {
     require(std::abs(norm(ray.direction) - 1.0) < 1e-14, "source direction must be unit length");
     require(ray.position_m.x * ray.position_m.x + ray.position_m.y * ray.position_m.y <=
                 structured.mirror_aperture_radius_m * structured.mirror_aperture_radius_m + 1e-12,
@@ -74,11 +78,14 @@ int main() {
   require(zero_direction.status == PhotonStatus::invalid_input, "zero direction must be rejected");
   ArtificialMstConfig invalid = bare;
   invalid.mirror_aperture_radius_m = invalid.mirror_radius_m + 1.0;
-  const auto invalid_optical_model = trace_artificial_mst({{0.0, 0.0, 20.0}, {0.0, 0.0, -1.0}}, 5, invalid);
-  require(invalid_optical_model.status == PhotonStatus::invalid_input, "impossible spherical cap must be rejected");
+  const auto invalid_optical_model =
+      trace_artificial_mst({{0.0, 0.0, 20.0}, {0.0, 0.0, -1.0}}, 5, invalid);
+  require(invalid_optical_model.status == PhotonStatus::invalid_input,
+          "impossible spherical cap must be rejected");
   invalid = bare;
   invalid.camera_half_depth_m = invalid.focal_length_m;
-  const auto inverted_camera = trace_artificial_mst({{0.0, 0.0, 20.0}, {0.0, 0.0, -1.0}}, 6, invalid);
+  const auto inverted_camera =
+      trace_artificial_mst({{0.0, 0.0, 20.0}, {0.0, 0.0, -1.0}}, 6, invalid);
   require(inverted_camera.status == PhotonStatus::invalid_input,
           "camera support endpoint behind the primary must be rejected");
 
@@ -86,7 +93,8 @@ int main() {
   ArtificialMstConfig no_obstruction = structured;
   no_obstruction.camera_radius_m = 0.0;
   no_obstruction.mast_radius_m = 0.0;
-  const auto unobscured = trace_artificial_mst({{0.0, 0.0, 20.0}, {0.0, 0.0, -1.0}}, 7, no_obstruction);
+  const auto unobscured =
+      trace_artificial_mst({{0.0, 0.0, 20.0}, {0.0, 0.0, -1.0}}, 7, no_obstruction);
   require(unobscured.status == PhotonStatus::detected, "zero-radius obstructions must not block");
 
   std::cout << "obdeect core tests passed\n";

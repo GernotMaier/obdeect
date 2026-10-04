@@ -1,0 +1,1 @@
+Record every selected source parameter, distinguish nominal and production optical models, index finite telescope geometry for diagnostic plots, execute frozen comparison commands with retained failure logs, require release notes for pull requests, and check installed compiled-model tracing and CMake consumers.

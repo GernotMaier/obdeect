@@ -10,12 +10,14 @@ from obdeect.model_import import resolve_model
 from obdeect.optical_model_compiler import (
     OpticalModelCompileError,
     _dual_reflector_surfaces,
+    build_plot_geometry,
     build_trace_model,
     compile_optical_model,
     derive_nominal_single_reflector,
     parse_obscuration_cylinders,
     parse_simtel_mirror_list,
     parse_simtel_segmentation,
+    parse_wavelength_response,
     require_trace_ready,
     trace_surface_rows,
     write_native_optical_model,
@@ -73,6 +75,11 @@ class TestOpticalModelCompiler(unittest.TestCase):
         self.assertEqual(surfaces["primary"]["outer_radius_m"], 2.0)
         self.assertAlmostEqual(surfaces["primary"]["coefficient_m"][1], 1.0)
         self.assertAlmostEqual(surfaces["secondary"]["coefficient_m"][0], 3.0)
+        self.assertAlmostEqual(surfaces["secondary"]["coefficient_m"][1], -2.0)
+        # The local secondary normal is reversed by sim_telarray's pi rotation.
+        parameters["secondary_mirror_parameters"]["value"][0] = -300.0
+        surfaces = _dual_reflector_surfaces(parameters)
+        self.assertEqual(surfaces["secondary"]["coefficient_m"][:2], [3.0, -2.0])
 
     def test_dual_reflector_preserves_simtel_reference_radius_convention(self):
         parameters = {
@@ -117,6 +124,24 @@ class TestOpticalModelCompiler(unittest.TestCase):
         self.assertEqual(trace_model["kind"], "segmented")
         self.assertEqual(trace_model["primary_facets"][0]["shape"], "hexagon_flat_y")
         self.assertEqual(trace_model["detector_surfaces"][0]["shape"], "circle")
+
+    def test_plot_index_contains_only_native_finite_components(self):
+        trace = {
+            "kind": "segmented",
+            "primary_facets": [{"id": 4}],
+            "detector_surfaces": [{"id": 7}],
+            "cylinder_obscurers": [{"id": 9}],
+        }
+        index = build_plot_geometry(
+            trace, {"trace_blockers": ["quadrilateral obscurers remain deferred"]}
+        )
+        self.assertEqual([item["id"] for item in index["components"]], [4, 7, 9])
+        self.assertEqual(index["components"][2]["source"], "trace_model.cylinder_obscurers")
+        self.assertEqual(index["unavailable_roles"], ["quadrilateral_obscurers"])
+        dual = build_plot_geometry({"kind": "axisymmetric"}, {"trace_blockers": []})
+        self.assertEqual(
+            [item["role"] for item in dual["components"]], ["primary", "secondary", "detector"]
+        )
 
     def test_trace_readiness_requires_resolved_optical_model(self):
         require_trace_ready({"report": {"trace_blockers": [], "trace_ready": True}})
@@ -253,7 +278,14 @@ class TestOpticalModelCompiler(unittest.TestCase):
                     {"wavelength_nm": 500.0, "response": 0.9},
                 ],
             },
-            "secondary": {"kind": "aspheric_mirror", **surface},
+            "secondary": {
+                "kind": "aspheric_mirror",
+                **surface,
+                "reflectivity": [
+                    {"wavelength_nm": 300.0, "response": 0.7},
+                    {"wavelength_nm": 500.0, "response": 0.8},
+                ],
+            },
             "focal_surface": surface,
         }
         with TemporaryDirectory() as directory:
@@ -262,6 +294,62 @@ class TestOpticalModelCompiler(unittest.TestCase):
             lines = output.read_text().splitlines()
         self.assertTrue(any(line.startswith("primary_reflectivity,300,0.8") for line in lines))
         self.assertTrue(any(line.startswith("primary_reflectivity,500,0.9") for line in lines))
+
+        trace_model = build_trace_model(optical_model)
+        self.assertEqual(
+            trace_model["primary_reflectivity"], optical_model["primary"]["reflectivity"]
+        )
+        self.assertEqual(
+            trace_model["secondary_reflectivity"], optical_model["secondary"]["reflectivity"]
+        )
+
+    def test_incidence_response_preserves_full_grid_and_rejects_missing_knots(self):
+        header = "wavelength incidence_angle reflectivity\n"
+        body = "500 20 0.6\n300 0 0.8\n500 0 0.9\n300 20 0.7\n"
+        response = parse_wavelength_response(header + body, "mirror")
+        self.assertEqual(
+            [(row["wavelength_nm"], row["incidence_angle_deg"]) for row in response],
+            [(300, 0), (300, 20), (500, 0), (500, 20)],
+        )
+        surface = {
+            "coefficient_m": [0.0] * 13,
+            "inner_radius_m": 0.0,
+            "outer_radius_m": 2.0,
+            "radial_scale_m": 1.0,
+        }
+        model = {
+            "primary": {"aspheric_surface": surface, "reflectivity": response},
+            "secondary": {"kind": "aspheric_mirror", **surface, "reflectivity": response},
+            "focal_surface": surface,
+        }
+        trace = build_trace_model(model)
+        self.assertEqual(trace["primary_reflectivity"], response)
+        self.assertEqual(trace["secondary_reflectivity"], response)
+        for invalid in (
+            body.replace("500 20 0.6\n", ""),
+            body + "500 20 0.6\n",
+            body.replace("20", "91"),
+            body.replace("500", "300"),
+        ):
+            with self.subTest(invalid=invalid), self.assertRaises(OpticalModelCompileError):
+                parse_wavelength_response(header + invalid, "mirror")
+        with self.assertRaises(OpticalModelCompileError):
+            parse_wavelength_response("wavelength reflectivity unsupported\n300 0.8 1\n", "mirror")
+
+    def test_response_preserves_measurement_metadata(self):
+        response = parse_wavelength_response(
+            "wavelength reflectivity reflectivity_rms reflectivity_min reflectivity_max\n"
+            "300 0.8 0.02 0.7 0.9\n500 0.6 0.03 0.5 0.7\n",
+            "mirror",
+        )
+        self.assertEqual(response[0]["reflectivity_rms"], 0.02)
+        self.assertEqual(response[1]["reflectivity_min"], 0.5)
+        self.assertEqual(response[1]["reflectivity_max"], 0.7)
+        with self.assertRaises(OpticalModelCompileError):
+            parse_wavelength_response(
+                "wavelength reflectivity reflectivity_rms\n300 0.8 invalid\n500 0.6 0.03\n",
+                "mirror",
+            )
 
     def test_axisymmetric_export_rejects_unrepresented_obscurers(self):
         surface = {
@@ -381,6 +469,12 @@ class TestOpticalModelCompiler(unittest.TestCase):
         self.assertEqual(segments[1]["start_deg"], 0.0)
         self.assertEqual(segments[2]["start_deg"], 180.0)
         self.assertEqual(segments[1]["gap_m"], 0.0)
+
+    def test_partial_ring_spacing_and_yhex_orientation_follow_reference_parser(self):
+        segments = parse_simtel_segmentation("ring 2 100 200 60 10 1\nyhex 1 0 0 80 5\n")
+        self.assertEqual(segments[0]["start_deg"], 10.0)
+        self.assertEqual(segments[1]["start_deg"], 70.0)
+        self.assertEqual(segments[2]["rotation_deg"], 95.0)
 
     def test_compiles_dual_mirror_segmentation_without_invented_normals(self):
         # T-IR-011: nullable mirror_list uses explicit segmentation assets.

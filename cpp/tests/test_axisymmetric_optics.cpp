@@ -7,14 +7,14 @@
 
 namespace {
 
-void require(bool condition, const char* message) {
+void require(bool condition, const char *message) {
   if (!condition) {
     std::cerr << "FAIL: " << message << '\n';
     std::exit(1);
   }
 }
 
-}  // namespace
+} // namespace
 
 int main() {
   using namespace obdeect;
@@ -39,12 +39,38 @@ int main() {
   const AxisymmetricMirror invalid{0.0, 2.0, 1.0, paraboloid(focal_length_m)};
   require(!intersect_axisymmetric_mirror(input, invalid), "invalid aperture must reject ray");
 
+  const AxisymmetricMirror horizontal_surface{0, 0, 4, paraboloid(1)};
+  const auto horizontal = intersect_axisymmetric_mirror({{0, 0, 1}, {1, 0, 0}}, horizontal_surface);
+  require(horizontal && std::abs(horizontal->distance_m - 2) < 1.e-10,
+          "horizontal ray intersects finite paraboloid");
+  const auto multiple = intersect_axisymmetric_mirror({{-3, 0, 1}, {1, 0, 0}}, horizontal_surface);
+  require(multiple && std::abs(multiple->distance_m - 1) < 1.e-10,
+          "nearest of two horizontal paraboloid roots wins");
+  const auto grazing = intersect_axisymmetric_mirror({{-3, 2, 1}, {1, 0, 0}}, horizontal_surface);
+  require(grazing && std::abs(grazing->distance_m - 3) < 1.e-9,
+          "double root at grazing incidence is retained");
+  const auto parallel =
+      intersect_axisymmetric_mirror({{0, 0, 1}, {1, 0, -1.e-14}}, horizontal_surface);
+  require(parallel && std::abs(parallel->distance_m - 2) < 1.e-10,
+          "near horizontal ray does not depend on vertex-plane seed");
+  const AxisymmetricMirror holed{0, 1, 4, paraboloid(1)};
+  require(!intersect_axisymmetric_mirror({{-3, 0, 0.01}, {1, 0, 0}}, holed),
+          "roots in central hole are physical misses");
+  auto extreme = horizontal_surface;
+  extreme.surface.coefficient_m[12] = std::numeric_limits<double>::max();
+  bool numerical_failure = false;
+  const auto failed = intersect_axisymmetric_mirror(
+      {{1.5, 0, 10}, {0, 0, -1}}, extreme, kEpsilon, [](const Vec3 &) { return true; },
+      &numerical_failure);
+  require(!failed && numerical_failure,
+          "overflow in a supported aperture is explicit numerical failure");
   // T-SC-001: conversion is exact at the reference radius and supplied SC
   // profiles remain finite over their primary apertures.
   const std::array<double, 13> centimetre_profile{0.0, 0.25};
   const auto metre_profile = centimetre_even_polynomial_to_metres(centimetre_profile);
   require(std::abs(metre_profile.sag(1.0) - 25.0) < 1e-12, "cm polynomial conversion at 1 m");
-  const auto normalised_profile = centimetre_normalised_radius_polynomial_to_metres({0.0, 25.0}, 2.0);
+  const auto normalised_profile =
+      centimetre_normalised_radius_polynomial_to_metres({0.0, 25.0}, 2.0);
   require(std::abs(normalised_profile.sag(2.0) - 0.25) < 1e-12,
           "normalised-radius conversion at reference radius");
   const auto ssts = ssts_design_reference();
@@ -59,8 +85,10 @@ int main() {
   const auto offset_hit = intersect_axisymmetric_mirror({{0, 0, 1}, {0, 0, 1}}, offset_plane);
   require(offset_hit && std::abs(offset_hit->point_m.z - 6.0) < 1e-12,
           "nonzero constant sag must enter intersection seed");
-  require(std::isfinite(ssts.primary.sag(0.5 * ssts.primary_diameter_m)), "SSTS primary profile finite");
-  require(std::isfinite(scts.secondary.sag(0.5 * scts.secondary_diameter_m)), "SCTS secondary profile finite");
+  require(std::isfinite(ssts.primary.sag(0.5 * ssts.primary_diameter_m)),
+          "SSTS primary profile finite");
+  require(std::isfinite(scts.secondary.sag(0.5 * scts.secondary_diameter_m)),
+          "SCTS secondary profile finite");
   require(kMstNectarCam.family == TelescopeOpticalFamily::mst_modified_davies_cotton,
           "MST reference must retain Davies-Cotton family");
 

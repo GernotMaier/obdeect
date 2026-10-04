@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from obdeect.reference_run import ReferenceRunError, freeze, verify
+from obdeect.reference_run import ReferenceRunError, execute, freeze, verify
 
 
 class TestReferenceRun(unittest.TestCase):
@@ -58,9 +58,13 @@ class TestReferenceRun(unittest.TestCase):
                 "commands": [
                     {
                         "name": "reference",
-                        "argv": [sys.executable],
+                        "argv": [
+                            sys.executable,
+                            "-c",
+                            "import os; print(os.environ['OPTICAL_TEST'])",
+                        ],
                         "cwd": str(root),
-                        "environment": {},
+                        "environment": {"OPTICAL_TEST": "shared-photons"},
                         "inputs": [str(block)],
                     }
                 ],
@@ -68,6 +72,39 @@ class TestReferenceRun(unittest.TestCase):
             reference_run = freeze(config, model_root)
             verify(reference_run, model_root)
             self.assertEqual(len(reference_run["file_sha256"]), 2)
+            result = execute(reference_run, model_root, root / "success")
+            self.assertTrue(result["passed"])
+            self.assertEqual((root / "success/000.stdout.txt").read_text(), "shared-photons\n")
+            self.assertEqual(result["commands"][0]["returncode"], 0)
+            with self.assertRaises(FileExistsError):
+                execute(reference_run, model_root, root / "success")
+            config["commands"][0]["argv"] = [sys.executable, "-c", "import sys; sys.exit(3)"]
+            failing = freeze(config, model_root)
+            with self.assertRaisesRegex(ReferenceRunError, "failed; see"):
+                execute(failing, model_root, root / "failure")
+            failure = json.loads((root / "failure/execution.json").read_text())
+            self.assertFalse(failure["passed"])
+            self.assertEqual(failure["commands"][0]["returncode"], 3)
+            config["commands"][0]["argv"] = [
+                sys.executable,
+                "-c",
+                "from pathlib import Path; Path(" + repr(str(block)) + ").write_text('changed')",
+            ]
+            mutating = freeze(config, model_root)
+            with self.assertRaisesRegex(ReferenceRunError, "failed; see"):
+                execute(mutating, model_root, root / "mutating")
+            mutation = json.loads((root / "mutating/execution.json").read_text())
+            self.assertFalse(mutation["passed"])
+            self.assertEqual(mutation["commands"][0]["returncode"], 0)
+            self.assertIn("differs", mutation["commands"][0]["error"])
+            # Freezing detaches the record from subsequent caller configuration edits.
+            self.assertNotEqual(reference_run["configuration"]["commands"], config["commands"])
+            for timeout in (0, -1, float("nan"), float("inf")):
+                with (
+                    self.subTest(timeout=timeout),
+                    self.assertRaisesRegex(ReferenceRunError, "timeout"),
+                ):
+                    execute(reference_run, model_root, root / "bad-timeout", timeout)
             block.write_text("photon_id\n2\n")
             with self.assertRaisesRegex(ReferenceRunError, "differs"):
                 verify(reference_run, model_root)

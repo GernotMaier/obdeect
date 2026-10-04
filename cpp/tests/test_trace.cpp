@@ -1,20 +1,20 @@
 #include "obdeect/trace.hpp"
 
-#include <cstdlib>
 #include <cmath>
+#include <cstdlib>
 #include <iostream>
 #include <vector>
 
 namespace {
 
-void require(bool condition, const char* message) {
+void require(bool condition, const char *message) {
   if (!condition) {
     std::cerr << "FAIL: " << message << '\n';
     std::exit(1);
   }
 }
 
-}  // namespace
+} // namespace
 
 int main() {
   using namespace obdeect;
@@ -46,7 +46,8 @@ int main() {
   const auto invalid = trace(*optical_model, malformed);
   require(invalid.photons.status[0] == PhotonStatus::invalid_input,
           "inconsistent public block fails closed");
-  require(invalid.summary.status_count[static_cast<std::size_t>(PhotonStatus::invalid_input)] == positions.size(),
+  require(invalid.summary.status_count[static_cast<std::size_t>(PhotonStatus::invalid_input)] ==
+              positions.size(),
           "invalid block summary closes status count");
 
   std::cout << "trace tests passed\n";

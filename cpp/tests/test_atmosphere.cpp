@@ -9,10 +9,11 @@
 #include <stdexcept>
 
 namespace {
-void require(bool condition, const char* message) {
-  if (!condition) throw std::runtime_error(message);
+void require(bool condition, const char *message) {
+  if (!condition)
+    throw std::runtime_error(message);
 }
-}  // namespace
+} // namespace
 
 int main() {
   using namespace obdeect;
@@ -27,8 +28,8 @@ int main() {
     require(table.observation_altitude_m() == 2000 && table.depth(450, 3000) == 1,
             "table parser and knot interpolation");
     PhotonBatchContext context{7, 8, 0, 0, {0, 0, 0}, 1};
-    OpticalPhoton bunch{{{0, 0, 0}, {0, 0, -1}}, 10, 0, 12, 2.5, 0, 3000,
-                         std::numeric_limits<double>::quiet_NaN()};
+    OpticalPhoton bunch{
+        {{0, 0, 0}, {0, 0, -1}}, 10, 0, 12, 2.5, 0, 3000, std::numeric_limits<double>::quiet_NaN()};
     EventioRunInfo info{300, 600, false, true, false, true, false, 0};
     info.observation_altitude_m = 2000;
     auto children = resolve_eventio_spectrum(bunch, info, 16, 1234);
@@ -46,23 +47,29 @@ int main() {
     require(std::abs(removed - 2.5 * (1 - std::exp(-1))) < 1e-12,
             "direct extinction uses optical depth once");
 
-    OpticalPhoton spatial{{{0, 0, 0}, {0, 0, -1}}, 11, 450, 12, 1, 0,
-                          std::numeric_limits<double>::quiet_NaN(), 1000};
+    OpticalPhoton spatial{
+        {{0, 0, 0}, {0, 0, -1}}, 11, 450, 12, 1, 0, std::numeric_limits<double>::quiet_NaN(), 1000};
     require(std::abs(table.direct_survival(spatial, context) - std::exp(-1)) < 1e-12,
             "3D emission distance produces expected altitude");
     info.ceffic = true;
     bool rejected = false;
-    try { (void) attenuate_eventio_direct_beam(children, context, info, table); }
-    catch (const std::invalid_argument&) { rejected = true; }
+    try {
+      (void)attenuate_eventio_direct_beam(children, context, info, table);
+    } catch (const std::invalid_argument &) {
+      rejected = true;
+    }
     require(rejected, "preselected CEFFIC light cannot be attenuated twice");
     info.ceffic = false;
     info.refraction = true;
     rejected = false;
-    try { (void) attenuate_eventio_direct_beam(children, context, info, table); }
-    catch (const std::invalid_argument&) { rejected = true; }
+    try {
+      (void)attenuate_eventio_direct_beam(children, context, info, table);
+    } catch (const std::invalid_argument &) {
+      rejected = true;
+    }
     require(rejected, "refracted rays require a path-integral atmosphere model");
     std::cout << "atmosphere transport tests passed\n";
-  } catch (const std::exception& error) {
+  } catch (const std::exception &error) {
     std::cerr << error.what() << '\n';
     return EXIT_FAILURE;
   }

@@ -10,14 +10,14 @@
 
 namespace {
 
-void require(bool condition, const char* message) {
+void require(bool condition, const char *message) {
   if (!condition) {
     std::cerr << "FAIL: " << message << '\n';
     std::exit(1);
   }
 }
 
-}  // namespace
+} // namespace
 
 int main() {
   using namespace obdeect;
@@ -61,14 +61,13 @@ int main() {
 
   // T-FRAME-001: rotation and translation preserve a physical ray through a
   // parent/local round trip. Reflections and scaled axes are rejected.
-  const RigidFrame frame{{2.0, -3.0, 5.0}, {0.0, 1.0, 0.0}, {-1.0, 0.0, 0.0},
-                         {0.0, 0.0, 1.0}};
+  const RigidFrame frame{{2.0, -3.0, 5.0}, {0.0, 1.0, 0.0}, {-1.0, 0.0, 0.0}, {0.0, 0.0, 1.0}};
   require(frame.is_valid(), "right-handed rigid frame accepted");
   const Ray local{{1.0, 2.0, 3.0}, {0.0, 0.0, -1.0}};
   const Ray parent = frame.ray_to_parent(local);
   const Ray round_trip = frame.ray_from_parent(parent);
-  require(parent.position_m.x == 0.0 && parent.position_m.y == -2.0 &&
-              parent.position_m.z == 8.0 && round_trip.position_m.x == local.position_m.x &&
+  require(parent.position_m.x == 0.0 && parent.position_m.y == -2.0 && parent.position_m.z == 8.0 &&
+              round_trip.position_m.x == local.position_m.x &&
               round_trip.position_m.y == local.position_m.y &&
               round_trip.position_m.z == local.position_m.z &&
               round_trip.direction.z == local.direction.z,

@@ -10,7 +10,7 @@
 
 namespace {
 
-void require(bool condition, const char* message) {
+void require(bool condition, const char *message) {
   if (!condition) {
     std::cerr << "FAIL: " << message << '\n';
     std::exit(1);
@@ -18,8 +18,8 @@ void require(bool condition, const char* message) {
 }
 
 class TemporaryFile {
- public:
-  explicit TemporaryFile(const std::string& contents)
+public:
+  explicit TemporaryFile(const std::string &contents)
       : path_(std::filesystem::temp_directory_path() / "obdeect-photon-input-test.csv") {
     std::ofstream output(path_);
     output << contents;
@@ -27,15 +27,16 @@ class TemporaryFile {
   ~TemporaryFile() { std::filesystem::remove(path_); }
   [[nodiscard]] std::string path() const { return path_.string(); }
 
- private:
+private:
   std::filesystem::path path_;
 };
 
-constexpr const char* kHeader =
-    "run_id,event_id,array_id,telescope_id,photon_id,x_m,y_m,z_m,dx,dy,dz,wavelength_nm,time_ns,weight,"
-    "bunch_id,emission_height_m,emission_distance_m,telescope_x_m,telescope_y_m,telescope_z_m,array_reuse_weight\n";
+constexpr const char *kHeader = "run_id,event_id,array_id,telescope_id,photon_id,x_m,y_m,z_m,dx,dy,"
+                                "dz,wavelength_nm,time_ns,weight,"
+                                "bunch_id,emission_height_m,emission_distance_m,telescope_x_m,"
+                                "telescope_y_m,telescope_z_m,array_reuse_weight\n";
 
-}  // namespace
+} // namespace
 
 int main() {
   using namespace obdeect;
@@ -50,11 +51,13 @@ int main() {
   std::array<OpticalPhoton, 1> batch{};
   const auto first = reader.read(batch);
   require(first.count == 1 && !first.eof, "capacity chunk is not falsely EOF");
-  require(first.context.run_id == 7 && first.context.event_id == 8 && first.context.telescope_id == 10,
+  require(first.context.run_id == 7 && first.context.event_id == 8 &&
+              first.context.telescope_id == 10,
           "event/telescope identifiers preserved");
-  require(first.context.telescope_position_m.x == 4.0 && first.context.telescope_position_m.y == 5.0 &&
-              first.context.telescope_position_m.z == 6.0 && first.context.array_reuse_weight == 1.5,
-          "telescope position and fractional reuse weight preserved");
+  require(
+      first.context.telescope_position_m.x == 4.0 && first.context.telescope_position_m.y == 5.0 &&
+          first.context.telescope_position_m.z == 6.0 && first.context.array_reuse_weight == 1.5,
+      "telescope position and fractional reuse weight preserved");
   require(batch[0].photon_id == 101 && batch[0].wavelength_nm == 0.0 && batch[0].bunch_id == 500 &&
               batch[0].emission_height_m == 12000.0 && batch[0].emission_distance_m == 3000.0,
           "raw bunch provenance and unspecified wavelength preserved");
@@ -81,8 +84,8 @@ int main() {
   require(csv_result.count == memory_result.count && !csv_result.eof,
           "CSV batch ends at the same event boundary");
   for (std::size_t index = 0; index < csv_result.count; ++index) {
-    const auto& csv = csv_batch[index];
-    const auto& in_memory = memory_batch[index];
+    const auto &csv = csv_batch[index];
+    const auto &in_memory = memory_batch[index];
     require(csv.photon_id == in_memory.photon_id && csv.bunch_id == in_memory.bunch_id &&
                 csv.ray.position_m.x == in_memory.ray.position_m.x &&
                 csv.ray.position_m.y == in_memory.ray.position_m.y &&
@@ -97,7 +100,8 @@ int main() {
             "CSV and in-memory photons agree exactly");
   }
   const auto third = reader.read(batch);
-  require(third.count == 1 && third.eof && third.context.event_id == 11 && batch[0].photon_id == 103,
+  require(third.count == 1 && third.eof && third.context.event_id == 11 &&
+              batch[0].photon_id == 103,
           "event boundary begins a new batch and final row is retained");
   require(reader.read(batch).count == 0 && reader.read(batch).eof, "repeated EOF is stable");
 
@@ -122,18 +126,17 @@ int main() {
   bool rejected = false;
   try {
     CsvPhotonReader invalid(missing.path());
-  } catch (const std::invalid_argument&) {
+  } catch (const std::invalid_argument &) {
     rejected = true;
   }
   require(rejected, "missing required column is rejected");
 
-  TemporaryFile malformed{std::string{kHeader} +
-                          "1,2,3,4,5,0,0,0,0,0,0,400,0,1,0,0,0,0,0,0,1\n"};
+  TemporaryFile malformed{std::string{kHeader} + "1,2,3,4,5,0,0,0,0,0,0,400,0,1,0,0,0,0,0,0,1\n"};
   rejected = false;
   try {
     CsvPhotonReader invalid(malformed.path());
     (void)invalid.read(batch);
-  } catch (const std::invalid_argument&) {
+  } catch (const std::invalid_argument &) {
     rejected = true;
   }
   require(rejected, "zero direction is rejected");
@@ -144,7 +147,7 @@ int main() {
   try {
     CsvPhotonReader invalid(nonunit_direction.path());
     (void)invalid.read(batch);
-  } catch (const std::invalid_argument&) {
+  } catch (const std::invalid_argument &) {
     rejected = true;
   }
   require(rejected, "non-unit CSV direction is rejected");
@@ -153,7 +156,7 @@ int main() {
   rejected = false;
   try {
     MemoryPhotonReader invalid(invalid_memory_photon, first.context);
-  } catch (const std::invalid_argument&) {
+  } catch (const std::invalid_argument &) {
     rejected = true;
   }
   require(rejected, "non-unit in-memory direction is rejected");
@@ -164,7 +167,7 @@ int main() {
   try {
     CsvPhotonReader invalid(negative_id.path());
     (void)invalid.read(batch);
-  } catch (const std::invalid_argument&) {
+  } catch (const std::invalid_argument &) {
     rejected = true;
   }
   require(rejected, "negative unsigned identifiers are rejected rather than wrapped");

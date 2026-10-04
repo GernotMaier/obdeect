@@ -1,6 +1,6 @@
+#include "obdeect/artificial_mst.hpp"
 #include "obdeect/cli_parse.hpp"
 #include "obdeect/sources.hpp"
-#include "obdeect/artificial_mst.hpp"
 
 #include <fstream>
 #include <iomanip>
@@ -10,7 +10,7 @@
 
 namespace {
 
-bool parse_source(const std::string& value, obdeect::ArtificialSourceKind& output) {
+bool parse_source(const std::string &value, obdeect::ArtificialSourceKind &output) {
   if (value == "star") {
     output = obdeect::ArtificialSourceKind::star;
     return true;
@@ -31,13 +31,14 @@ void usage() {
             << "                    [--source star|illuminator|laser] [--field-x-deg D]\n"
             << "                    [--field-y-deg D] [--distance-m D] [--divergence-deg D]\n"
             << "                    [--wavelength-nm D]\n"
-            << "Developer demonstration: trace artificial photons through a simple MST-inspired spherical\n"
+            << "Developer demonstration: trace artificial photons through a simple MST-inspired "
+               "spherical\n"
             << "mirror, camera shadow and four mast supports.\n";
 }
 
-}  // namespace
+} // namespace
 
-int main(int argc, char** argv) {
+int main(int argc, char **argv) {
   using obdeect::parse_finite_double;
   using obdeect::parse_positive_size;
   std::size_t photon_count = 10000;
@@ -51,8 +52,13 @@ int main(int argc, char** argv) {
   double wavelength_nm = 400.0;
   for (int index = 1; index < argc; ++index) {
     const std::string argument{argv[index]};
-    if (argument == "-h" || argument == "--help") { usage(); return 0; }
-    if (argument == "--photons" && index + 1 < argc && parse_positive_size(argv[++index], photon_count)) continue;
+    if (argument == "-h" || argument == "--help") {
+      usage();
+      return 0;
+    }
+    if (argument == "--photons" && index + 1 < argc &&
+        parse_positive_size(argv[++index], photon_count))
+      continue;
     if (argument == "--output" && index + 1 < argc) {
       output_path = argv[++index];
       continue;
@@ -61,19 +67,24 @@ int main(int argc, char** argv) {
       config.include_structure = false;
       continue;
     }
-    if (argument == "--source" && index + 1 < argc && parse_source(argv[++index], source_kind)) continue;
-    if (argument == "--field-x-deg" && index + 1 < argc && parse_finite_double(argv[++index], field_x_deg)) continue;
-    if (argument == "--field-y-deg" && index + 1 < argc && parse_finite_double(argv[++index], field_y_deg)) continue;
-    if (argument == "--distance-m" && index + 1 < argc && parse_finite_double(argv[++index], distance_m) &&
-        distance_m > 0.0) {
+    if (argument == "--source" && index + 1 < argc && parse_source(argv[++index], source_kind))
+      continue;
+    if (argument == "--field-x-deg" && index + 1 < argc &&
+        parse_finite_double(argv[++index], field_x_deg))
+      continue;
+    if (argument == "--field-y-deg" && index + 1 < argc &&
+        parse_finite_double(argv[++index], field_y_deg))
+      continue;
+    if (argument == "--distance-m" && index + 1 < argc &&
+        parse_finite_double(argv[++index], distance_m) && distance_m > 0.0) {
       continue;
     }
-    if (argument == "--divergence-deg" && index + 1 < argc && parse_finite_double(argv[++index], divergence_deg) &&
-        divergence_deg >= 0.0) {
+    if (argument == "--divergence-deg" && index + 1 < argc &&
+        parse_finite_double(argv[++index], divergence_deg) && divergence_deg >= 0.0) {
       continue;
     }
-    if (argument == "--wavelength-nm" && index + 1 < argc && parse_finite_double(argv[++index], wavelength_nm) &&
-        wavelength_nm > 0.0) {
+    if (argument == "--wavelength-nm" && index + 1 < argc &&
+        parse_finite_double(argv[++index], wavelength_nm) && wavelength_nm > 0.0) {
       continue;
     }
     usage();
@@ -86,7 +97,8 @@ int main(int argc, char** argv) {
     return 1;
   }
   output << std::setprecision(17);
-  output << "contract_version,photon_id,source_kind,wavelength_nm,emission_time_ns,source_weight,throughput,"
+  output << "contract_version,photon_id,source_kind,wavelength_nm,emission_time_ns,source_weight,"
+            "throughput,"
             "status,point_count,path_length_m,incidence_primary_deg,incidence_secondary_deg,"
             "incidence_focal_deg,x0_m,y0_m,z0_m,x1_m,y1_m,z1_m,x2_m,y2_m,z2_m,x3_m,y3_m,z3_m\n";
 
@@ -97,37 +109,40 @@ int main(int argc, char** argv) {
   std::vector<obdeect::OpticalPhoton> photons;
   if (source_kind == obdeect::ArtificialSourceKind::star) {
     photons = obdeect::star_photons(photon_count, config.mirror_aperture_radius_m,
-                                    {field_x_deg * radians_per_degree, field_y_deg * radians_per_degree,
-                                     distance_m, wavelength_nm});
+                                    {field_x_deg * radians_per_degree,
+                                     field_y_deg * radians_per_degree, distance_m, wavelength_nm});
   } else if (source_kind == obdeect::ArtificialSourceKind::illuminator) {
     photons = obdeect::illuminator_photons(photon_count, config.mirror_aperture_radius_m,
-                                            {{0.0, 0.0, distance_m}, wavelength_nm, 1.0});
+                                           {{0.0, 0.0, distance_m}, wavelength_nm, 1.0});
   } else {
     photons = obdeect::laser_photons(photon_count, config.mirror_aperture_radius_m,
-                                      {{0.0, 0.0, -1.0}, {0.0, 0.0, distance_m},
-                                       divergence_deg * radians_per_degree, wavelength_nm});
+                                     {{0.0, 0.0, -1.0},
+                                      {0.0, 0.0, distance_m},
+                                      divergence_deg * radians_per_degree,
+                                      wavelength_nm});
   }
   if (photons.size() != photon_count) {
     std::cerr << "Cannot generate the requested source photons\n";
     return 1;
   }
-  for (const auto& photon : photons) {
+  for (const auto &photon : photons) {
     auto record = obdeect::trace_artificial_mst(photon.ray, photon.photon_id, config);
     record.wavelength_nm = photon.wavelength_nm;
     detected += record.status == obdeect::PhotonStatus::detected;
     camera_blocked += record.status == obdeect::PhotonStatus::blocked_camera;
     mast_blocked += record.status == obdeect::PhotonStatus::blocked_mast;
     const double throughput = record.status == obdeect::PhotonStatus::detected ? 1.0 : 0.0;
-    output << "obdeect-arrival-v1," << record.photon_id << ',' << obdeect::to_string(source_kind) << ','
-           << record.wavelength_nm << ',' << photon.time_ns << ',' << photon.weight << ',' << throughput << ','
-           << obdeect::to_string(record.status) << ',' << static_cast<int>(record.point_count) << ','
-           << record.path_length_m << ",,,";
-    for (const auto& point : record.points_m) output << ',' << point.x << ',' << point.y << ',' << point.z;
+    output << "obdeect-arrival-v1," << record.photon_id << ',' << obdeect::to_string(source_kind)
+           << ',' << record.wavelength_nm << ',' << photon.time_ns << ',' << photon.weight << ','
+           << throughput << ',' << obdeect::to_string(record.status) << ','
+           << static_cast<int>(record.point_count) << ',' << record.path_length_m << ",,,";
+    for (const auto &point : record.points_m)
+      output << ',' << point.x << ',' << point.y << ',' << point.z;
     output << '\n';
   }
 
-  std::cout << "MST baseline: " << photon_count << " artificial " << wavelength_nm << "-nm " << obdeect::to_string(source_kind)
-            << " photons\n"
+  std::cout << "MST baseline: " << photon_count << " artificial " << wavelength_nm << "-nm "
+            << obdeect::to_string(source_kind) << " photons\n"
             << "  detected: " << detected << " (" << 100.0 * detected / photon_count << "%)\n"
             << "  camera shadow: " << camera_blocked << "\n"
             << "  mast shadow: " << mast_blocked << "\n"

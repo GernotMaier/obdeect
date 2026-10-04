@@ -12,9 +12,7 @@ validation matrix for architectural or scientific changes.
 
 - Never ever modify the main README.md. Suggest instead changes, don't apply them.
 - Terminology: this project is for gamma-ray astronomy. Always call the
-  compiled telescope geometry and optical-response artifact an "optical model";
-  never call it a "scene" in user-facing text, documentation,
-  diagnostics, or new APIs.
+  compiled telescope geometry and optical-response artifact an "optical model".
 - Keep it simple, efficient, deterministic, and portable. Prefer small,
   explicit data structures and testable physical kernels over frameworks,
   global state, hidden defaults, or abstraction in the hot path.
@@ -49,10 +47,7 @@ validation matrix for architectural or scientific changes.
   examples and fixtures clearly labelled and configuration-driven.
 - When renaming a public concept, update implementation symbols, imports,
   exception types, serialized keys, fixture variables, and test call sites
-  together. For scene-to-optical-model renames, do not leave stale references
-  such as `write_native_scene`, `SceneCompileError`, `scene_sha256`, or local
-  variables named `scene` in optical-model tests unless they intentionally test
-  backward compatibility.
+  together. Do not leave obsolete geometry terminology in optical-model tests.
 
 ## Build, test, and lint
 

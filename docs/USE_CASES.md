@@ -90,6 +90,78 @@ obdeect-plot-reference --view assembly-3d \
   --output lst-optical-model-3d.png
 ```
 
+### Recorded paths, terminal losses, and finite masks
+
+Supplying a CSV to the telescope plate overlays its recorded flight segments and
+interaction vertices. A cross marks the terminal vertex. Status controls colour;
+source identity does not override that colour. Long source-flight segments are
+cropped to a telescope-frame cube for display, without modifying the CSV or
+solving another optical path. `--no-show-paths` retains the geometry-only plate.
+
+```sh
+obdeect-plot-reference --view telescope --input lst-star.csv \
+  --optical-model-json lst.optical-model.json --path-selection stratified \
+  --selection-seed 42 --max-paths 200 --context-radius-m 35 \
+  --output lst-path-plate.svg
+
+obdeect-plot-reference --view telescope --input lst-star.csv \
+  --optical-model-json lst.optical-model.json --panel focal-plane-hits \
+  --no-show-paths --bins 64 --output lst-geometry-and-psf.png
+```
+
+Use `--panel assembly`, `section`, `pupil`, or `focal-geometry` with the telescope
+view to export one selected panel. In the pupil panel, supplied CSVs overlay
+recorded entrance markers; in the focal geometry panel they overlay recorded
+detected endpoints. Assembly and section panels overlay recorded flight
+segments.
+
+The default fourth panel contains detector geometry. Only the explicit
+`--panel focal-plane-hits` option replaces it with weighted detected-hit density.
+Parsed finite camera entrance footprints appear only in the focal panel; a
+camera layout with centres and no footprint types does not create pixel polygons
+or three-dimensional camera hardware. Segmented aspheric models use their
+compiled hexagonal tangent-plane footprints or annular sectors, including
+recorded radial and azimuthal gaps. Hexagonal curvature is not rendered; this
+limitation is declared in the footer. Continuous aspheric contours use 256 radial
+samples. Cylinder projection boundaries use 64 angular samples and capped
+three-dimensional cylinders use 12 sides. The axial panel is an orthographic
+projection of surface boundaries; cylinders entirely outside its selected plane
+are omitted. It is labelled as a projection, rather than an exact mechanical cut.
+
+A loss map uses each photon's recorded entrance vertex (point 0) and input weight.
+Its numerator counts the input weight of terminal losses, and its denominator
+counts all incident input weight in the same bin. Empty bins remain masked.
+Detected photons with zero optical response remain detected outcomes; they do
+not become geometric losses.
+
+```sh
+obdeect-plot-reference --view loss-map --input lst-star.csv \
+  --optical-model-json lst.optical-model.json --bins 64 --output lst-losses.png
+
+obdeect-plot-reference --view loss-map --input lst-star.csv \
+  --optical-model-json lst.optical-model.json --status blocked_obscurer \
+  --component-id 902 --output recorded-component-losses.svg
+```
+
+Status/component filters select the left-panel markers and the loss numerator;
+the right-panel incident denominator retains all input photons. Component IDs
+must be present in recorded diagnostics. Unknown or legacy IDs are never
+assigned to nearby hardware by geometric inference. The legacy case is labelled
+`component unknown`. Native versioned CSVs pass the shared optical-arrival
+validator before plotting or PSF analysis; unversioned reference diagnostics
+remain an explicit compatibility path.
+
+`--path-selection first` retains the first-N behaviour. `stratified` distributes
+slots across recorded status/source groups, ranked by a stable hash of photon
+identity and the selection seed. `--colour-by wavelength`, `arrival-time`, or
+`incidence-angle` requires the corresponding recorded finite values and shows a
+numeric colour bar with units. `--view pupil --colour-by facet-z` colours aperture
+centre height; `--label-panels` labels at most 300 segmented primary panels.
+PNG and PDF use the headless Matplotlib renderer. Geometry SVGs have fixed artist
+IDs and no creation timestamp; repeated exports are byte-stable for the same
+inputs, options, and Matplotlib version. `--view focal-plane --output psf.svg`
+uses the existing deterministic dependency-free weighted PSF summary.
+
 ### Single-panel 2F test stand
 
 Find the panel ID in `lst.optical-model.json` under `primary.facets`. Place the source at the panel centre plus twice its `focal_length_m` along `nominal_normal`, and place a planar test screen at that point. Select the panel, then derive and plot the screen distribution.
@@ -194,4 +266,4 @@ These requests need geometry or response data that the current compiled optical 
 | Full structure-and-ray rendering | Compiled 3D component geometry and per-component interaction records. |
 | Segmented SST/SCT structure, shadowing, and throughput | Segment placement/alignment, masts, camera housing, baffles, material binding, and validation fixtures. The M1/M2/focal aspheres are exported and traced. |
 
-The existing native structure plot shows only compiled panel centres and the focal boundary. It intentionally does not draw unmodeled hardware.
+The compiled telescope plate shows finite panel boundaries, supplied detector surfaces, aspheric contours or finite masks, and supplied cylinders. Mechanical geometry absent from the compiled optical model is declared in the footer.

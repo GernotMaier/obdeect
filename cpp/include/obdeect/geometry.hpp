@@ -20,12 +20,14 @@ struct CylinderObstruction {
 
 using OpticalSurface = std::variant<AxisymmetricMirror, DiskSurface>;
 
-[[nodiscard]] inline std::optional<double> intersect(const Ray& ray, const DiskSurface& surface) {
+[[nodiscard]] inline std::optional<double> intersect(const Ray &ray, const DiskSurface &surface) {
   return intersect_disk_z(ray, surface.z_m, surface.radius_m);
 }
 
-[[nodiscard]] inline std::optional<double> intersect(const Ray& ray, const CylinderObstruction& obstruction) {
-  return intersect_finite_cylinder(ray, obstruction.start_m, obstruction.end_m, obstruction.radius_m);
+[[nodiscard]] inline std::optional<double> intersect(const Ray &ray,
+                                                     const CylinderObstruction &obstruction) {
+  return intersect_finite_cylinder(ray, obstruction.start_m, obstruction.end_m,
+                                   obstruction.radius_m);
 }
 
-}  // namespace obdeect
+} // namespace obdeect

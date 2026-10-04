@@ -6,13 +6,13 @@
 #include <iostream>
 
 namespace {
-void require(bool condition, const char* message) {
+void require(bool condition, const char *message) {
   if (!condition) {
     std::cerr << "FAIL: " << message << '\n';
     std::exit(1);
   }
 }
-}  // namespace
+} // namespace
 
 int main() {
   using namespace obdeect;

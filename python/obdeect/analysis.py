@@ -10,11 +10,11 @@ import json
 import math
 import subprocess
 from collections import defaultdict
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-from obdeect.result_contract import TERMINAL_STATUSES
+from obdeect.result_contract import TERMINAL_STATUSES, iter_arrivals
 
 
 @dataclass(frozen=True)
@@ -77,16 +77,21 @@ def _final_hit(row: dict[str, str], path: Path, row_number: int) -> tuple[float,
     return x, y
 
 
-def analyse_trace_csv(path: Path) -> PsfResult:
-    """Compute a focal-plane PSF and loss closure from one photon-trace CSV."""
-    input_weight = 0.0
-    detected_weight = 0.0
-    terminal_count: dict[str, int] = defaultdict(int)
-    terminal_input_weight: dict[str, float] = defaultdict(float)
-    detected_photons = 0
-    hits: list[FocalPlaneHit] = []
+def _trace_samples(path: Path) -> Iterator[tuple[str, float, float, float, float]]:
+    """Read each photon once, retaining the legacy trace CSV adapter."""
     with path.open(newline="") as handle:
         reader = csv.DictReader(handle)
+        if "contract_version" in (reader.fieldnames or ()):
+            handle.close()
+            for arrival in iter_arrivals(path):
+                yield (
+                    arrival.status,
+                    arrival.source_weight,
+                    arrival.throughput,
+                    arrival.focal_x_m if arrival.detected else 0.0,
+                    arrival.focal_y_m if arrival.detected else 0.0,
+                )
+            return
         required = {"status", "point_count", "source_weight", "throughput"}
         if reader.fieldnames is None or not required.issubset(reader.fieldnames):
             raise ValueError(f"{path}: CSV must contain {', '.join(sorted(required))} columns")
@@ -102,17 +107,29 @@ def analyse_trace_csv(path: Path) -> PsfResult:
                 raise ValueError(f"{path}:{row_number}: throughput must not exceed 1")
             if status != "detected" and throughput != 0.0:
                 raise ValueError(f"{path}:{row_number}: lost photon has nonzero throughput")
-            input_weight += source_weight
-            terminal_count[status] += 1
-            terminal_input_weight[status] += source_weight
-            if status != "detected":
-                continue
-            x, y = _final_hit(row, path, row_number)
-            detected_photons += 1
-            weight = source_weight * throughput
-            detected_weight += weight
-            if weight > 0.0:
-                hits.append(FocalPlaneHit(x, y, weight))
+            x, y = _final_hit(row, path, row_number) if status == "detected" else (0.0, 0.0)
+            yield status, source_weight, throughput, x, y
+
+
+def analyse_trace_csv(path: Path) -> PsfResult:
+    """Compute a focal-plane PSF and loss closure from one photon-trace CSV."""
+    input_weight = 0.0
+    detected_weight = 0.0
+    terminal_count: dict[str, int] = defaultdict(int)
+    terminal_input_weight: dict[str, float] = defaultdict(float)
+    detected_photons = 0
+    hits: list[FocalPlaneHit] = []
+    for status, source_weight, throughput, x, y in _trace_samples(path):
+        input_weight += source_weight
+        terminal_count[status] += 1
+        terminal_input_weight[status] += source_weight
+        if status != "detected":
+            continue
+        detected_photons += 1
+        weight = source_weight * throughput
+        detected_weight += weight
+        if weight > 0.0:
+            hits.append(FocalPlaneHit(x, y, weight))
     if input_weight <= 0.0:
         raise ValueError(f"{path}: total input weight must be positive")
     if detected_photons == 0:

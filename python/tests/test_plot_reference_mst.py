@@ -119,7 +119,7 @@ class TestTracePathReader(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "segmented"):
                 PLOT.compiled_facet_polygons(path)
 
-    def test_loads_finite_segmented_scene_without_invented_hardware(self):
+    def test_loads_finite_segmented_optical_model_without_invented_hardware(self):
         model = {
             "provenance": {"model": "mini-dish", "model_version": "1"},
             "optical_model_sha256": "a" * 64,
@@ -158,15 +158,15 @@ class TestTracePathReader(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "model.json"
             path.write_text(json.dumps(model))
-            scene = PLOT.load_plot_scene(path)
-        self.assertEqual(scene.kind, "segmented")
-        self.assertEqual(scene.model_label, "mini-dish/1")
+            optical_model = PLOT.load_plot_optical_model(path)
+        self.assertEqual(optical_model.kind, "segmented")
+        self.assertEqual(optical_model.model_label, "mini-dish/1")
         self.assertEqual(
-            [(item.identifier, item.role) for item in scene.polygons],
+            [(item.identifier, item.role) for item in optical_model.polygons],
             [(4, "primary"), (5, "detector")],
         )
-        self.assertEqual(scene.obscurers[0].identifier, 6)
-        self.assertEqual(scene.unavailable_roles, ())
+        self.assertEqual(optical_model.obscurers[0].identifier, 6)
+        self.assertEqual(optical_model.unavailable_roles, ())
 
     def test_axisymmetric_profile_follows_compiled_polynomial(self):
         model = {
@@ -198,13 +198,13 @@ class TestTracePathReader(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "model.json"
             path.write_text(json.dumps(model))
-            scene = PLOT.load_plot_scene(path)
-        primary = scene.axisymmetric_surfaces[0]
+            optical_model = PLOT.load_plot_optical_model(path)
+        primary = optical_model.axisymmetric_surfaces[0]
         profile = PLOT._axisymmetric_profile(primary, samples=3)
         self.assertEqual(profile[0], (0.0, 2.0))
         self.assertEqual(profile[-1], (3.0, 11.0))
 
-    def test_scene_loader_rejects_duplicate_component_identifiers(self):
+    def test_optical_model_loader_rejects_duplicate_component_identifiers(self):
         surface = {
             "id": 4,
             "shape": "circle",
@@ -224,10 +224,10 @@ class TestTracePathReader(unittest.TestCase):
             path = Path(directory) / "model.json"
             path.write_text(json.dumps(model))
             with self.assertRaisesRegex(ValueError, "unique"):
-                PLOT.load_plot_scene(path)
+                PLOT.load_plot_optical_model(path)
 
-    def test_scene_bounds_include_the_full_cylinder_diameter(self):
-        scene = PLOT.PlotScene(
+    def test_optical_model_bounds_include_the_full_cylinder_diameter(self):
+        optical_model = PLOT.PlotOpticalModel(
             "segmented",
             "fixture",
             None,
@@ -236,7 +236,9 @@ class TestTracePathReader(unittest.TestCase):
             (PLOT.PlotObscurer(1, (1, 2, 3), (2, 3, 4), 0.5),),
             (),
         )
-        self.assertEqual(PLOT._scene_bounds(scene), ((0.75, 2.25), (1.75, 3.25), (2.75, 4.25)))
+        self.assertEqual(
+            PLOT._optical_model_bounds(optical_model), ((0.75, 2.25), (1.75, 3.25), (2.75, 4.25))
+        )
 
     def test_rejects_invalid_detected_focal_plane_data(self):
         csv_text = "status,point_count,x0_m,y0_m\ndetected,1,nan,0\n"
