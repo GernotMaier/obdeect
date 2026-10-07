@@ -1,0 +1,103 @@
+"""Exercise both simtools workflows against the packaged native executable."""
+
+import json
+import logging
+import runpy
+import unittest
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+
+try:
+    import astropy.units as u
+    import simtools  # noqa: F401
+except ImportError as error:
+    raise unittest.SkipTest("simtools integration requires simtools and astropy") from error
+from obdeect import executable_path
+from obdeect.result_contract import read_arrivals
+from simtools import settings
+from simtools.ray_tracing.incident_angles import IncidentAnglesCalculator
+from simtools.ray_tracing.ray_tracing import RayTracing
+
+
+@pytest.fixture
+def installed_model(tmp_path, monkeypatch):
+    """Create a generic reflector without a database or production model assets."""
+    smoke = runpy.run_path(str(Path(__file__).parents[2] / "tools" / "installed_smoke.py"))
+    model = tmp_path / "model.json"
+    model.write_text(json.dumps(smoke["tiny_model"]()))
+    monkeypatch.setattr(settings.config, "_ray_tracing_backend", "obdeect")
+    monkeypatch.setattr(settings.config, "_args", {"obdeect_optical_model_file": model})
+    monkeypatch.setattr(settings.config, "_obdeect_exe", None)
+    assert settings.config.obdeect_exe == executable_path("obdeect-simtools-raytrace")
+    return model
+
+
+def test_ray_tracing_executes_packaged_model_for_unique_offsets(installed_model, tmp_path):
+    """Run the actual backend factory, file naming and native transport."""
+    ray = object.__new__(RayTracing)
+    ray._logger = logging.getLogger(__name__)
+    ray.telescope_model = SimpleNamespace(site="North", name="LSTN-01", label="smoke")
+    ray.label = "smoke"
+    ray.output_directory = tmp_path
+    ray.single_mirror_mode = False
+    ray.zenith_angle = 0.0
+    ray.mirrors = [{"source_distance": 10.0}]
+    files = []
+    for offset in (0.0, 0.1):
+        simulator, *_ = ray._create_simulator(offset, 0, 0, ray.mirrors[0], True, False)
+        simulator.run()
+        arrivals = read_arrivals(simulator.output_file)
+        assert len(arrivals) == 100
+        assert any(arrival.detected for arrival in arrivals)
+        settings.config.args["obdeect_launch_area_m2"] = 2.0
+        image = ray._create_psf_image(simulator.output_file, 1000, 0.8)
+        expected_area_m2 = (
+            2
+            * sum(arrival.optical_weight for arrival in arrivals)
+            / sum(arrival.source_weight for arrival in arrivals)
+        )
+        assert image.get_effective_area() == pytest.approx(expected_area_m2)
+        result = ray._analyze_image(image, offset, 0, offset, 0.8, 1)
+        assert result[5].to_value(u.m**2) == pytest.approx(expected_area_m2)
+        assert all(
+            arrival.optical_weight == pytest.approx(0.8) for arrival in arrivals if arrival.detected
+        )
+        files.append(simulator.output_file)
+        # Reuse preserves an existing result; force regenerates a damaged file.
+        simulator.output_file.write_text("existing result")
+        simulator.run()
+        assert simulator.output_file.read_text() == "existing result"
+        simulator.force_simulate = True
+        simulator.run()
+        assert len(read_arrivals(simulator.output_file)) == 100
+    assert files[0] != files[1]
+
+
+def test_incident_angles_executes_packaged_model(installed_model, tmp_path, monkeypatch):
+    """Read native incidence measurements and write the real ECSV distribution."""
+    calculator = object.__new__(IncidentAnglesCalculator)
+    calculator.logger = logging.getLogger(__name__)
+    calculator.label = "smoke"
+    calculator.results_dir = tmp_path
+    calculator.calculate_primary_secondary_angles = False
+    calculator.config_data = {
+        "telescope": "LSTN-01",
+        "source_distance": 10 * u.km,
+        "number_of_photons": 100,
+        "off_axis_angle": 0 * u.deg,
+        "obdeect_optical_model_file": installed_model,
+    }
+    monkeypatch.setattr(
+        "simtools.ray_tracing.incident_angles.MetadataCollector.dump", lambda **_: None
+    )
+    result = calculator.run()
+    assert len(result) > 0
+    assert result["angle_incidence_focal"].unit == u.deg
+    assert (tmp_path / "incident_angles_smoke_LSTN-01_off0.ecsv").is_file()
+    assert all(
+        arrival.incidence_focal_deg is not None
+        for arrival in read_arrivals(tmp_path / "arrivals_smoke_LSTN-01_off0.csv")
+        if arrival.detected
+    )

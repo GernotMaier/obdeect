@@ -5,6 +5,8 @@
 #include <cmath>
 #include <cstdint>
 #include <fstream>
+#include <iomanip>
+#include <iterator>
 #include <limits>
 #include <optional>
 #include <span>
@@ -37,16 +39,44 @@ struct PhotonReadResult {
   bool eof{};
 };
 
-[[nodiscard]] inline bool valid_photon(const OpticalPhoton& photon) {
+// Boundary output, before tracing. Optional emission metadata stays unavailable
+// when the source does not specify it; it is never reconstructed from detections.
+inline void write_photon_csv_header(std::ostream &output) {
+  output << "run_id,event_id,array_id,telescope_id,photon_id,x_m,y_m,z_m,dx,dy,dz,"
+            "wavelength_nm,time_ns,weight,bunch_id,emission_height_m,emission_distance_m,"
+            "telescope_x_m,telescope_y_m,telescope_z_m,array_reuse_weight\n";
+}
+
+inline void write_photon_csv(std::ostream &output, const PhotonBatchContext &context,
+                             const OpticalPhoton &photon) {
+  output << std::setprecision(17) << context.run_id << ',' << context.event_id << ','
+         << context.array_id << ',' << context.telescope_id << ',' << photon.photon_id << ','
+         << photon.ray.position_m.x << ',' << photon.ray.position_m.y << ','
+         << photon.ray.position_m.z << ',' << photon.ray.direction.x << ','
+         << photon.ray.direction.y << ',' << photon.ray.direction.z << ',' << photon.wavelength_nm
+         << ',' << photon.time_ns << ',' << photon.weight << ',' << photon.bunch_id << ',';
+  for (const auto value : {photon.emission_height_m, photon.emission_distance_m}) {
+    if (std::isfinite(value))
+      output << value;
+    output << ',';
+  }
+  output << context.telescope_position_m.x << ',' << context.telescope_position_m.y << ','
+         << context.telescope_position_m.z << ',' << context.array_reuse_weight << '\n';
+}
+
+[[nodiscard]] inline bool valid_photon(const OpticalPhoton &photon) {
   const double direction_length = norm(photon.ray.direction);
   return std::isfinite(photon.ray.position_m.x) && std::isfinite(photon.ray.position_m.y) &&
          std::isfinite(photon.ray.position_m.z) && std::isfinite(direction_length) &&
          std::abs(direction_length - 1.0) <= 1e-12 && std::isfinite(photon.wavelength_nm) &&
          photon.wavelength_nm >= 0.0 && std::isfinite(photon.time_ns) &&
-         std::isfinite(photon.weight) && photon.weight >= 0.0;
+         std::isfinite(photon.weight) && photon.weight >= 0.0 &&
+         (std::isnan(photon.emission_height_m) || std::isfinite(photon.emission_height_m)) &&
+         (std::isnan(photon.emission_distance_m) ||
+          (std::isfinite(photon.emission_distance_m) && photon.emission_distance_m >= 0.0));
 }
 
-[[nodiscard]] inline bool valid_context(const PhotonBatchContext& context) {
+[[nodiscard]] inline bool valid_context(const PhotonBatchContext &context) {
   return std::isfinite(context.telescope_position_m.x) &&
          std::isfinite(context.telescope_position_m.y) &&
          std::isfinite(context.telescope_position_m.z) &&
@@ -57,7 +87,7 @@ struct PhotonReadResult {
 // destination storage; errors throw (never masquerade as EOF). A non-EOF read
 // must return count > 0. Event boundaries must not be mixed within a batch.
 class PhotonReader {
- public:
+public:
   virtual ~PhotonReader() = default;
   virtual PhotonReadResult read(std::span<OpticalPhoton> destination) = 0;
 };
@@ -65,23 +95,23 @@ class PhotonReader {
 // First adapter: deterministic test/calibration sources. Source storage must
 // outlive this reader; no photon copy beyond the requested batch is allocated.
 class MemoryPhotonReader final : public PhotonReader {
- public:
+public:
   MemoryPhotonReader(std::span<const OpticalPhoton> source, PhotonBatchContext context)
       : source_(source), context_(context) {
-    if (!valid_context(context_) ||
-        !std::all_of(source_.begin(), source_.end(), valid_photon))
+    if (!valid_context(context_) || !std::all_of(source_.begin(), source_.end(), valid_photon))
       throw std::invalid_argument("invalid in-memory photon or batch metadata");
   }
 
   PhotonReadResult read(std::span<OpticalPhoton> destination) override {
-    if (destination.empty()) throw std::invalid_argument("photon batch capacity must be positive");
+    if (destination.empty())
+      throw std::invalid_argument("photon batch capacity must be positive");
     const auto count = std::min(destination.size(), source_.size() - offset_);
     std::copy_n(source_.begin() + offset_, count, destination.begin());
     offset_ += count;
     return {context_, count, offset_ == source_.size()};
   }
 
- private:
+private:
   std::span<const OpticalPhoton> source_;
   PhotonBatchContext context_;
   std::size_t offset_{};
@@ -99,23 +129,27 @@ class MemoryPhotonReader final : public PhotonReader {
 // preserved as the explicit unspecified-spectrum sentinel.  Malformed input
 // throws invalid_argument; it is never reported as EOF.
 class CsvPhotonReader final : public PhotonReader {
- public:
-  explicit CsvPhotonReader(const std::string& path) : input_(path) {
-    if (!input_) throw std::invalid_argument("cannot open photon CSV: " + path);
+public:
+  explicit CsvPhotonReader(const std::string &path) : input_(path) {
+    if (!input_)
+      throw std::invalid_argument("cannot open photon CSV: " + path);
     initialise_header();
   }
 
   PhotonReadResult read(std::span<OpticalPhoton> destination) override {
-    if (destination.empty()) throw std::invalid_argument("photon batch capacity must be positive");
+    if (destination.empty())
+      throw std::invalid_argument("photon batch capacity must be positive");
     const auto first = next_row();
-    if (!first) return {{}, 0, true};
+    if (!first)
+      return {{}, 0, true};
 
     const PhotonBatchContext context = first->context;
     destination[0] = first->photon;
     std::size_t count = 1;
     while (count < destination.size()) {
       const auto row = next_row();
-      if (!row) return {context, count, true};
+      if (!row)
+        return {context, count, true};
       if (!same_context(context, row->context)) {
         pending_ = *row;
         return {context, count, false};
@@ -126,26 +160,36 @@ class CsvPhotonReader final : public PhotonReader {
     // Read one row ahead so eof is accurate even when the final batch exactly
     // fills caller storage.  The row is retained for the next call.
     const auto row = next_row();
-    if (!row) return {context, count, true};
+    if (!row)
+      return {context, count, true};
     pending_ = *row;
     return {context, count, false};
   }
 
- private:
+private:
   struct Row {
     PhotonBatchContext context;
     OpticalPhoton photon;
   };
 
   static constexpr std::string_view kRequiredColumns[] = {
-      "run_id", "event_id", "array_id", "telescope_id", "photon_id", "x_m", "y_m", "z_m",
-      "dx", "dy", "dz", "wavelength_nm", "time_ns", "weight"};
+      "run_id", "event_id", "array_id", "telescope_id", "photon_id",     "x_m",     "y_m",
+      "z_m",    "dx",       "dy",       "dz",           "wavelength_nm", "time_ns", "weight"};
+  static constexpr std::string_view kOptionalColumns[] = {
+      "bunch_id",      "emission_height_m", "emission_distance_m", "telescope_x_m",
+      "telescope_y_m", "telescope_z_m",     "array_reuse_weight"};
 
   void initialise_header() {
     std::string header;
-    if (!std::getline(input_, header)) throw std::invalid_argument("photon CSV is missing a header");
+    if (!std::getline(input_, header))
+      throw std::invalid_argument("photon CSV is missing a header");
     const auto columns = split(header);
     for (std::size_t index = 0; index < columns.size(); ++index) {
+      if (std::find(std::begin(kRequiredColumns), std::end(kRequiredColumns), columns[index]) ==
+              std::end(kRequiredColumns) &&
+          std::find(std::begin(kOptionalColumns), std::end(kOptionalColumns), columns[index]) ==
+              std::end(kOptionalColumns))
+        throw std::invalid_argument("photon CSV has unsupported column: " + columns[index]);
       if (columns[index].empty() || !header_index_.emplace(columns[index], index).second)
         throw std::invalid_argument("photon CSV has an empty or duplicate column name");
     }
@@ -155,50 +199,69 @@ class CsvPhotonReader final : public PhotonReader {
   }
 
   [[nodiscard]] std::optional<Row> next_row() {
-    if (pending_) return std::exchange(pending_, std::nullopt);
+    if (pending_)
+      return std::exchange(pending_, std::nullopt);
     std::string line;
     while (std::getline(input_, line)) {
       ++line_number_;
-      if (line.empty() || line.front() == '#') continue;
+      if (line.empty() || line.front() == '#')
+        continue;
       return parse_row(split(line));
     }
-    if (input_.bad()) throw std::invalid_argument("error while reading photon CSV");
+    if (input_.bad())
+      throw std::invalid_argument("error while reading photon CSV");
     return std::nullopt;
   }
 
-  [[nodiscard]] Row parse_row(const std::vector<std::string>& fields) const {
-    if (fields.size() != header_index_.size()) throw invalid("wrong number of fields");
+  [[nodiscard]] Row parse_row(const std::vector<std::string> &fields) const {
+    if (fields.size() != header_index_.size())
+      throw invalid("wrong number of fields");
     const auto integer = [this, &fields](std::string_view name) {
-      const auto& text = fields.at(header_index_.at(std::string{name}));
+      const auto &text = fields.at(header_index_.at(std::string{name}));
       std::size_t consumed{};
       try {
         // std::stoull accepts a leading minus sign and converts it modulo the
         // unsigned range. IDs must fail closed instead of silently wrapping.
-        if (text.empty() || text.front() == '-') throw invalid("invalid integer in " + std::string{name});
+        if (text.empty() || text.find_first_not_of("0123456789") != std::string::npos)
+          throw invalid("invalid integer in " + std::string{name});
         const auto value = std::stoull(text, &consumed);
-        if (consumed != text.size()) throw invalid("invalid integer in " + std::string{name});
+        if (consumed != text.size())
+          throw invalid("invalid integer in " + std::string{name});
         return static_cast<std::uint64_t>(value);
-      } catch (const std::exception&) { throw invalid("invalid integer in " + std::string{name}); }
+      } catch (const std::exception &) {
+        throw invalid("invalid integer in " + std::string{name});
+      }
     };
     const auto number = [this, &fields](std::string_view name, double fallback) {
       const auto found = header_index_.find(std::string{name});
-      if (found == header_index_.end()) return fallback;
-      const auto& text = fields.at(found->second);
+      if (found == header_index_.end())
+        return fallback;
+      const auto &text = fields.at(found->second);
+      if (text.empty() && std::isnan(fallback))
+        return fallback; // Explicitly unavailable optional emission metadata.
       std::size_t consumed{};
       try {
         const double value = std::stod(text, &consumed);
-        if (consumed != text.size() || !std::isfinite(value)) throw invalid("invalid number in " + std::string{name});
+        if (consumed != text.size() || !std::isfinite(value))
+          throw invalid("invalid number in " + std::string{name});
         return value;
-      } catch (const std::exception&) { throw invalid("invalid number in " + std::string{name}); }
+      } catch (const std::exception &) {
+        throw invalid("invalid number in " + std::string{name});
+      }
     };
 
-    PhotonBatchContext context{integer("run_id"), integer("event_id"), integer("array_id"), integer("telescope_id"),
-                               {number("telescope_x_m", 0.0), number("telescope_y_m", 0.0),
-                                number("telescope_z_m", 0.0)},
-                               number("array_reuse_weight", 1.0)};
+    PhotonBatchContext context{
+        integer("run_id"),
+        integer("event_id"),
+        integer("array_id"),
+        integer("telescope_id"),
+        {number("telescope_x_m", 0.0), number("telescope_y_m", 0.0), number("telescope_z_m", 0.0)},
+        number("array_reuse_weight", 1.0)};
     OpticalPhoton photon{{{number("x_m", 0.0), number("y_m", 0.0), number("z_m", 0.0)},
                           {number("dx", 0.0), number("dy", 0.0), number("dz", 0.0)}},
-                         integer("photon_id"), number("wavelength_nm", 0.0), number("time_ns", 0.0),
+                         integer("photon_id"),
+                         number("wavelength_nm", 0.0),
+                         number("time_ns", 0.0),
                          number("weight", 0.0),
                          header_index_.contains("bunch_id") ? integer("bunch_id") : 0,
                          number("emission_height_m", std::numeric_limits<double>::quiet_NaN()),
@@ -208,13 +271,15 @@ class CsvPhotonReader final : public PhotonReader {
     return {context, photon};
   }
 
-  [[nodiscard]] std::invalid_argument invalid(const std::string& message) const {
-    return std::invalid_argument("photon CSV line " + std::to_string(line_number_) + ": " + message);
+  [[nodiscard]] std::invalid_argument invalid(const std::string &message) const {
+    return std::invalid_argument("photon CSV line " + std::to_string(line_number_) + ": " +
+                                 message);
   }
 
-  static std::vector<std::string> split(const std::string& line) {
+  static std::vector<std::string> split(const std::string &line) {
     std::vector<std::string> fields;
-    const std::size_t record_end = !line.empty() && line.back() == '\r' ? line.size() - 1 : line.size();
+    const std::size_t record_end =
+        !line.empty() && line.back() == '\r' ? line.size() - 1 : line.size();
     std::size_t start{};
     for (std::size_t comma = line.find(',', start);
          comma != std::string::npos && comma < record_end; comma = line.find(',', start)) {
@@ -225,10 +290,12 @@ class CsvPhotonReader final : public PhotonReader {
     return fields;
   }
 
-  static bool same_context(const PhotonBatchContext& left, const PhotonBatchContext& right) {
-    return left.run_id == right.run_id && left.event_id == right.event_id && left.array_id == right.array_id &&
-           left.telescope_id == right.telescope_id && left.telescope_position_m.x == right.telescope_position_m.x &&
-           left.telescope_position_m.y == right.telescope_position_m.y && left.telescope_position_m.z == right.telescope_position_m.z &&
+  static bool same_context(const PhotonBatchContext &left, const PhotonBatchContext &right) {
+    return left.run_id == right.run_id && left.event_id == right.event_id &&
+           left.array_id == right.array_id && left.telescope_id == right.telescope_id &&
+           left.telescope_position_m.x == right.telescope_position_m.x &&
+           left.telescope_position_m.y == right.telescope_position_m.y &&
+           left.telescope_position_m.z == right.telescope_position_m.z &&
            left.array_reuse_weight == right.array_reuse_weight;
   }
 
@@ -238,4 +305,4 @@ class CsvPhotonReader final : public PhotonReader {
   std::size_t line_number_{1};
 };
 
-}  // namespace obdeect
+} // namespace obdeect

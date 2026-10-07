@@ -31,8 +31,8 @@ struct ImportedCtaoReferenceModel {
   ImportedModelMetadata import;
 };
 
-[[nodiscard]] inline std::optional<ImportedCtaoReferenceModel> import_ctao_reference_model(
-    std::string_view name, ModelProvenance provenance) {
+[[nodiscard]] inline std::optional<ImportedCtaoReferenceModel>
+import_ctao_reference_model(std::string_view name, ModelProvenance provenance) {
   const auto optical = ctao_reference_model(name);
   if (!optical || provenance.model_name.empty() || provenance.model_version.empty() ||
       provenance.content_hash.size() != 64 || provenance.model_name != name) {
@@ -46,4 +46,4 @@ struct ImportedCtaoReferenceModel {
   return ImportedCtaoReferenceModel{*optical, {optical->family, provenance, true, true}};
 }
 
-}  // namespace obdeect
+} // namespace obdeect

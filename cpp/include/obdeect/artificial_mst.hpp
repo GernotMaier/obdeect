@@ -16,9 +16,9 @@ namespace obdeect {
 // four finite cylindrical mast legs.  Its purpose is a clear executable first
 // vertical slice, including real pre-M1 structural shadowing.
 struct ArtificialMstConfig {
-  double mirror_radius_m{9.75};       // MST-like 12 m dish curvature scale.
+  double mirror_radius_m{9.75}; // MST-like 12 m dish curvature scale.
   double mirror_aperture_radius_m{6.0};
-  double focal_length_m{4.875};       // Spherical paraxial focus = R / 2.
+  double focal_length_m{4.875}; // Spherical paraxial focus = R / 2.
   double screen_radius_m{2.0};
   double camera_radius_m{0.55};
   double camera_half_depth_m{0.25};
@@ -26,28 +26,30 @@ struct ArtificialMstConfig {
   bool include_structure{true};
 };
 
-inline bool is_valid(const ArtificialMstConfig& config) {
+inline bool is_valid(const ArtificialMstConfig &config) {
   return std::isfinite(config.mirror_radius_m) && std::isfinite(config.mirror_aperture_radius_m) &&
          std::isfinite(config.focal_length_m) && std::isfinite(config.screen_radius_m) &&
          std::isfinite(config.camera_radius_m) && std::isfinite(config.camera_half_depth_m) &&
          std::isfinite(config.mast_radius_m) && config.mirror_radius_m > kEpsilon &&
          config.mirror_aperture_radius_m > kEpsilon &&
-         config.mirror_aperture_radius_m <= config.mirror_radius_m && config.focal_length_m > kEpsilon &&
-         config.screen_radius_m > kEpsilon && config.camera_radius_m >= 0.0 &&
-         config.camera_half_depth_m >= 0.0 && config.camera_half_depth_m < config.focal_length_m &&
-         std::isfinite(config.focal_length_m + config.camera_half_depth_m) && config.mast_radius_m >= 0.0;
+         config.mirror_aperture_radius_m <= config.mirror_radius_m &&
+         config.focal_length_m > kEpsilon && config.screen_radius_m > kEpsilon &&
+         config.camera_radius_m >= 0.0 && config.camera_half_depth_m >= 0.0 &&
+         config.camera_half_depth_m < config.focal_length_m &&
+         std::isfinite(config.focal_length_m + config.camera_half_depth_m) &&
+         config.mast_radius_m >= 0.0;
 }
 
-
-inline std::array<std::pair<Vec3, Vec3>, 4> mast_legs(const ArtificialMstConfig& config) {
+inline std::array<std::pair<Vec3, Vec3>, 4> mast_legs(const ArtificialMstConfig &config) {
   std::array<std::pair<Vec3, Vec3>, 4> legs{};
   constexpr double base_radius_m = 4.2;
   constexpr double camera_support_radius_m = 0.7;
   for (int leg = 0; leg < 4; ++leg) {
     const double angle = static_cast<double>(leg) * std::numbers::pi / 2.0;
     legs[leg] = {{base_radius_m * std::cos(angle), base_radius_m * std::sin(angle), 0.30},
-                    {camera_support_radius_m * std::cos(angle), camera_support_radius_m * std::sin(angle),
-                     config.focal_length_m - config.camera_half_depth_m}};
+                 {camera_support_radius_m * std::cos(angle),
+                  camera_support_radius_m * std::sin(angle),
+                  config.focal_length_m - config.camera_half_depth_m}};
   }
   return legs;
 }
@@ -57,9 +59,10 @@ struct ReferenceObstructionHit {
   PhotonStatus status{PhotonStatus::blocked_camera};
 };
 
-[[nodiscard]] inline std::optional<ReferenceObstructionHit> nearest_reference_obstruction(const Ray& ray,
-                                                                                 const ArtificialMstConfig& config) {
-  if (!config.include_structure) return std::nullopt;
+[[nodiscard]] inline std::optional<ReferenceObstructionHit>
+nearest_reference_obstruction(const Ray &ray, const ArtificialMstConfig &config) {
+  if (!config.include_structure)
+    return std::nullopt;
   std::optional<ReferenceObstructionHit> nearest;
   const auto consider = [&nearest](std::optional<double> candidate, PhotonStatus status) {
     if (candidate && (!nearest || *candidate < nearest->distance_m)) {
@@ -71,22 +74,27 @@ struct ReferenceObstructionHit {
   const Vec3 camera_back{0.0, 0.0, config.focal_length_m - config.camera_half_depth_m};
   if (config.camera_half_depth_m <= kEpsilon) {
     // Preserve the documented zero-depth configuration as an opaque disk.
-    consider(intersect_disk_z(ray, config.focal_length_m, config.camera_radius_m), PhotonStatus::blocked_camera);
-  } else {
-    consider(intersect_closed_finite_cylinder(ray, camera_front, camera_back, config.camera_radius_m),
+    consider(intersect_disk_z(ray, config.focal_length_m, config.camera_radius_m),
              PhotonStatus::blocked_camera);
+  } else {
+    consider(
+        intersect_closed_finite_cylinder(ray, camera_front, camera_back, config.camera_radius_m),
+        PhotonStatus::blocked_camera);
   }
-  for (const auto& [a, b] : mast_legs(config)) {
-    consider(intersect_closed_finite_cylinder(ray, a, b, config.mast_radius_m), PhotonStatus::blocked_mast);
+  for (const auto &[a, b] : mast_legs(config)) {
+    consider(intersect_closed_finite_cylinder(ray, a, b, config.mast_radius_m),
+             PhotonStatus::blocked_mast);
   }
   return nearest;
 }
 
-[[nodiscard]] inline bool occurs_before(const ReferenceObstructionHit& obstruction, double boundary_m) {
+[[nodiscard]] inline bool occurs_before(const ReferenceObstructionHit &obstruction,
+                                        double boundary_m) {
   return obstruction.distance_m < boundary_m;
 }
 
-inline PathRecord trace_artificial_mst(const Ray& input, std::uint64_t photon_id, const ArtificialMstConfig& config) {
+inline PathRecord trace_artificial_mst(const Ray &input, std::uint64_t photon_id,
+                                       const ArtificialMstConfig &config) {
   PathRecord record{};
   record.photon_id = photon_id;
   record.points_m[0] = input.position_m;
@@ -168,20 +176,22 @@ inline PathRecord trace_artificial_mst(const Ray& input, std::uint64_t photon_id
 }
 
 // Low-discrepancy, uniform-area samples across the optical entrance pupil.
-inline std::vector<Ray> parallel_blue_cherenkov_rays(std::size_t count, const ArtificialMstConfig& config,
-                                                      double source_z_m = 20.0) {
+inline std::vector<Ray> parallel_blue_cherenkov_rays(std::size_t count,
+                                                     const ArtificialMstConfig &config,
+                                                     double source_z_m = 20.0) {
   std::vector<Ray> rays;
-  if (!is_valid(config) || !std::isfinite(source_z_m) || count == 0) return rays;
+  if (!is_valid(config) || !std::isfinite(source_z_m) || count == 0)
+    return rays;
   rays.reserve(count);
   constexpr double golden_ratio_conjugate = 0.6180339887498948482;
   for (std::size_t index = 0; index < count; ++index) {
     const double u = (static_cast<double>(index) + 0.5) / static_cast<double>(count);
     const double r = config.mirror_aperture_radius_m * std::sqrt(u);
-    const double phi = std::fmod(static_cast<double>(index) * golden_ratio_conjugate, 1.0) *
-                       2.0 * std::numbers::pi;
+    const double phi = std::fmod(static_cast<double>(index) * golden_ratio_conjugate, 1.0) * 2.0 *
+                       std::numbers::pi;
     rays.push_back({{r * std::cos(phi), r * std::sin(phi), source_z_m}, {0.0, 0.0, -1.0}});
   }
   return rays;
 }
 
-}  // namespace obdeect
+} // namespace obdeect

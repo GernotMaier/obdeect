@@ -1,8 +1,8 @@
 #pragma once
 
 #include <algorithm>
-#include <cstddef>
 #include <cmath>
+#include <cstddef>
 #include <optional>
 #include <span>
 
@@ -15,21 +15,31 @@ struct Table1DView {
   std::span<const double> value;
 
   [[nodiscard]] bool is_valid() const {
-    if (axis.size() < 2 || axis.size() != value.size()) return false;
+    if (axis.size() < 2 || axis.size() != value.size())
+      return false;
     for (std::size_t index = 0; index < axis.size(); ++index) {
-      if (!std::isfinite(axis[index]) || !std::isfinite(value[index]) || value[index] < 0.0) return false;
-      if (index > 0 && axis[index] <= axis[index - 1]) return false;
+      if (!std::isfinite(axis[index]) || !std::isfinite(value[index]) || value[index] < 0.0)
+        return false;
+      if (index > 0 && axis[index] <= axis[index - 1])
+        return false;
     }
     return true;
   }
 
   [[nodiscard]] std::optional<double> interpolate(double coordinate) const {
-    if (!is_valid() || !std::isfinite(coordinate) || coordinate < axis.front() || coordinate > axis.back()) {
+    return is_valid() ? interpolate_unchecked(coordinate) : std::nullopt;
+  }
+
+  // Immutable table validity is established at the model compilation boundary.
+  [[nodiscard]] std::optional<double> interpolate_unchecked(double coordinate) const {
+    if (!std::isfinite(coordinate) || coordinate < axis.front() || coordinate > axis.back()) {
       return std::nullopt;
     }
     const auto upper = std::upper_bound(axis.begin(), axis.end(), coordinate);
-    if (upper == axis.begin()) return value.front();
-    if (upper == axis.end()) return value.back();
+    if (upper == axis.begin())
+      return value.front();
+    if (upper == axis.end())
+      return value.back();
     const std::size_t high = static_cast<std::size_t>(upper - axis.begin());
     const std::size_t low = high - 1;
     const double fraction = (coordinate - axis[low]) / (axis[high] - axis[low]);
@@ -37,4 +47,4 @@ struct Table1DView {
   }
 };
 
-}  // namespace obdeect
+} // namespace obdeect

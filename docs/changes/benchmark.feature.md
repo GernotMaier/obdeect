@@ -1,0 +1,1 @@
+Add a provenance-frozen benchmark boundary with matched optical-equivalence and exact repetition/thread/block reproducibility gates, at least ten paired repeats, per-process memory/CPU measurements, and explicit instrumented kernel/I/O separation before reporting speedup.

@@ -7,6 +7,8 @@ import shlex
 from collections import Counter
 from typing import Any
 
+PIXEL_APERTURE_SHAPES = {0: "circle", 1: "hexagon_flat_y", 2: "square", 3: "hexagon_flat_x"}
+
 
 class CameraConfigError(ValueError):
     """Camera geometry is malformed or uses an unsupported directive."""
@@ -113,6 +115,62 @@ def parse_camera_layout(contents: str) -> dict[str, Any]:
     }
 
 
+def parse_camera_pixel_types(parameter: dict[str, Any]) -> list[dict[str, Any]]:
+    """Import physical entrance/cathode dimensions and retain response references."""
+    values = parameter.get("value")
+    if not isinstance(values, list) or not values:
+        raise CameraConfigError("camera_pixel_types must contain pixel types")
+    result = []
+    identifiers = set()
+    required = {
+        "type_id",
+        "pmt_type",
+        "cathode_shape",
+        "cathode_diameter_cm",
+        "funnel_shape",
+        "funnel_diameter_cm",
+        "funnel_depth_cm",
+    }
+    for value in values:
+        if not isinstance(value, dict) or not required.issubset(value):
+            raise CameraConfigError("incomplete physical pixel type")
+        identifier = value["type_id"]
+        if isinstance(identifier, bool) or not isinstance(identifier, int) or identifier < 0:
+            raise CameraConfigError("invalid physical pixel type identifier")
+        if identifier in identifiers:
+            raise CameraConfigError("duplicate physical pixel type")
+        identifiers.add(identifier)
+        shapes = (value["cathode_shape"], value["funnel_shape"])
+        if any(
+            isinstance(shape, bool) or not isinstance(shape, int) or shape not in range(4)
+            for shape in shapes
+        ):
+            raise CameraConfigError("unsupported physical pixel shape")
+        sizes = []
+        for key in ("cathode_diameter_cm", "funnel_diameter_cm", "funnel_depth_cm"):
+            number = value[key]
+            if (
+                isinstance(number, bool)
+                or not isinstance(number, (int, float))
+                or not math.isfinite(number)
+            ):
+                raise CameraConfigError(f"invalid physical pixel {key}")
+            sizes.append(float(number) * 0.01)
+        if sizes[0] <= 0 or sizes[1] <= 0 or sizes[2] < 0:
+            raise CameraConfigError("invalid physical pixel dimensions")
+        result.append({
+            "id": identifier,
+            "cathode_shape_code": shapes[0],
+            "funnel_shape_code": shapes[1],
+            "cathode_diameter_m": sizes[0],
+            "funnel_diameter_m": sizes[1],
+            "funnel_depth_m": sizes[2],
+            "response_files": [],
+            "source_fields": dict(value),
+        })
+    return result
+
+
 def parse_camera_layout_ecsv(contents: str) -> dict[str, Any]:
     """Read the geometric subset of a simulation-models camera-layout ECSV.
 
@@ -140,14 +198,31 @@ def parse_camera_layout_ecsv(contents: str) -> dict[str, Any]:
         if identifier in identifiers:
             raise CameraConfigError(f"camera ECSV line {line_number}: duplicate identifier")
         identifiers.add(identifier)
-        entries.append({
+        entry = {
             "id": identifier,
             "type_id": _integer(values["type_id"], line_number),
             "centre_xy_m": [
                 _number(values["x_cm"], line_number) * 0.01,
                 _number(values["y_cm"], line_number) * 0.01,
             ],
-        })
+            "source_fields": values,
+        }
+        placement = {"z_offset_cm", "rotation_deg", "normal_x", "normal_y", "module", "enabled"}
+        if placement.issubset(values):
+            enabled = _integer(values["enabled"], line_number)
+            if enabled not in (0, 1):
+                raise CameraConfigError("pixel enabled must be zero or one")
+            entry.update({
+                "z_offset_m": _number(values["z_offset_cm"], line_number) * 0.01,
+                "rotation_deg": _number(values["rotation_deg"], line_number),
+                "normal_slopes": [
+                    _number(values["normal_x"], line_number),
+                    _number(values["normal_y"], line_number),
+                ],
+                "module": _integer(values["module"], line_number),
+                "enabled": bool(enabled),
+            })
+        entries.append(entry)
     if header is None or not entries:
         raise CameraConfigError("camera ECSV has no layout entries")
     return {

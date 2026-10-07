@@ -12,12 +12,16 @@ struct CompiledReferenceOpticalModel {
   ArtificialMstConfig configuration;
   TraceMode mode{TraceMode::directed};
 
-  [[nodiscard]] bool is_valid() const { return mode == TraceMode::directed && obdeect::is_valid(configuration); }
+  [[nodiscard]] bool is_valid() const {
+    return mode == TraceMode::directed && obdeect::is_valid(configuration);
+  }
 };
 
-[[nodiscard]] inline std::optional<CompiledReferenceOpticalModel> compile_optical_model(const ArtificialMstConfig& configuration) {
-  if (!obdeect::is_valid(configuration)) return std::nullopt;
+[[nodiscard]] inline std::optional<CompiledReferenceOpticalModel>
+compile_optical_model(const ArtificialMstConfig &configuration) {
+  if (!obdeect::is_valid(configuration))
+    return std::nullopt;
   return CompiledReferenceOpticalModel{configuration};
 }
 
-}  // namespace obdeect
+} // namespace obdeect

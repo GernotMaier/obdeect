@@ -1,6 +1,6 @@
 [build-system]
 build-backend = "scikit_build_core.build"
-requires = [ "scikit-build-core>=0.10", "setuptools-scm>=8" ]
+requires = [ "nanobind>=3.1", "scikit-build-core>=0.10", "setuptools-scm>=8" ]
 
 [project]
 name = "obdeect-dev"
@@ -19,9 +19,11 @@ classifiers = [
 dynamic = [ "version" ]
 dependencies = [
   "matplotlib>=3.8",
+  "numpy>=2.3",
 ]
 optional-dependencies.dev = [ "pre-commit", "pytest", "ruff", "towncrier" ]
 scripts.obdeect-analytic-optics = "obdeect.cli:analytic_optics_main"
+scripts.obdeect-benchmark = "obdeect.benchmark:main"
 scripts.obdeect-compile-optical-model = "obdeect.optical_model_compiler:main"
 scripts.obdeect-demo-mst = "obdeect.cli:demo_mst_main"
 scripts.obdeect-normalize-arrivals = "obdeect.arrival_normalizer:main"
@@ -38,10 +40,13 @@ fallback_version = "0.1.0"
 [tool.scikit-build]
 cmake.args = [ "-DOBDEECT_BUILD_TESTING=OFF", "-DOBDEECT_BUILD_EVENTIO_INPUT=OFF" ]
 cmake.build-type = "Release"
-sdist.include = [ "cpp/**", "cmake/**", "CMakeLists.txt", "python/**", "README.md", "LICENSE" ]
+sdist.include = [ "cpp/**", "cmake/**", "CMakeLists.txt", "python/**", "README.md", "LICENSE", "tools/**" ]
 wheel.packages = [ "python/obdeect" ]
 wheel.platlib = true
-wheel.py-api = "py3"
+
+[tool.cibuildwheel]
+# libc++ floating-point to_chars is available from macOS 13.3.
+macos.environment = { MACOSX_DEPLOYMENT_TARGET = "13.3" }
 
 [tool.ruff]
 target-version = "py314"

@@ -94,8 +94,16 @@ photon-by-photon behaviour.
 cover full, compact, and 3-D photon files. `RigidFrame` validates right-handed
 coordinate transforms and their round trips.
 
-The native tracer still writes a short, fixed path record. It does not yet
-provide the complete interaction history, group arrival time, or pixel-level
-result required above. Until those fields are available, the project can run
-diagnostic comparisons, but it must not claim a complete obdeect/sim_telarray
-reference comparison.
+The nominal native tracer records terminal position and direction, surface IDs,
+ordered surface interactions, arrival time, wavelength and optical loss weights.
+Its optional capped interaction CSV also records normals and incident/outgoing
+directions. The current path capacity covers the nominal sequential mirror and
+detector transport; it does not establish arbitrary window or concentrator paths,
+material group delay, or physical pixel-level results.
+
+The comparison gate validates identities, terminal status, detector coordinates,
+timing, optical weights, directions and surface sequences against explicit
+tolerances and frozen source/model hashes. An adapter must still produce equivalent
+sim_telarray records from the same resolved input photons. A detected-only imaging
+list cannot do this. The full production matrix in [STATUS.md](STATUS.md) remains
+required before a complete replacement or speed advantage can be claimed.

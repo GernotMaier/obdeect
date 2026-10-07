@@ -114,6 +114,40 @@ class TestSimulationModelsImport(unittest.TestCase):
             optical_model = IMPORTER.resolve_model(root, "TEST", "1.2.3")
         self.assertIn("secondary_mirror_parameters", optical_model["parameters"])
 
+    def test_unknown_required_optical_parameter_is_not_silently_discarded(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.make_tree(root)
+            manifest = root / "productions/1.2.3/TEST.json"
+            data = json.loads(manifest.read_text())
+            data["parameters"]["TEST"]["new_window_curvature"] = "1.0.0"
+            manifest.write_text(json.dumps(data))
+            folder = root / "model_parameters/TEST/new_window_curvature"
+            folder.mkdir()
+            parameter = folder / "new_window_curvature-1.0.0.json"
+            parameter.write_text(
+                json.dumps({
+                    "instrument": "TEST",
+                    "parameter": "new_window_curvature",
+                    "parameter_version": "1.0.0",
+                    "type": "float64",
+                    "unit": "m",
+                    "value": 1.0,
+                    "file": False,
+                    "required_for_trace": True,
+                })
+            )
+            with self.assertRaisesRegex(IMPORTER.ImportError, "required optical parameter"):
+                IMPORTER.resolve_model(root, "TEST", "1.2.3")
+            data = json.loads(parameter.read_text())
+            data["required_for_trace"] = False
+            parameter.write_text(json.dumps(data))
+            coverage = IMPORTER.resolve_model(root, "TEST", "1.2.3")["source_parameter_coverage"]
+            self.assertEqual(coverage["new_window_curvature"]["disposition"], "unsupported")
+            self.assertEqual(
+                coverage["new_window_curvature"]["record"]["sha256"], IMPORTER.sha256(parameter)
+            )
+
     def test_missing_declared_asset_fails_closed(self):
         # T-IMPORT-002: an asset reference can never become an untracked path.
         with tempfile.TemporaryDirectory() as directory:

@@ -16,9 +16,16 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@v7
         with:
           python-version: '3.14'
+      - name: Require a release note for every pull request
+        if: github.event_name == 'pull_request'
+        env:
+          CHANGELOG_BASE: ${{ github.event.pull_request.base.sha }}
+        run: python tools/check_changelog.py --base "$CHANGELOG_BASE"
       - name: Install linters
         run: python -m pip install --upgrade pip pre-commit ruff
       - name: Run repository hooks

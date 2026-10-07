@@ -12,14 +12,17 @@
 
 namespace {
 void usage() {
-  std::cout << "Usage: obdeect-analytic-optics --telescope LST|MST|SST|SCT [--photons N] [--output paths.csv]\n"
-            << "                                [--field-x-deg D] [--field-y-deg D] [--wavelength-nm N[,N...]]\n"
-            << "Developer diagnostic: trace a discrete spectrum of parallel photons through an analytic prescription.\n"
+  std::cout << "Usage: obdeect-analytic-optics --telescope LST|MST|SST|SCT [--photons N] [--output "
+               "paths.csv]\n"
+            << "                                [--field-x-deg D] [--field-y-deg D] "
+               "[--wavelength-nm N[,N...]]\n"
+            << "Developer diagnostic: trace a discrete spectrum of parallel photons through an "
+               "analytic prescription.\n"
             << "Use obdeect-simtools-raytrace --optical-model for model-derived CTAO geometry.\n";
 }
-}  // namespace
+} // namespace
 
-int main(int argc, char** argv) {
+int main(int argc, char **argv) {
   using obdeect::parse_finite_double;
   using obdeect::parse_positive_size;
   std::size_t photon_count = 10000;
@@ -30,12 +33,27 @@ int main(int argc, char** argv) {
   std::vector<double> wavelengths_nm{400.0};
   for (int index = 1; index < argc; ++index) {
     const std::string argument{argv[index]};
-    if (argument == "-h" || argument == "--help") { usage(); return 0; }
-    if (argument == "--telescope" && index + 1 < argc) { telescope_name = argv[++index]; continue; }
-    if (argument == "--photons" && index + 1 < argc && parse_positive_size(argv[++index], photon_count)) continue;
-    if (argument == "--output" && index + 1 < argc) { output_path = argv[++index]; continue; }
-    if (argument == "--field-x-deg" && index + 1 < argc && parse_finite_double(argv[++index], field_x_deg)) continue;
-    if (argument == "--field-y-deg" && index + 1 < argc && parse_finite_double(argv[++index], field_y_deg)) continue;
+    if (argument == "-h" || argument == "--help") {
+      usage();
+      return 0;
+    }
+    if (argument == "--telescope" && index + 1 < argc) {
+      telescope_name = argv[++index];
+      continue;
+    }
+    if (argument == "--photons" && index + 1 < argc &&
+        parse_positive_size(argv[++index], photon_count))
+      continue;
+    if (argument == "--output" && index + 1 < argc) {
+      output_path = argv[++index];
+      continue;
+    }
+    if (argument == "--field-x-deg" && index + 1 < argc &&
+        parse_finite_double(argv[++index], field_x_deg))
+      continue;
+    if (argument == "--field-y-deg" && index + 1 < argc &&
+        parse_finite_double(argv[++index], field_y_deg))
+      continue;
     if (argument == "--wavelength-nm" && index + 1 < argc &&
         obdeect::parse_wavelengths_nm(argv[++index], wavelengths_nm)) {
       continue;
@@ -49,16 +67,18 @@ int main(int argc, char** argv) {
     return 2;
   }
   const double radians_per_degree = std::numbers::pi / 180.0;
-  const auto photons = obdeect::star_photons(
-      photon_count, model->primary_outer_radius_m,
-      {field_x_deg * radians_per_degree, field_y_deg * radians_per_degree, 60.0, wavelengths_nm.front()});
+  const auto photons =
+      obdeect::star_photons(photon_count, model->primary_outer_radius_m,
+                            {field_x_deg * radians_per_degree, field_y_deg * radians_per_degree,
+                             60.0, wavelengths_nm.front()});
   std::ofstream output{output_path};
   if (!output) {
     std::cerr << "Cannot write " << output_path << '\n';
     return 1;
   }
   output << std::setprecision(17)
-         << "photon_id,wavelength_nm,emission_time_ns,source_weight,throughput,status,point_count,path_length_m,"
+         << "photon_id,wavelength_nm,emission_time_ns,source_weight,throughput,status,point_count,"
+            "path_length_m,"
             "x0_m,y0_m,z0_m,x1_m,y1_m,z1_m,"
             "x2_m,y2_m,z2_m,x3_m,y3_m,z3_m\n";
   std::size_t detected = 0;
@@ -69,14 +89,15 @@ int main(int argc, char** argv) {
     path.wavelength_nm = photon.wavelength_nm;
     detected += path.status == obdeect::PhotonStatus::detected;
     const double throughput = path.status == obdeect::PhotonStatus::detected ? 1.0 : 0.0;
-    output << path.photon_id << ',' << path.wavelength_nm << ',' << photon.time_ns << ',' << photon.weight << ','
-           << throughput << ',' << obdeect::to_string(path.status) << ',' << static_cast<int>(path.point_count)
-           << ',' << path.path_length_m;
-    for (const auto& point : path.points_m) output << ',' << point.x << ',' << point.y << ',' << point.z;
+    output << path.photon_id << ',' << path.wavelength_nm << ',' << photon.time_ns << ','
+           << photon.weight << ',' << throughput << ',' << obdeect::to_string(path.status) << ','
+           << static_cast<int>(path.point_count) << ',' << path.path_length_m;
+    for (const auto &point : path.points_m)
+      output << ',' << point.x << ',' << point.y << ',' << point.z;
     output << '\n';
   }
-  std::cout << "Tracing analytic " << model->identifier << " diagnostic: " << photon_count << " photons across "
-            << wavelengths_nm.size() << " wavelength sample(s)\n"
+  std::cout << "Tracing analytic " << model->identifier << " diagnostic: " << photon_count
+            << " photons across " << wavelengths_nm.size() << " wavelength sample(s)\n"
             << "  detected: " << detected << " (" << 100.0 * detected / photon_count << "%)\n"
             << "  paths: " << output_path << '\n';
   return 0;

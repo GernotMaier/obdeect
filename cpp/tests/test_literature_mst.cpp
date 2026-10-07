@@ -6,14 +6,14 @@
 
 namespace {
 
-void require(bool condition, const char* message) {
+void require(bool condition, const char *message) {
   if (!condition) {
     std::cerr << "FAIL: " << message << '\n';
     std::exit(1);
   }
 }
 
-}  // namespace
+} // namespace
 
 int main() {
   using namespace obdeect;
@@ -27,7 +27,8 @@ int main() {
           "published central-facet paraxial focus must equal R/2");
 
   const auto ray = trace_artificial_mst({{0.0, 0.0, 50.0}, {0.0, 0.0, -1.0}}, 0, central_facet);
-  require(ray.status == PhotonStatus::detected, "published central-facet ray must reach focal plane");
+  require(ray.status == PhotonStatus::detected,
+          "published central-facet ray must reach focal plane");
   require(std::abs(ray.points_m[2].x) < 1e-12 && std::abs(ray.points_m[2].y) < 1e-12,
           "published central-facet on-axis ray must land at focal-plane origin");
   std::cout << "literature central-facet validation passed\n";

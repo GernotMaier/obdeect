@@ -5,7 +5,7 @@
 #include <exception>
 #include <iostream>
 
-int main(int argc, char** argv) {
+int main(int argc, char **argv) {
   if (argc != 2) {
     std::cerr << "Usage: obdeect_eventio_summary CORSIKA_TELFIL\n";
     return 2;
@@ -23,12 +23,13 @@ int main(int argc, char** argv) {
         for (std::size_t index = 0; index < result.count; ++index)
           photons += bunches[index].weight;
       }
-      if (result.eof) break;
+      if (result.eof)
+        break;
     }
     std::cout << "CORSIKA EventIO batches=" << batches << " bunches=" << count
               << " photons=" << photons << '\n';
     return 0;
-  } catch (const std::exception& error) {
+  } catch (const std::exception &error) {
     std::cerr << error.what() << '\n';
     return 1;
   }

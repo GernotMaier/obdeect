@@ -33,21 +33,21 @@ struct EventioRunInfo {
 // passed through the ordinary atmospheric and optical efficiency stages.
 // The external EventIO C library is needed only by this optional target.
 class EventioPhotonReader final : public PhotonReader {
- public:
-  explicit EventioPhotonReader(const std::string& path, EventioInputLimits limits = {});
+public:
+  explicit EventioPhotonReader(const std::string &path, EventioInputLimits limits = {});
   ~EventioPhotonReader() override;
-  EventioPhotonReader(const EventioPhotonReader&) = delete;
-  EventioPhotonReader& operator=(const EventioPhotonReader&) = delete;
-  EventioPhotonReader(EventioPhotonReader&&) noexcept;
-  EventioPhotonReader& operator=(EventioPhotonReader&&) noexcept;
+  EventioPhotonReader(const EventioPhotonReader &) = delete;
+  EventioPhotonReader &operator=(const EventioPhotonReader &) = delete;
+  EventioPhotonReader(EventioPhotonReader &&) noexcept;
+  EventioPhotonReader &operator=(EventioPhotonReader &&) noexcept;
 
   PhotonReadResult read(std::span<OpticalPhoton> destination) override;
   // Metadata for the most recently returned batch (stable across lookahead).
-  [[nodiscard]] const EventioRunInfo& run_info() const noexcept;
+  [[nodiscard]] const EventioRunInfo &run_info() const noexcept;
 
- private:
+private:
   struct Impl;
   std::unique_ptr<Impl> impl_;
 };
 
-}  // namespace obdeect
+} // namespace obdeect

@@ -8,21 +8,21 @@
 #include <vector>
 
 namespace {
-void require(bool condition, const char* message) {
+void require(bool condition, const char *message) {
   if (!condition) {
     std::cerr << "FAIL: " << message << '\n';
     std::exit(1);
   }
 }
-}  // namespace
+} // namespace
 
 int main() {
   using namespace obdeect;
   const ModelProvenance provenance{"geometry-oracle", "1", std::string(64, 'a')};
-  const OpticalSurfaceRecord mirror{10, {{0.0, 0.0, 0.0}}, FacetShape::square, 2.0,
-                                    SurfaceRole::mirror};
-  const OpticalSurfaceRecord detector{20, {{0.0, 0.0, 4.0}}, FacetShape::square, 2.0,
-                                      SurfaceRole::detector};
+  const OpticalSurfaceRecord mirror{
+      10, {{0.0, 0.0, 0.0}}, FacetShape::square, 2.0, SurfaceRole::mirror};
+  const OpticalSurfaceRecord detector{
+      20, {{0.0, 0.0, 4.0}}, FacetShape::square, 2.0, SurfaceRole::detector};
   const auto optical_model = compile_optical_model({provenance, {detector, mirror}, 4});
   require(optical_model.has_value(), "T-GEO-001: unordered finite optical_model compiles");
   const std::vector<Vec3> positions{{0.0, 0.0, 3.0}, {1.1, 0.0, 3.0}};
@@ -45,14 +45,18 @@ int main() {
 
   const double cosine = std::cos(std::numbers::pi / 8.0);
   const double sine = std::sin(std::numbers::pi / 8.0);
-  const OpticalSurfaceRecord tilted_mirror{11, {{0.0, 0.0, 0.0}, {cosine, 0.0, -sine},
-                                                {0.0, 1.0, 0.0}, {sine, 0.0, cosine}},
-                                           FacetShape::circle, 2.0, SurfaceRole::mirror};
-  const OpticalSurfaceRecord blocker{30, {{1.0, 0.0, 1.0}}, FacetShape::circle, 0.5,
-                                     SurfaceRole::obscurer};
-  const OpticalSurfaceRecord angled_detector{21, {{2.0, 0.0, 2.0}}, FacetShape::circle, 0.5,
-                                             SurfaceRole::detector};
-  const auto angled = compile_optical_model({provenance, {angled_detector, tilted_mirror, blocker}, 4});
+  const OpticalSurfaceRecord tilted_mirror{
+      11,
+      {{0.0, 0.0, 0.0}, {cosine, 0.0, -sine}, {0.0, 1.0, 0.0}, {sine, 0.0, cosine}},
+      FacetShape::circle,
+      2.0,
+      SurfaceRole::mirror};
+  const OpticalSurfaceRecord blocker{
+      30, {{1.0, 0.0, 1.0}}, FacetShape::circle, 0.5, SurfaceRole::obscurer};
+  const OpticalSurfaceRecord angled_detector{
+      21, {{2.0, 0.0, 2.0}}, FacetShape::circle, 0.5, SurfaceRole::detector};
+  const auto angled =
+      compile_optical_model({provenance, {angled_detector, tilted_mirror, blocker}, 4});
   require(angled.has_value(), "tilted optical_model compiles");
   const auto blocked = trace(*angled, input);
   require(blocked.photons.status[0] == PhotonStatus::blocked_obscurer &&
@@ -61,8 +65,8 @@ int main() {
               std::abs(blocked.photons.optical_path_m[0] - (3.0 + std::sqrt(2.0))) < 1e-12,
           "T-GEO-002: nearest post-mirror blocker wins and is attributed");
 
-  const OpticalSurfaceRecord front_blocker{31, {{0.0, 0.0, 2.0}}, FacetShape::circle, 2.0,
-                                           SurfaceRole::obscurer};
+  const OpticalSurfaceRecord front_blocker{
+      31, {{0.0, 0.0, 2.0}}, FacetShape::circle, 2.0, SurfaceRole::obscurer};
   const auto front = compile_optical_model({provenance, {mirror, detector, front_blocker}, 4});
   require(front.has_value(), "front blocker optical_model compiles");
   const auto pre_mirror = trace(*front, input);
@@ -71,8 +75,8 @@ int main() {
               pre_mirror.photons.optical_path_m[0] == 1.0,
           "T-GEO-005: globally nearest pre-mirror obstruction wins");
 
-  const OpticalSurfaceRecord upper_mirror{40, {{0.0, 0.0, 2.0}}, FacetShape::circle, 2.0,
-                                          SurfaceRole::mirror};
+  const OpticalSurfaceRecord upper_mirror{
+      40, {{0.0, 0.0, 2.0}}, FacetShape::circle, 2.0, SurfaceRole::mirror};
   const auto cavity = compile_optical_model({provenance, {upper_mirror, mirror}, 2});
   require(cavity.has_value(), "bounded mirror optical_model compiles");
   const std::vector<Vec3> cavity_position{{0.0, 0.0, 1.0}};
@@ -81,8 +85,8 @@ int main() {
   const std::vector<double> cavity_time{0.0};
   const std::vector<double> cavity_weight{1.0};
   const std::vector<std::uint64_t> cavity_id{3};
-  const PhotonBlockView cavity_input{cavity_position, cavity_direction, cavity_scalar, cavity_time,
-                                     cavity_weight, cavity_id};
+  const PhotonBlockView cavity_input{cavity_position, cavity_direction, cavity_scalar,
+                                     cavity_time,     cavity_weight,    cavity_id};
   const auto limited = trace(*cavity, cavity_input);
   require(limited.photons.status[0] == PhotonStatus::interaction_limit &&
               limited.photons.surface_id[0] == upper_mirror.id &&
@@ -103,16 +107,18 @@ int main() {
   curved.shape = FacetShape::circle;
   curved.sag = paraboloid(4.0);
   curved.inner_radius_m = 0.5;
-  const OpticalSurfaceRecord beneath{51, {{0.0, 0.0, -1.0}}, FacetShape::circle, 2.0,
-                                     SurfaceRole::detector};
+  const OpticalSurfaceRecord beneath{
+      51, {{0.0, 0.0, -1.0}}, FacetShape::circle, 2.0, SurfaceRole::detector};
   const auto curved_optical_model = compile_optical_model({provenance, {beneath, curved}, 4});
   require(curved_optical_model.has_value(), "T-GEO-010: annular asphere compiles");
-  const auto curved_hit = intersect_nearest_surface({{1.0, 0.0, 2.0}, {0.0, 0.0, -1.0}}, *curved_optical_model);
+  const auto curved_hit =
+      intersect_nearest_surface({{1.0, 0.0, 2.0}, {0.0, 0.0, -1.0}}, *curved_optical_model);
   require(curved_hit && curved_hit->surface_id == 50 &&
               std::abs(curved_hit->point_m.z - 1.0 / 16.0) < 1e-12 &&
               std::abs(curved_hit->normal.x + 0.125 / std::hypot(1.0, 0.125)) < 1e-12,
           "T-GEO-011: globally nearest curved hit has physical sag and normal");
-  const auto hole_hit = intersect_nearest_surface({{0.0, 0.0, 2.0}, {0.0, 0.0, -1.0}}, *curved_optical_model);
+  const auto hole_hit =
+      intersect_nearest_surface({{0.0, 0.0, 2.0}, {0.0, 0.0, -1.0}}, *curved_optical_model);
   require(hole_hit && hole_hit->surface_id == beneath.id,
           "T-GEO-012: central aperture hole passes the ray to the next surface");
   curved.sag->coefficient_m[1] = std::numeric_limits<double>::quiet_NaN();
