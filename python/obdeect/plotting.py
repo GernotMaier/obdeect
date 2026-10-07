@@ -14,6 +14,33 @@ from xml.sax.saxutils import escape
 from obdeect.camera_config import PIXEL_APERTURE_SHAPES
 
 
+class _FileRenderer:
+    """Create file-only figures without importing pyplot or a GUI backend."""
+
+    def __init__(self):
+        from matplotlib import cm, colormaps
+        from matplotlib.backends.backend_agg import FigureCanvasAgg
+        from matplotlib.figure import Figure
+
+        self.cm = cm
+        self.get_cmap = colormaps.get_cmap
+        self._figure = Figure
+        self._canvas = FigureCanvasAgg
+
+    def figure(self, **options):
+        figure = self._figure(**options)
+        self._canvas(figure)
+        return figure
+
+    def subplots(self, *args, figsize=None, **options):
+        figure = self.figure(figsize=figsize)
+        return figure, figure.subplots(*args, **options)
+
+    @staticmethod
+    def close(figure):
+        figure.clear()
+
+
 def _save_figure(figure, output: Path, **options):
     """Make vector exports reproducible by removing date and random ID metadata."""
     import matplotlib
@@ -863,7 +890,7 @@ def _draw_optical_model_assembly(axis, optical_model: PlotOpticalModel) -> None:
     _set_equal_3d_bounds(axis, optical_model)
     axis.set_proj_type("ortho")
     axis.view_init(elev=24, azim=-55)
-    axis.set(xlabel="x [m]", ylabel="y [m]", zlabel="z [m]", title="A. orthographic assembly")
+    axis.set(xlabel="x [m]", ylabel="y [m]", zlabel="z [m]")
 
 
 def _convex_hull(points):
@@ -1923,7 +1950,10 @@ def main():
             "loss-map",
         ),
         default="rays",
-        help="telescope outline, compiled-model geometry, recorded ray paths, or focal-plane image",
+        help=(
+            "compiled-model geometry, recorded ray paths, or focal-plane image; "
+            "structure uses a reference outline only when no optical model is supplied"
+        ),
     )
     parser.add_argument(
         "--focal-plane",
@@ -2036,10 +2066,7 @@ def main():
         return
 
     try:
-        import matplotlib
-
-        matplotlib.use("Agg")
-        import matplotlib.pyplot as plt
+        plt = _FileRenderer()
     except ImportError as error:
         raise SystemExit(
             "Install optional visualization dependency: python -m pip install matplotlib"
@@ -2057,7 +2084,10 @@ def main():
         )
         return
     if args.view == "structure":
-        draw_structure(plt, args.telescope, args.output)
+        if args.optical_model_json is not None:
+            draw_section(plt, args.optical_model_json, args.output, args.section_plane)
+        else:
+            draw_structure(plt, args.telescope, args.output)
         return
     if args.view == "telescope":
         draw_telescope(
