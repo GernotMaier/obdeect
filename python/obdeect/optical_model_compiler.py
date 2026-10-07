@@ -893,10 +893,15 @@ def compile_optical_model(ir: dict[str, Any], source_root: Path) -> dict[str, An
             raise OpticalModelCompileError(str(error)) from error
         consumed.add(camera_asset_name)
         if "camera_pixel_types" in parameters:
+            layout_types = {entry["id"]: entry for entry in camera["pixel_types"]}
             try:
                 camera["pixel_types"] = parse_camera_pixel_types(parameters["camera_pixel_types"])
             except CameraConfigError as error:
                 raise OpticalModelCompileError(str(error)) from error
+            for pixel_type in camera["pixel_types"]:
+                pixel_type["response_files"] = list(
+                    layout_types.get(pixel_type["id"], {}).get("response_files", [])
+                )
             type_ids = {entry["id"] for entry in camera["pixel_types"]}
             if any(pixel["type_id"] not in type_ids for pixel in camera["pixels"]):
                 raise OpticalModelCompileError(

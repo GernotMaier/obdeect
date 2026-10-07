@@ -5,6 +5,7 @@ import unittest
 
 from obdeect.camera_config import CameraConfigError, parse_camera_pixel_types
 from obdeect.camera_surfaces import compile_camera_surfaces
+from obdeect.optical_model_compiler import build_trace_model
 
 
 class TestCameraSurfaces(unittest.TestCase):
@@ -77,3 +78,78 @@ class TestCameraSurfaces(unittest.TestCase):
         del camera["pixels"][0]["z_offset_m"]
         with self.assertRaisesRegex(CameraConfigError, "requires"):
             compile_camera_surfaces(camera, focal, 0, reflected=False)
+
+    def test_disabled_pixels_keep_module_placement_but_emit_no_surfaces(self):
+        focal = dict(coefficient_m=[10, 0.5], radial_scale_m=1)
+        for mode in range(4):
+            for reflected in (False, True):
+                with self.subTest(mode=mode, reflected=reflected):
+                    camera = self.camera([0, 2, 4])
+                    complete = compile_camera_surfaces(camera, focal, mode, reflected=reflected)
+                    camera["pixels"][1]["enabled"] = False
+                    active = compile_camera_surfaces(camera, focal, mode, reflected=reflected)
+                    for key in ("entrance_surfaces", "cathode_surfaces"):
+                        self.assertEqual(active[key], [complete[key][0], complete[key][2]])
+                    self.assertFalse(camera["pixels"][1]["enabled"])
+
+    def test_no_enabled_entrances_is_rejected(self):
+        camera = self.camera([0])
+        camera["pixels"][0]["enabled"] = False
+        for mode in range(4):
+            with (
+                self.subTest(mode=mode),
+                self.assertRaisesRegex(CameraConfigError, "no enabled pixel entrances"),
+            ):
+                compile_camera_surfaces(
+                    camera, dict(coefficient_m=[10], radial_scale_m=1), mode, reflected=False
+                )
+
+    def test_trace_models_use_only_enabled_physical_entrances(self):
+        camera = self.camera([0, 2])
+        camera["pixels"][0]["enabled"] = False
+        camera.update(
+            compile_camera_surfaces(
+                camera, dict(coefficient_m=[10], radial_scale_m=1), 1, reflected=False
+            )
+        )
+        surface = dict(
+            coefficient_m=[0.0] * 13,
+            inner_radius_m=0.0,
+            outer_radius_m=4.0,
+            radial_scale_m=1.0,
+        )
+        optical_model = {
+            "camera": camera,
+            "report": {"facet_geometry_evidence": {"normal_status": "nominal_unperturbed"}},
+            "primary": {
+                "facets": [
+                    dict(
+                        id=0,
+                        shape="circle",
+                        diameter_m=1.0,
+                        focal_length_m=10.0,
+                        nominal_centre_m=[0.0, 0.0, 0.0],
+                        nominal_normal=[0.0, 0.0, 1.0],
+                    )
+                ]
+            },
+        }
+        segmented = build_trace_model(optical_model)
+        response = [
+            {"wavelength_nm": 300.0, "response": 0.8},
+            {"wavelength_nm": 500.0, "response": 0.8},
+        ]
+        optical_model["primary"] = {"aspheric_surface": surface, "reflectivity": response}
+        optical_model["secondary"] = {
+            "kind": "aspheric_mirror",
+            "reflectivity": response,
+            **surface,
+        }
+        optical_model["focal_surface"] = surface
+        axisymmetric = build_trace_model(optical_model)
+        for trace in (segmented, axisymmetric):
+            with self.subTest(kind=trace["kind"]):
+                detectors = trace["detector_surfaces"]
+                self.assertEqual(len(detectors), 1)
+                self.assertEqual(detectors[0]["centre_m"], [2, 0, 10])
+                self.assertTrue(detectors[0].get("enabled", True))

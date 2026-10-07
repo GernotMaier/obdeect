@@ -56,6 +56,8 @@ def compile_camera_surfaces(
             module_planes[identifier] = nx, ny, x * nx + y * ny + z
     entrances, cathodes = [], []
     for pixel in pixels:
+        if not pixel["enabled"]:
+            continue
         x, y = pixel["centre_xy_m"]
         nx, ny = pixel["normal_slopes"]
         rotation = math.radians(pixel["rotation_deg"])
@@ -113,4 +115,6 @@ def compile_camera_surfaces(
             "shape": PIXEL_APERTURE_SHAPES[pixel_type["cathode_shape_code"]],
             "diameter_m": pixel_type["cathode_diameter_m"],
         })
+    if not entrances:
+        raise CameraConfigError("physical camera has no enabled pixel entrances")
     return {"entrance_surfaces": entrances, "cathode_surfaces": cathodes}

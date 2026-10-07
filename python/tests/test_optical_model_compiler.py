@@ -597,6 +597,51 @@ class TestOpticalModelCompiler(unittest.TestCase):
             optical_model = compile_optical_model(ir, root)
             self.assertEqual(optical_model["report"]["camera_layout_evidence"]["pixel_count"], 2)
             self.assertIn("response.dat", optical_model["provenance"]["nested_assets"])
+            original_asset = optical_model["provenance"]["nested_assets"]["response.dat"]
+            # Physical dimensions override the layout dimensions, but the
+            # response file remains bound to the same pixel type and provenance.
+            physical_types = root / (
+                "model_parameters/GENERIC/camera_pixel_types/camera_pixel_types-1.0.0.json"
+            )
+            physical_types.parent.mkdir(parents=True)
+            physical_types.write_text(
+                json.dumps({
+                    "instrument": "GENERIC",
+                    "parameter": "camera_pixel_types",
+                    "parameter_version": "1.0.0",
+                    "type": "dict",
+                    "unit": None,
+                    "file": False,
+                    "value": [
+                        {
+                            "type_id": 1,
+                            "pmt_type": 0,
+                            "cathode_shape": 0,
+                            "cathode_diameter_cm": 2,
+                            "funnel_shape": 2,
+                            "funnel_diameter_cm": 4,
+                            "funnel_depth_cm": 10,
+                        }
+                    ],
+                })
+            )
+            data["parameters"]["GENERIC"]["camera_pixel_types"] = "1.0.0"
+            production.write_text(json.dumps(data))
+            ir = resolve_model(root, "GENERIC", "1.0.0")
+            overridden = compile_optical_model(ir, root)
+            pixel_type = overridden["camera"]["pixel_types"][0]
+            self.assertEqual(pixel_type["funnel_diameter_m"], 0.04)
+            self.assertEqual(pixel_type["response_files"], ["response.dat"])
+            self.assertEqual(
+                overridden["provenance"]["nested_assets"]["response.dat"], original_asset
+            )
+            (files / "response.dat").write_text("300 0.5\n")
+            changed = compile_optical_model(ir, root)
+            self.assertNotEqual(
+                changed["provenance"]["nested_assets"]["response.dat"]["sha256"],
+                original_asset["sha256"],
+            )
+            self.assertNotEqual(changed["optical_model_sha256"], overridden["optical_model_sha256"])
             (files / "response.dat").unlink()
             self.assertEqual(
                 compile_optical_model(ir, root)["report"]["camera_layout_evidence"][
