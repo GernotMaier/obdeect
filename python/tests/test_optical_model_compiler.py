@@ -144,6 +144,19 @@ class TestOpticalModelCompiler(unittest.TestCase):
         self.assertEqual(
             [item["role"] for item in dual["components"]], ["primary", "secondary", "detector"]
         )
+        dual = build_plot_geometry(
+            {
+                "kind": "axisymmetric",
+                "primary_to_secondary_planes": [{"id": 10}],
+                "incoming_obscurer_planes": [{"id": 11}],
+                "primary_to_secondary_cylinders": [{"id": 12}],
+            },
+            {"trace_blockers": []},
+        )
+        self.assertEqual(
+            [(item["id"], item["role"]) for item in dual["components"][-3:]],
+            [(10, "obscurer"), (11, "obscurer"), (12, "opaque_cylinder")],
+        )
 
     def test_trace_readiness_requires_resolved_optical_model(self):
         require_trace_ready({"report": {"trace_blockers": [], "trace_ready": True}})
@@ -221,6 +234,169 @@ class TestOpticalModelCompiler(unittest.TestCase):
                 })
             )
         return resolve_model(root, "GENERIC", "1.0.0")
+
+    def test_measured_scatter_requires_explicit_seed_and_preserves_units(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.make_ir(root)
+            production = root / "productions/1.0.0/GENERIC.json"
+            data = json.loads(production.read_text())
+            name = "mirror_reflection_random_angle"
+            data["parameters"]["GENERIC"][name] = "1.0.0"
+            production.write_text(json.dumps(data))
+            record = root / f"model_parameters/GENERIC/{name}/{name}-1.0.0.json"
+            record.parent.mkdir(parents=True)
+            parameter = {
+                "instrument": "GENERIC",
+                "parameter": name,
+                "parameter_version": "1.0.0",
+                "type": "float64",
+                "unit": ["deg", "null", "deg"],
+                "value": [0.0255, 0.2, 0.05],
+                "file": False,
+            }
+            record.write_text(json.dumps(parameter))
+            ir = resolve_model(root, "GENERIC", "1.0.0")
+            nominal = compile_optical_model(ir, root)
+            self.assertIn(name, nominal["report"]["deferred"])
+            self.assertNotIn("scatter", nominal["primary"])
+            compiled = compile_optical_model(ir, root, scatter_seed=21)
+            scatter = compiled["primary"]["scatter"]
+            self.assertEqual(scatter["seed"], 21)
+            self.assertEqual(scatter["method"], "outgoing_angles")
+            self.assertAlmostEqual(scatter["sigma1_rad"], math.radians(0.0255))
+            self.assertAlmostEqual(scatter["sigma2_rad"], math.radians(0.05))
+            self.assertEqual(scatter["fraction2"], 0.2)
+            self.assertNotIn(name, compiled["report"]["deferred"])
+            for seed in (True, -1, 2**64):
+                with self.subTest(seed=seed), self.assertRaises(OpticalModelCompileError):
+                    compile_optical_model(ir, root, scatter_seed=seed)
+            for values in ([90, 0, 0], [0, 1, 0], [-1, 0, 0], [0, 0, True]):
+                parameter["value"] = values
+                record.write_text(json.dumps(parameter))
+                ir = resolve_model(root, "GENERIC", "1.0.0")
+                with self.subTest(values=values), self.assertRaises(OpticalModelCompileError):
+                    compile_optical_model(ir, root, scatter_seed=21)
+
+    def test_axisymmetric_trace_preserves_scatter_housing_and_shadow(self):
+        surface = {
+            "inner_radius_m": 0,
+            "outer_radius_m": 2,
+            "radial_scale_m": 1,
+            "coefficient_m": [0.0] * 13,
+        }
+        scatter = {
+            "sigma1_rad": 0.001,
+            "fraction2": 0,
+            "sigma2_rad": 0,
+            "method": "surface_slopes",
+            "seed": 21,
+        }
+        optical_model = {
+            "primary": {
+                "aspheric_surface": surface,
+                "scatter": scatter,
+                "reflectivity": [
+                    {"wavelength_nm": 300, "response": 0.8},
+                    {"wavelength_nm": 500, "response": 0.8},
+                ],
+            },
+            "secondary": {
+                "kind": "aspheric_mirror",
+                "reflectivity": [
+                    {"wavelength_nm": 300, "response": 0.9},
+                    {"wavelength_nm": 500, "response": 0.9},
+                ],
+                **surface,
+                "scatter": scatter,
+                "incoming_shadow": {"diameter_m": 3, "z_m": 3},
+            },
+            "focal_surface": surface,
+            "camera": {
+                "housing": {"shape": "square", "diameter_m": 0.5, "front_z_m": 1.5, "depth_m": 0.3},
+            },
+        }
+        trace = build_trace_model(optical_model)
+        self.assertEqual(trace["primary_scatter"], scatter)
+        self.assertEqual(trace["secondary_scatter"], scatter)
+        self.assertFalse(trace["block_incoming_secondary"])
+        plane = trace["primary_to_secondary_planes"][0]
+        self.assertEqual(plane["shape"], "square")
+        self.assertEqual(plane["centre_m"], [0, 0, 1.2])
+        cylinder = trace["primary_to_secondary_cylinders"][0]
+        self.assertEqual(cylinder["second_endpoint_m"], [0, 0, 1.5])
+        self.assertEqual(trace["incoming_obscurer_planes"][0]["diameter_m"], 3)
+        ids = [
+            trace[key]
+            for key in ("primary_surface_id", "secondary_surface_id", "detector_surface_id")
+        ] + [plane["id"], cylinder["id"], trace["incoming_obscurer_planes"][0]["id"]]
+        self.assertEqual(len(ids), len(set(ids)))
+
+    def test_imports_dual_mirror_scatter_and_obscuration_from_verified_records(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.make_ir(root)
+            (root / "model_parameters/Files/segments.dat").write_text("hex 1 0 0 400 0\n")
+            (root / "model_parameters/Files/reflectivity.dat").write_text(
+                "wavelength reflectivity\n300 0.8\n400 0.9\n"
+            )
+            (root / "model_parameters/Files/camera.dat").write_text(
+                'PixType 1 0 0 1 0 1 0 "filter.dat"\nPixel 0 1 0 0\n'
+            )
+            production = root / "productions/1.0.0/GENERIC.json"
+            data = json.loads(production.read_text())
+            parameters = {
+                "primary_mirror_segmentation": ("segments.dat", None, True),
+                "primary_mirror_parameters": ([0.0], ["cm"], False),
+                "primary_mirror_diameter": (400, "cm", False),
+                "primary_mirror_hole_diameter": (0, "cm", False),
+                "secondary_mirror_parameters": ([250.0], ["cm"], False),
+                "secondary_mirror_diameter": (180, "cm", False),
+                "secondary_mirror_hole_diameter": (0, "cm", False),
+                "focal_surface_parameters": ([200.0], ["cm"], False),
+                "mirror_reflectivity": ("reflectivity.dat", None, True),
+                "secondary_mirror_reflectivity": ("reflectivity.dat", None, True),
+                "mirror_reflection_random_angle": ([0.0255, 0, 0], ["deg", "null", "deg"], False),
+                "camera_config_file": ("camera.dat", None, True),
+                "camera_pixels": (1, None, False),
+                "camera_body_shape": (2, None, False),
+                "camera_depth": (20, "cm", False),
+                "secondary_mirror_shadow_diameter": (214, "cm", False),
+                "secondary_mirror_shadow_offset": (0, "cm", False),
+            }
+            for name, (value, unit, is_file) in parameters.items():
+                record = root / f"model_parameters/GENERIC/{name}/{name}-1.0.0.json"
+                record.parent.mkdir(parents=True)
+                record.write_text(
+                    json.dumps({
+                        "instrument": "GENERIC",
+                        "parameter": name,
+                        "parameter_version": "1.0.0",
+                        "type": "string" if is_file else "float64",
+                        "unit": unit,
+                        "value": value,
+                        "file": is_file,
+                    })
+                )
+                data["parameters"]["GENERIC"][name] = "1.0.0"
+            production.write_text(json.dumps(data))
+            optical_model = compile_optical_model(
+                resolve_model(root, "GENERIC", "1.0.0"), root, scatter_seed=21
+            )
+            trace = optical_model["trace_model"]
+            self.assertEqual(trace["primary_scatter"]["method"], "surface_slopes")
+            self.assertEqual(trace["secondary_scatter"], trace["primary_scatter"])
+            self.assertAlmostEqual(trace["incoming_obscurer_planes"][0]["diameter_m"], 2.14)
+            self.assertEqual(trace["incoming_obscurer_planes"][0]["centre_m"][2], 2.5)
+            self.assertEqual(trace["primary_to_secondary_planes"][0]["shape"], "square")
+            self.assertEqual(trace["primary_to_secondary_planes"][0]["centre_m"][2], 1.8)
+            self.assertEqual(len(trace["primary_to_secondary_planes"]), 1)
+            self.assertEqual(
+                trace["primary_to_secondary_cylinders"][0]["second_endpoint_m"][2], 2.0
+            )
+            self.assertNotIn("camera_depth", optical_model["report"]["deferred"])
+            with self.assertRaisesRegex(OpticalModelCompileError, "use compiled JSON"):
+                write_native_optical_model(optical_model, root / "unsupported.csv")
 
     def test_compiles_tracked_mirror_list_without_dropping_deferred_fields(self):
         # T-IR-004: source units, shape, position and zero-focal fallback survive compilation.

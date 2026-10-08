@@ -114,6 +114,30 @@ class DiagnosticTests(unittest.TestCase):
             "secondary": surface,
             "detector": surface,
             "detector_surfaces": [plane],
+            "primary_to_secondary_planes": [
+                {
+                    **plane,
+                    "id": 11,
+                    "centre_m": [0, 0, 2],
+                    "diameter_m": 1.0,
+                }
+            ],
+            "incoming_obscurer_planes": [
+                {
+                    **plane,
+                    "id": 12,
+                    "centre_m": [0, 0, 3],
+                    "diameter_m": 1.0,
+                }
+            ],
+            "primary_to_secondary_cylinders": [
+                {
+                    "id": 13,
+                    "first_endpoint_m": [0, 0, 1],
+                    "second_endpoint_m": [0, 0, 2],
+                    "diameter_m": 0.2,
+                }
+            ],
         }
         fixture["trace_model"] = trace
         fixture["camera"] = {"entrance_surfaces": [plane]}
@@ -125,6 +149,11 @@ class DiagnosticTests(unittest.TestCase):
         )
         self.assertEqual(compiled.polygons[0].identifier, 10)
         self.assertEqual(compiled.camera_pixels[0].identifier, 42)
+        self.assertEqual(
+            [(item.identifier, item.role) for item in compiled.polygons[1:]],
+            [(11, "obscurer"), (12, "obscurer")],
+        )
+        self.assertEqual(compiled.obscurers[0].identifier, 13)
         self.assertEqual(
             compiled.camera_pixels[0].vertices_xy_m,
             tuple((p[0], p[1]) for p in compiled.polygons[0].vertices_m),
@@ -568,6 +597,92 @@ class DiagnosticTests(unittest.TestCase):
             context_radius_m=5,
         )
         self.assertFalse(plt.get_fignums())
+
+    def test_cli_writes_files_without_pyplot_with_interactive_backend(self):
+        try:
+            import matplotlib  # noqa: F401
+        except ImportError:
+            self.skipTest("Matplotlib optional")
+        script = """
+import importlib.abc
+import sys
+from pathlib import Path
+
+class NoGuiImports(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname == "matplotlib.pyplot" or fullname.startswith((
+            "matplotlib.backends.backend_macosx", "matplotlib.backends._macosx",
+            "matplotlib.backends.backend_qt", "matplotlib.backends.backend_tk",
+            "matplotlib.backends._backend_tk", "matplotlib.backends.backend_gtk",
+            "matplotlib.backends.backend_wx",
+        )):
+            raise AssertionError(f"GUI import attempted: {fullname}")
+
+sys.meta_path.insert(0, NoGuiImports())
+import matplotlib
+matplotlib.rcParams.update({"backend": "MacOSX", "interactive": True})
+from obdeect.plotting import main
+
+model, trace, directory = sys.argv[1:]
+for extension in ("png", "pdf", "svg"):
+    sys.argv = ["obdeect-plot-reference", "--view", "telescope",
+                "--optical-model-json", model, "--input", trace,
+                "--colour-by", "wavelength", "--output",
+                str(Path(directory) / f"headless.{extension}")]
+    main()
+assert "matplotlib.pyplot" not in sys.modules
+assert matplotlib.rcParams["backend"] == "MacOSX"
+"""
+        rows = self.csv.read_text().splitlines()
+        self.csv.write_text(
+            rows[0] + ",wavelength_nm\n" + "\n".join(row + ",400" for row in rows[1:]) + "\n"
+        )
+        subprocess.run(
+            [sys.executable, "-c", script, str(self.model), str(self.csv), str(self.directory)],
+            check=True,
+            env={**os.environ, "PYTHONPATH": str(Path(plot.__file__).parents[1])},
+        )
+        self.assertTrue((self.directory / "headless.png").read_bytes().startswith(b"\x89PNG"))
+        self.assertTrue((self.directory / "headless.pdf").read_bytes().startswith(b"%PDF"))
+        self.assertIn("<svg", (self.directory / "headless.svg").read_text())
+        self.assertNotIn("A. orthographic assembly", (self.directory / "headless.svg").read_text())
+
+    def test_structure_cli_uses_model_geometry_and_selected_section_plane(self):
+        try:
+            import matplotlib  # noqa: F401
+        except ImportError:
+            self.skipTest("Matplotlib optional")
+        output = self.directory / "structure.svg"
+        command = [
+            sys.executable,
+            "-m",
+            "obdeect.plotting",
+            "--view",
+            "structure",
+            "--section-plane",
+            "yz",
+            "--output",
+            str(output),
+        ]
+        env = {**os.environ, "PYTHONPATH": str(Path(plot.__file__).parents[1])}
+        subprocess.run(command + ["--optical-model-json", str(self.model)], check=True, env=env)
+        svg = output.read_text()
+        self.assertIn("finite-fixture/1 compiled optical section", svg)
+        self.assertIn("telescope y [m]", svg)
+        self.assertIn("a" * 12, svg)
+        self.assertIn("opaque cylinder #6", svg)
+        self.assertNotIn("spherical primary", svg)
+        self.assertNotIn("camera body projection", svg)
+
+        # A supplied invalid model must not fall back to a reference outline.
+        self.model.write_text("{}")
+        result = subprocess.run(
+            command + ["--optical-model-json", str(self.model)], capture_output=True, env=env
+        )
+        self.assertNotEqual(result.returncode, 0)
+
+        subprocess.run(command, check=True, env=env)
+        self.assertIn("reference-mst reference mirror, camera and supports", output.read_text())
 
 
 if __name__ == "__main__":

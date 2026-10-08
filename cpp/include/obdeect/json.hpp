@@ -8,6 +8,7 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <variant>
 #include <vector>
 
 namespace obdeect::json {
@@ -17,25 +18,46 @@ namespace obdeect::json {
 // tracing kernels or on binary-wheel users.
 struct Value {
   enum class Kind { null, boolean, number, string, array, object };
+  struct Number {
+    double value;
+    // Preserve number spelling for canonical artifact hashing.
+    std::string text;
+  };
+  using Array = std::vector<Value>;
+  using Object = std::vector<std::pair<std::string, Value>>;
 
-  Kind kind{Kind::null};
-  bool boolean{};
-  double number{};
-  // Keep the source token so canonical artifact hashing preserves the
-  // compiler's JSON number spelling (for example, 1.0 versus 1).
-  std::string number_text;
-  std::string string;
-  std::vector<Value> array;
-  std::vector<std::pair<std::string, Value>> object;
+  Value() = default;
+  explicit Value(bool value) : data_(value) {}
+  explicit Value(Number value) : data_(std::move(value)) {}
+  explicit Value(std::string value) : data_(std::move(value)) {}
+  explicit Value(Array value) : data_(std::move(value)) {}
+  explicit Value(Object value) : data_(std::move(value)) {}
+
+  [[nodiscard]] Kind kind() const { return static_cast<Kind>(data_.index()); }
+  [[nodiscard]] bool boolean() const { return std::get<bool>(data_); }
+  bool &boolean() { return std::get<bool>(data_); }
+  [[nodiscard]] double number() const { return std::get<Number>(data_).value; }
+  [[nodiscard]] const std::string &number_text() const { return std::get<Number>(data_).text; }
+  [[nodiscard]] const std::string &string() const { return std::get<std::string>(data_); }
+  std::string &string() { return std::get<std::string>(data_); }
+  [[nodiscard]] const Array &array() const { return std::get<Array>(data_); }
+  Array &array() { return std::get<Array>(data_); }
+  [[nodiscard]] const Object &object() const { return std::get<Object>(data_); }
+  Object &object() { return std::get<Object>(data_); }
 
   [[nodiscard]] const Value *find(std::string_view key) const {
-    if (kind != Kind::object)
+    if (kind() != Kind::object)
       return nullptr;
-    for (const auto &[name, value] : object)
+    for (const auto &[name, value] : object())
       if (name == key)
         return &value;
     return nullptr;
   }
+
+private:
+  // Only the active JSON type occupies storage; numeric table entries do not
+  // carry unused string, array and object containers.
+  std::variant<std::monostate, bool, Number, std::string, Array, Object> data_;
 };
 
 class Parser {
@@ -76,10 +98,7 @@ private:
       auto text = parse_string();
       if (!text)
         return std::nullopt;
-      Value value{};
-      value.kind = Value::Kind::string;
-      value.string = std::move(*text);
-      return value;
+      return Value{std::move(*text)};
     }
     case 't':
       return consume_literal("true", Value::Kind::boolean, true);
@@ -97,10 +116,9 @@ private:
     if (input_.substr(position_, literal.size()) != literal)
       return std::nullopt;
     position_ += literal.size();
-    Value value{};
-    value.kind = kind;
-    value.boolean = boolean;
-    return value;
+    if (kind == Value::Kind::boolean)
+      return Value{boolean};
+    return Value{};
   }
 
   [[nodiscard]] std::optional<std::string> parse_string() {
@@ -194,18 +212,13 @@ private:
     const double value = std::strtod(text.c_str(), &end);
     if (end != text.c_str() + text.size() || !std::isfinite(value))
       return std::nullopt;
-    Value result{};
-    result.kind = Value::Kind::number;
-    result.number = value;
-    result.number_text = text;
-    return result;
+    return Value{Value::Number{value, text}};
   }
 
   [[nodiscard]] std::optional<Value> parse_array(std::size_t depth) {
     if (!consume('['))
       return std::nullopt;
-    Value result{};
-    result.kind = Value::Kind::array;
+    Value result{Value::Array{}};
     skip_space();
     if (consume(']'))
       return result;
@@ -214,7 +227,7 @@ private:
       auto value = parse_value(depth);
       if (!value)
         return std::nullopt;
-      result.array.push_back(std::move(*value));
+      result.array().push_back(std::move(*value));
       skip_space();
       if (consume(']'))
         return result;
@@ -226,8 +239,7 @@ private:
   [[nodiscard]] std::optional<Value> parse_object(std::size_t depth) {
     if (!consume('{'))
       return std::nullopt;
-    Value result{};
-    result.kind = Value::Kind::object;
+    Value result{Value::Object{}};
     skip_space();
     if (consume('}'))
       return result;
@@ -243,7 +255,7 @@ private:
       auto value = parse_value(depth);
       if (!value)
         return std::nullopt;
-      result.object.emplace_back(std::move(*key), std::move(*value));
+      result.object().emplace_back(std::move(*key), std::move(*value));
       skip_space();
       if (consume('}'))
         return result;

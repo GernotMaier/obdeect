@@ -46,7 +46,7 @@ def test_ray_tracing_executes_packaged_model_for_unique_offsets(installed_model,
     ray.mirrors = [{"source_distance": 10.0}]
     files = []
     for offset in (0.0, 0.1):
-        simulator, *_ = ray._create_simulator(offset, 0, 0, ray.mirrors[0], True, False)
+        simulator = ray._create_simulator(offset, 0, 0, ray.mirrors[0], True, False)
         simulator.run()
         arrivals = read_arrivals(simulator.output_file)
         assert len(arrivals) == 100

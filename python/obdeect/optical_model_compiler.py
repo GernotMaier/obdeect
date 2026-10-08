@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from obdeect.camera_config import (
+    PIXEL_APERTURE_SHAPES,
     CameraConfigError,
     parse_camera_layout,
     parse_camera_layout_ecsv,
@@ -695,7 +696,9 @@ def _dual_reflector_surfaces(parameters: dict[str, Any]) -> dict[str, dict[str, 
     }
 
 
-def compile_optical_model(ir: dict[str, Any], source_root: Path) -> dict[str, Any]:
+def compile_optical_model(
+    ir: dict[str, Any], source_root: Path, *, scatter_seed: int | None = None
+) -> dict[str, Any]:
     """Compile ``obdeect.simulation-models-optical-model-ir.v1`` into generic optical model data."""
     if ir.get("format") != "obdeect.simulation-models-optical-model-ir.v1":
         raise OpticalModelCompileError("expected obdeect.simulation-models-optical-model-ir.v1")
@@ -857,6 +860,26 @@ def compile_optical_model(ir: dict[str, Any], source_root: Path) -> dict[str, An
             **dual_surfaces["secondary"],
             "segments": secondary.get("segments", []) if secondary is not None else [],
         }
+        shadow_fields = {"secondary_mirror_shadow_diameter", "secondary_mirror_shadow_offset"}
+        if shadow_fields.issubset(parameters):
+            diameter = _length_m(
+                parameters["secondary_mirror_shadow_diameter"],
+                "secondary_mirror_shadow_diameter",
+                allow_zero=True,
+            )
+            offset = _signed_length_m(
+                parameters["secondary_mirror_shadow_offset"], "secondary_mirror_shadow_offset"
+            )
+            if offset <= 0:
+                radius = diameter * 0.5 / secondary["radial_scale_m"]
+                offset = sum(
+                    value * radius ** (2 * index)
+                    for index, value in enumerate(secondary["coefficient_m"])
+                )
+            elif "mirror_offset" in parameters:
+                offset -= _signed_length_m(parameters["mirror_offset"], "mirror_offset")
+            secondary["incoming_shadow"] = {"diameter_m": diameter, "z_m": offset}
+            consumed.update(shadow_fields)
         if "secondary_mirror_reflectivity" in verified_assets:
             try:
                 secondary["reflectivity"] = parse_wavelength_response(
@@ -874,6 +897,36 @@ def compile_optical_model(ir: dict[str, Any], source_root: Path) -> dict[str, An
             "secondary_mirror_degraded_reflection",
         )
         consumed.add("secondary_mirror_degraded_reflection")
+    if "mirror_reflection_random_angle" in parameters and scatter_seed is not None:
+        parameter = parameters["mirror_reflection_random_angle"]
+        values, units = parameter.get("value"), parameter.get("unit")
+        if (
+            not isinstance(values, list)
+            or len(values) != 3
+            or units != ["deg", "null", "deg"]
+            or isinstance(scatter_seed, bool)
+            or not isinstance(scatter_seed, int)
+            or not 0 <= scatter_seed < 2**64
+        ):
+            raise OpticalModelCompileError(
+                "mirror scatter requires three components and uint64 seed"
+            )
+        first, fraction, second = [
+            _number(value, "mirror_reflection_random_angle") for value in values
+        ]
+        if not 0 <= first < 90 or not 0 <= second < 90 or not 0 <= fraction < 1:
+            raise OpticalModelCompileError("invalid mirror scatter widths or mixture fraction")
+        scatter = {
+            "sigma1_rad": math.radians(first),
+            "fraction2": fraction,
+            "sigma2_rad": math.radians(second),
+            "method": "surface_slopes" if dual_surfaces is not None else "outgoing_angles",
+            "seed": scatter_seed,
+        }
+        primary["scatter"] = scatter
+        if dual_surfaces is not None:
+            secondary["scatter"] = dict(scatter)
+        consumed.add("mirror_reflection_random_angle")
     camera = None
     nested_assets = {}
     unresolved_references = []
@@ -930,6 +983,25 @@ def compile_optical_model(ir: dict[str, Any], source_root: Path) -> dict[str, An
                 else:
                     unresolved_references.append(filename)
     if camera is not None:
+        housing_fields = {"camera_body_diameter", "camera_body_shape", "camera_depth"}
+        if dual_surfaces is not None and housing_fields.issubset(parameters):
+            shape = parameters["camera_body_shape"].get("value")
+            if (
+                isinstance(shape, bool)
+                or not isinstance(shape, int)
+                or shape not in PIXEL_APERTURE_SHAPES
+            ):
+                raise OpticalModelCompileError("unsupported camera housing footprint")
+            camera["housing"] = {
+                "shape": PIXEL_APERTURE_SHAPES[shape],
+                "diameter_m": _length_m(
+                    parameters["camera_body_diameter"], "camera_body_diameter", allow_zero=True
+                ),
+                "depth_m": _length_m(parameters["camera_depth"], "camera_depth", allow_zero=True),
+                "front_z_m": dual_surfaces["focal_surface"]["coefficient_m"][0],
+                "sidewall_convention": "sim_telarray_cylindrical_sidewalls",
+            }
+            consumed.update(housing_fields)
         if "camera_filter" in verified_assets:
             camera["filter_response"] = parse_wavelength_response(
                 verified_assets["camera_filter"].read_text(encoding="utf-8"),
@@ -979,6 +1051,13 @@ def compile_optical_model(ir: dict[str, Any], source_root: Path) -> dict[str, An
             for name in sorted(parameters)
         },
         "trace_blockers": [
+            *(
+                ["mirror scatter requires an explicit --scatter-seed"]
+                if "mirror_reflection_random_angle" in parameters
+                and "mirror_reflection_random_angle" not in consumed
+                else []
+            ),
+            *(["secondary baffle remains deferred"] if "secondary_baffle" in parameters else []),
             "run-specific panel alignment and distance are not compiled"
             if nominal_geometry
             else "facet surface normals and alignment are not compiled",
@@ -1142,6 +1221,19 @@ def build_plot_geometry(trace_model: dict[str, Any], report: dict[str, Any]) -> 
         components.extend(
             {"id": item["id"], "role": "detector", "source": "trace_model.detector_surfaces"}
             for item in trace_model.get("detector_surfaces", [])
+        )
+        for field in ("primary_to_secondary_planes", "incoming_obscurer_planes"):
+            components.extend(
+                {"id": item["id"], "role": "obscurer", "source": f"trace_model.{field}"}
+                for item in trace_model.get(field, [])
+            )
+        components.extend(
+            {
+                "id": item["id"],
+                "role": "opaque_cylinder",
+                "source": "trace_model.primary_to_secondary_cylinders",
+            }
+            for item in trace_model.get("primary_to_secondary_cylinders", [])
         )
     unavailable = []
     if any("physical detector surfaces and materials" in item for item in report["trace_blockers"]):
@@ -1391,6 +1483,7 @@ def build_trace_model(optical_model: dict[str, Any]) -> dict[str, Any]:
             detectors.append(surface)
     return {
         "kind": "segmented",
+        **({"primary_scatter": primary["scatter"]} if "scatter" in primary else {}),
         **_camera_response_fields(optical_model),
         "primary_facets": facets,
         "detector_surfaces": detectors,
@@ -1502,6 +1595,15 @@ def _write_native_axisymmetric_optical_model(optical_model: dict[str, Any], outp
         raise OpticalModelCompileError(
             "native axisymmetric export cannot represent cylinder obscurers"
         )
+    if (
+        primary_source.get("scatter")
+        or optical_model["secondary"].get("scatter")
+        or optical_model["secondary"].get("incoming_shadow")
+        or optical_model.get("camera", {}).get("housing")
+    ):
+        raise OpticalModelCompileError(
+            "CSV export cannot represent scatter or flight-specific obscurers; use compiled JSON"
+        )
     primary = primary_source["aspheric_surface"]
     secondary = optical_model["secondary"]
     focal = optical_model.get("focal_surface")
@@ -1607,9 +1709,47 @@ def _axisymmetric_trace_model(optical_model: dict[str, Any]) -> dict[str, Any]:
         for segment in segments:
             masks[role].append({**segment, "id": next_id})
             next_id += 1
+    camera = optical_model.get("camera", {})
+    housing = camera.get("housing", {})
+    obscurer_planes, obscurer_cylinders, incoming_planes = [], [], []
+    identifier = next_id + 3 + len(camera.get("entrance_surfaces", []))
+    if housing.get("diameter_m", 0) > 0:
+        front = housing["front_z_m"]
+        back = front - housing["depth_m"]
+        obscurer_planes.append({
+            "id": identifier,
+            "shape": housing["shape"],
+            "centre_m": [0.0, 0.0, back],
+            "normal": [0.0, 0.0, 1.0],
+            "tangent": [1.0, 0.0, 0.0],
+            "diameter_m": housing["diameter_m"],
+        })
+        if housing["depth_m"] > 0:
+            # sim_telarray's usual build checks the rear face and cylindrical
+            # sidewall. The front-face check is behind the disabled
+            # RAYTRACING_CAMERA_FRONT_AFTER_PRIMARY build flag.
+            obscurer_cylinders.append({
+                "id": identifier + 1,
+                "first_endpoint_m": [0.0, 0.0, back],
+                "second_endpoint_m": [0.0, 0.0, front],
+                "diameter_m": housing["diameter_m"],
+            })
+    shadow = secondary.get("incoming_shadow", {})
+    if shadow.get("diameter_m", 0) > 0:
+        incoming_planes.append({
+            "id": identifier + len(obscurer_planes) + len(obscurer_cylinders),
+            "shape": "circle",
+            "centre_m": [0.0, 0.0, shadow["z_m"]],
+            "normal": [0.0, 0.0, 1.0],
+            "tangent": [1.0, 0.0, 0.0],
+            "diameter_m": shadow["diameter_m"],
+        })
     return {
         "primary_segments": masks["primary"],
         "secondary_segments": masks["secondary"],
+        "primary_to_secondary_planes": obscurer_planes,
+        "primary_to_secondary_cylinders": obscurer_cylinders,
+        "incoming_obscurer_planes": incoming_planes,
         "primary_surface_id": next_id,
         "secondary_surface_id": next_id + 1,
         "detector_surface_id": next_id + 2,
@@ -1619,8 +1759,14 @@ def _axisymmetric_trace_model(optical_model: dict[str, Any]) -> dict[str, Any]:
                 optical_model.get("camera", {}).get("entrance_surfaces", [])
             )
         ],
-        "block_incoming_secondary": True,
+        "block_incoming_secondary": "incoming_shadow" not in secondary,
         "kind": "axisymmetric",
+        **(
+            {"primary_scatter": optical_model["primary"]["scatter"]}
+            if "scatter" in optical_model["primary"]
+            else {}
+        ),
+        **({"secondary_scatter": secondary["scatter"]} if "scatter" in secondary else {}),
         **_camera_response_fields(optical_model),
         "primary": surface(primary, "primary"),
         "secondary": surface(secondary, "secondary"),
@@ -1645,6 +1791,9 @@ def main() -> None:
     parser.add_argument("--version", required=True, help="production model version")
     parser.add_argument("--output", type=Path, required=True, help="compiled optical model JSON")
     parser.add_argument(
+        "--scatter-seed", type=int, help="explicit uint64 seed for measured mirror scatter"
+    )
+    parser.add_argument(
         "--require-trace-ready",
         action="store_true",
         help="fail if unresolved optical geometry or response prevents production tracing",
@@ -1652,7 +1801,7 @@ def main() -> None:
     args = parser.parse_args()
     try:
         ir = resolve_model(args.source_root, args.model, args.version)
-        optical_model = compile_optical_model(ir, args.source_root)
+        optical_model = compile_optical_model(ir, args.source_root, scatter_seed=args.scatter_seed)
         if args.require_trace_ready:
             require_trace_ready(optical_model)
     except (OSError, ModelImportError, OpticalModelCompileError) as error:
@@ -1661,7 +1810,7 @@ def main() -> None:
         json.dumps(optical_model, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
-    print(f"Compiled {optical_model['provenance']['model']} geometry into {args.output}")
+    print(f"Compiled {optical_model['provenance']['model']} optical model into {args.output}")
 
 
 if __name__ == "__main__":

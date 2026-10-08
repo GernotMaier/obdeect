@@ -9,7 +9,7 @@ from pathlib import Path
 
 
 def executable_path(name: str = "obdeect-simtools-raytrace") -> Path:
-    """Return the packaged native executable named ``name``.
+    """Return the native executable from a wheel or editable package installation.
 
     Parameters
     ----------
@@ -22,17 +22,24 @@ def executable_path(name: str = "obdeect-simtools-raytrace") -> Path:
         If the wheel does not contain the requested executable.
     """
 
-    native_dir = Path(__file__).resolve().parent / "_native"
-    candidates = [native_dir / name]
-    if os.name == "nt" and not name.endswith(".exe"):
-        candidates.append(native_dir / f"{name}.exe")
+    from obdeect import __path__ as package_paths
+
+    # Editable installs can put Python sources and native files in separate
+    # package locations. Search the package paths in their declared order.
+    native_dirs = [Path(location) / "_native" for location in package_paths]
+    candidates = []
+    for native_dir in native_dirs:
+        candidates.append(native_dir / name)
+        if os.name == "nt" and not name.endswith(".exe"):
+            candidates.append(native_dir / f"{name}.exe")
     for candidate in candidates:
         if candidate.is_file():
             if os.name != "nt" and not os.access(candidate, os.X_OK):
                 raise PermissionError(f"Packaged obdeect executable is not executable: {candidate}")
             return candidate
     raise FileNotFoundError(
-        f"Packaged obdeect executable {name!r} was not found in {native_dir}. "
+        f"Packaged obdeect executable {name!r} was not found in "
+        f"{', '.join(str(directory) for directory in native_dirs)}. "
         "Reinstall obdeect-dev with a wheel for this platform."
     )
 

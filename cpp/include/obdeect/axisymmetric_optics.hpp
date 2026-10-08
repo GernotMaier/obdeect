@@ -85,15 +85,25 @@ intersect_axisymmetric_mirror(const Ray &ray, const AxisymmetricMirror &mirror, 
   if (!direction || !std::isfinite(ray.position_m.x) || !std::isfinite(ray.position_m.y) ||
       !std::isfinite(ray.position_m.z))
     return std::nullopt;
+  // Solve near the surface, rather than subtracting source-distance-sized
+  // coordinates at every trial root. Keep the original distance for timing.
+  const double origin_distance =
+      std::max(0.0, dot(Vec3{0, 0, mirror.vertex_z_m} - ray.position_m, *direction));
+  const Vec3 position{std::fma(origin_distance, direction->x, ray.position_m.x),
+                      std::fma(origin_distance, direction->y, ray.position_m.y),
+                      std::fma(origin_distance, direction->z, ray.position_m.z)};
+  const double minimum_local = minimum_t_m - origin_distance;
   const auto make_hit = [&](double distance) -> std::optional<AxisymmetricHit> {
-    if (!std::isfinite(distance)) {
+    if (!std::isfinite(distance) || !std::isfinite(origin_distance + distance)) {
       if (numerical_failure)
         *numerical_failure = true;
       return std::nullopt;
     }
-    if (distance <= minimum_t_m)
+    if (distance <= minimum_local)
       return std::nullopt;
-    const Vec3 point = ray.position_m + *direction * distance;
+    const Vec3 point{std::fma(distance, direction->x, position.x),
+                     std::fma(distance, direction->y, position.y),
+                     std::fma(distance, direction->z, position.z)};
     const double radius = std::hypot(point.x, point.y);
     if (radius < mirror.inner_radius_m || radius > mirror.outer_radius_m)
       return std::nullopt;
@@ -112,31 +122,29 @@ intersect_axisymmetric_mirror(const Ray &ray, const AxisymmetricMirror &mirror, 
         normalised_checked({-slope * point.x * inverse, -slope * point.y * inverse, 1.0});
     if (!normal && numerical_failure)
       *numerical_failure = true;
-    return normal ? std::optional<AxisymmetricHit>{{distance, point, *normal}} : std::nullopt;
+    return normal ? std::optional<AxisymmetricHit>{{origin_distance + distance, point, *normal}}
+                  : std::nullopt;
   };
   const long double transverse = static_cast<long double>(direction->x) * direction->x +
                                  static_cast<long double>(direction->y) * direction->y;
   if (transverse == 0) {
     if (direction->z == 0)
       return std::nullopt;
-    const double radius = std::hypot(ray.position_m.x, ray.position_m.y);
+    const double radius = std::hypot(position.x, position.y);
     if (radius < mirror.inner_radius_m || radius > mirror.outer_radius_m)
       return std::nullopt;
-    return make_hit((mirror.vertex_z_m +
-                     mirror.surface.sag(std::hypot(ray.position_m.x, ray.position_m.y)) -
-                     ray.position_m.z) /
-                    direction->z);
+    return make_hit((mirror.vertex_z_m + mirror.surface.sag(radius) - position.z) / direction->z);
   }
-  const long double projection = static_cast<long double>(ray.position_m.x) * direction->x +
-                                 static_cast<long double>(ray.position_m.y) * direction->y;
-  const long double radial = static_cast<long double>(ray.position_m.x) * ray.position_m.x +
-                             static_cast<long double>(ray.position_m.y) * ray.position_m.y;
+  const long double projection = static_cast<long double>(position.x) * direction->x +
+                                 static_cast<long double>(position.y) * direction->y;
+  const long double radial = static_cast<long double>(position.x) * position.x +
+                             static_cast<long double>(position.y) * position.y;
   const long double radius_squared =
       static_cast<long double>(mirror.outer_radius_m) * mirror.outer_radius_m;
   const long double discriminant = projection * projection - transverse * (radial - radius_squared);
   if (discriminant < 0)
     return std::nullopt;
-  const long double low = std::max(static_cast<long double>(minimum_t_m),
+  const long double low = std::max(static_cast<long double>(minimum_local),
                                    (-projection - std::sqrt(discriminant)) / transverse);
   const long double high = (-projection + std::sqrt(discriminant)) / transverse;
   if (high < low)
@@ -144,8 +152,8 @@ intersect_axisymmetric_mirror(const Ray &ray, const AxisymmetricMirror &mirror, 
   if (high == low)
     return make_hit(static_cast<double>(low));
   const long double span = high - low;
-  const long double px = ray.position_m.x + low * direction->x;
-  const long double py = ray.position_m.y + low * direction->y;
+  const long double px = position.x + low * direction->x;
+  const long double py = position.y + low * direction->y;
   const long double vx = span * direction->x, vy = span * direction->y;
   const long double scale_squared =
       static_cast<long double>(mirror.surface.radial_scale_m) * mirror.surface.radial_scale_m;
@@ -165,7 +173,7 @@ intersect_axisymmetric_mirror(const Ray &ray, const AxisymmetricMirror &mirror, 
         next[j + k] += power[j] * q[k];
     power = next;
   }
-  polynomial[0] += ray.position_m.z + low * direction->z - mirror.vertex_z_m;
+  polynomial[0] += position.z + low * direction->z - mirror.vertex_z_m;
   polynomial[1] += span * direction->z;
   for (const auto coefficient : polynomial)
     if (!std::isfinite(coefficient)) {
@@ -174,9 +182,39 @@ intersect_axisymmetric_mirror(const Ray &ray, const AxisymmetricMirror &mirror, 
       return std::nullopt;
     }
   const auto roots = detail::polynomial_roots_unit_interval(polynomial, 24);
-  for (std::size_t i = 0; i < roots.count; ++i)
-    if (auto hit = make_hit(static_cast<double>(low + span * roots.values[i])))
+  for (std::size_t i = 0; i < roots.count; ++i) {
+    double distance = static_cast<double>(low + span * roots.values[i]);
+    const long double left =
+        i == 0 ? low : low + span * (roots.values[i - 1] + roots.values[i]) / 2;
+    const long double right =
+        i + 1 == roots.count ? high : low + span * (roots.values[i] + roots.values[i + 1]) / 2;
+    // Polynomial expansion can lose precision for high-order prescriptions.
+    // Refine against the original sag equation within this isolated root's
+    // neighbourhood, retaining the existing physical residual tolerance.
+    for (int iteration = 0; iteration < 8; ++iteration) {
+      const Vec3 point{std::fma(distance, direction->x, position.x),
+                       std::fma(distance, direction->y, position.y),
+                       std::fma(distance, direction->z, position.z)};
+      const double radius = std::hypot(point.x, point.y);
+      const double sag = mirror.vertex_z_m + mirror.surface.sag(radius);
+      const double residual = point.z - sag;
+      if (!std::isfinite(residual) || std::abs(residual) <= 1.e-10 * std::max(1.0, std::abs(sag)))
+        break;
+      const double derivative =
+          direction->z - (radius > kEpsilon
+                              ? mirror.surface.radial_slope(radius) *
+                                    (point.x * direction->x + point.y * direction->y) / radius
+                              : 0.0);
+      if (derivative == 0 || !std::isfinite(derivative))
+        break;
+      const double next = distance - residual / derivative;
+      if (!std::isfinite(next) || next < left || next > right || next == distance)
+        break;
+      distance = next;
+    }
+    if (auto hit = make_hit(distance))
       return hit;
+  }
   return std::nullopt;
 }
 

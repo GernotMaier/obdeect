@@ -79,6 +79,9 @@ obdeect-plot-reference --view pupil \
 For a paper-style optical cross-section or a full-size CAD-like orthographic
 view, select the corresponding model-derived renderer. `compiled-structure`,
 `compiled-mirror`, and `compiled-3d` remain supported aliases.
+`--view structure` also renders the compiled optical section when
+`--optical-model-json` is supplied. Without an optical model, `structure` draws
+the selected analytic reference outline; it is not an imported mechanical structure.
 
 ```sh
 obdeect-plot-reference --view section --section-plane xz \
@@ -157,7 +160,9 @@ identity and the selection seed. `--colour-by wavelength`, `arrival-time`, or
 `incidence-angle` requires the corresponding recorded finite values and shows a
 numeric colour bar with units. `--view pupil --colour-by facet-z` colours aperture
 centre height; `--label-panels` labels at most 300 segmented primary panels.
-PNG and PDF use the headless Matplotlib renderer. Geometry SVGs have fixed artist
+Plots always write to the output file without opening a window, regardless of
+the configured Matplotlib backend. PNG and PDF use a file-only Matplotlib canvas.
+Geometry SVGs have fixed artist
 IDs and no creation timestamp; repeated exports are byte-stable for the same
 inputs, options, and Matplotlib version. `--view focal-plane --output psf.svg`
 uses the existing deterministic dependency-free weighted PSF summary.
@@ -189,6 +194,30 @@ obdeect-psf derive --input lst-star.csv --output lst-star-psf.json
 obdeect-plot-reference --input lst-star.csv --view focal-plane \
   --optical-model-json lst.optical-model.json --output lst-star-psf.png
 ```
+
+### Dual-mirror focal-surface PSF comparison
+
+Include the measured mirror scatter with an explicit seed when compiling the
+optical model. Regenerate older artifacts to include the camera housing and
+configured secondary shadow.
+
+```sh
+obdeect-compile-optical-model --source-root "$OBDEECT_SIMULATION_MODELS_PATH" \
+  --model SSTS-design --version "$OBDEECT_SIMULATION_MODELS_VERSION" \
+  --scatter-seed 21 --output ssts.optical-model.json
+obdeect-simtools-raytrace --optical-model ssts.optical-model.json --source star \
+  --distance-m 10000000 --field-x-deg 3 --photons 100000 \
+  --focal-surface-image --output ssts-image.csv
+```
+
+`--focal-surface-image` measures the continuous focal prescription before pixel
+acceptance and camera response, matching the sim_telarray imaging-list boundary.
+It supports compiled axisymmetric optical models and records the boundary in the
+CSV. This diagnostic does not satisfy the production-readiness gate. The normal
+trace command retains the compiled detector and camera response.
+
+The [SST PSF comparison](review/sst-psf-comparison.md) records the validation and
+remaining limits.
 
 ### Nearby illuminator, laser, and arrival time
 

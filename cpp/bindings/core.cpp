@@ -39,12 +39,12 @@ nb::object array(std::vector<T> &values, const nb::capsule &owner, std::size_t n
 class OpticalModel {
 public:
   explicit OpticalModel(const std::string &path) {
-    segmented_ = obdeect::read_segmented_optical_model(path);
-    if (!segmented_)
-      axisymmetric_ = obdeect::read_axisymmetric_optical_model(path);
-    if (!segmented_ && !axisymmetric_)
-      if (auto model = obdeect::read_nonsequential_optical_model(path))
-        nonsequential_.emplace(std::move(*model));
+    if (auto loaded = obdeect::read_optical_model(path)) {
+      segmented_ = std::move(loaded->segmented);
+      axisymmetric_ = std::move(loaded->axisymmetric);
+      if (loaded->nonsequential)
+        nonsequential_.emplace(std::move(*loaded->nonsequential));
+    }
     if (!segmented_ && !axisymmetric_ && !nonsequential_)
       throw nb::value_error("Cannot load optical model: invalid schema, content hash or geometry");
   }

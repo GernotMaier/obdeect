@@ -33,6 +33,8 @@ void usage() {
       << "  --optical-model FILE  compiled obdeect optical-model JSON\n"
       << "  --require-production-ready  reject optical models lacking a completed production "
          "report\n"
+      << "  --focal-surface-image  axisymmetric imaging diagnostic before pixel acceptance and "
+         "camera response\n"
       << "  --photon-input FILE --input-block-size N  replay telescope-local CSV photons\n"
       << "  --photon-output FILE  save every resolved input photon before optical tracing\n"
       << "  --interactions-output FILE --interaction-record-limit N --interaction-byte-limit N\n"
@@ -86,6 +88,7 @@ int main(int argc, char **argv) {
   bool launch_pupil_radius_set = false;
   bool require_production_ready = false;
   bool production_ready = false;
+  bool focal_surface_image = false;
   std::string interactions_output_path;
   std::size_t interaction_record_limit = 10000, interaction_byte_limit = 4 * 1024 * 1024;
   std::string photon_input_path;
@@ -119,6 +122,10 @@ int main(int argc, char **argv) {
     }
     if (std::string{argv[index]} == "--require-production-ready") {
       require_production_ready = true;
+      continue;
+    }
+    if (std::string{argv[index]} == "--focal-surface-image") {
+      focal_surface_image = true;
       continue;
     }
     if (std::string{argv[index]} == "-h" || std::string{argv[index]} == "--help") {
@@ -207,15 +214,26 @@ int main(int argc, char **argv) {
   }
   const auto model =
       optical_model_path.empty() ? obdeect::ctao_reference_model(telescope) : std::nullopt;
-  auto imported_optical_model = optical_model_path.empty()
-                                    ? std::optional<obdeect::CompiledSegmentedOpticalModel>{}
-                                    : obdeect::read_segmented_optical_model(optical_model_path);
-  const auto axisymmetric_optical_model =
-      optical_model_path.empty() ? std::optional<obdeect::AxisymmetricOpticalModel>{}
-                                 : obdeect::read_axisymmetric_optical_model(optical_model_path);
-  const auto nonsequential_optical_model =
-      optical_model_path.empty() ? std::optional<obdeect::CompiledOpticalModel>{}
-                                 : obdeect::read_nonsequential_optical_model(optical_model_path);
+  auto loaded = optical_model_path.empty() ? std::optional<obdeect::LoadedOpticalModel>{}
+                                           : obdeect::read_optical_model(optical_model_path);
+  auto imported_optical_model = loaded ? std::move(loaded->segmented)
+                                       : std::optional<obdeect::CompiledSegmentedOpticalModel>{};
+  auto axisymmetric_optical_model =
+      loaded ? std::move(loaded->axisymmetric) : std::optional<obdeect::AxisymmetricOpticalModel>{};
+  auto nonsequential_optical_model =
+      loaded ? std::move(loaded->nonsequential) : std::optional<obdeect::CompiledOpticalModel>{};
+  production_ready = loaded && loaded->production_ready;
+  if (focal_surface_image) {
+    if (!axisymmetric_optical_model) {
+      std::cerr << "--focal-surface-image requires a compiled axisymmetric optical model\n";
+      return 2;
+    }
+    // An imaging-list diagnostic ends on the continuous focal prescription,
+    // before pixel acceptance and measured camera response are applied.
+    axisymmetric_optical_model->detector_planes.reset();
+    axisymmetric_optical_model->camera_response.reset();
+    production_ready = false;
+  }
   if (nonsequential_optical_model && photon_input_path.empty() && !launch_pupil_radius_set) {
     std::cerr
         << "nonsequential optical models require --photon-input or an explicit --pupil-radius-m\n";
@@ -255,15 +273,6 @@ int main(int argc, char **argv) {
       aliases(photon_output_path, interactions_output_path)) {
     std::cerr << "output files must not alias each other, the photon input, or the optical model\n";
     return 2;
-  }
-  if (!optical_model_path.empty()) {
-    const auto root = obdeect::detail::read_json(optical_model_path);
-    const auto report = root ? root->find("report") : nullptr;
-    const auto readiness = report ? report->find("production_trace_ready") : nullptr;
-    const auto blockers = report ? report->find("trace_blockers") : nullptr;
-    production_ready =
-        readiness && readiness->kind == obdeect::json::Value::Kind::boolean && readiness->boolean &&
-        blockers && blockers->kind == obdeect::json::Value::Kind::array && blockers->array.empty();
   }
   // A reviewed artifact's qualification does not cover diagnostic geometry overrides.
   production_ready = production_ready && !panel_id && !screen_x_set;
@@ -399,7 +408,7 @@ int main(int argc, char **argv) {
     output << "x" << point << "_m,y" << point << "_m,z" << point << "_m" << ',';
   output << "run_id,event_id,array_id,telescope_id,bunch_id,arrival_time_ns,terminal_surface_id,"
             "final_dx,final_dy,final_dz,interaction_surface_ids,response_loss_fraction,terminal_"
-            "loss_fraction,optical_path_m\n";
+            "loss_fraction,optical_path_m,detector_boundary\n";
   std::size_t detected = 0;
   std::size_t traced_count = 0;
   std::unique_ptr<obdeect::CsvPhotonReader> reader;
@@ -524,8 +533,8 @@ int main(int argc, char **argv) {
         }
         output << ',' << 1.0 - path.surviving_throughput << ','
                << (path.status == obdeect::PhotonStatus::detected ? 0.0 : path.surviving_throughput)
-               << ',' << (path.material_transport ? path.optical_path_m : path.path_length_m)
-               << '\n';
+               << ',' << (path.material_transport ? path.optical_path_m : path.path_length_m) << ','
+               << (focal_surface_image ? "continuous_focal_surface" : "compiled_detector") << '\n';
         return true;
       };
       if (nonsequential_optical_model) {
@@ -570,6 +579,8 @@ int main(int argc, char **argv) {
               << " photons, detected " << detected
               << (production_ready ? ", production readiness declared"
                                    : ", nominal optical transport; production unvalidated");
+    if (focal_surface_image)
+      std::cout << "; continuous focal-surface imaging, camera response omitted";
     if (panel_id)
       std::cout << ", panel " << *panel_id;
     std::cout << "\n";
