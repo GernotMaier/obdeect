@@ -1,1 +1,0 @@
-Add model-derived telescope plates, finite pupil and assembly views, recorded path overlays, deterministic selection and SVG export, and entrance-weight loss maps with factual component filters. Native plotting and PSF analysis share the optical-arrival validator.
