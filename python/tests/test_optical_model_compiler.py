@@ -144,6 +144,19 @@ class TestOpticalModelCompiler(unittest.TestCase):
         self.assertEqual(
             [item["role"] for item in dual["components"]], ["primary", "secondary", "detector"]
         )
+        dual = build_plot_geometry(
+            {
+                "kind": "axisymmetric",
+                "primary_to_secondary_planes": [{"id": 10}],
+                "incoming_obscurer_planes": [{"id": 11}],
+                "primary_to_secondary_cylinders": [{"id": 12}],
+            },
+            {"trace_blockers": []},
+        )
+        self.assertEqual(
+            [(item["id"], item["role"]) for item in dual["components"][-3:]],
+            [(10, "obscurer"), (11, "obscurer"), (12, "opaque_cylinder")],
+        )
 
     def test_trace_readiness_requires_resolved_optical_model(self):
         require_trace_ready({"report": {"trace_blockers": [], "trace_ready": True}})

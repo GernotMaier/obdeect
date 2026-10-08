@@ -196,7 +196,7 @@ class PlotPolygon:
     """One finite compiled surface rendered as an exact boundary polygon."""
 
     identifier: int
-    role: Literal["primary", "secondary", "detector"]
+    role: Literal["primary", "secondary", "detector", "obscurer"]
     vertices_m: tuple[tuple[float, float, float], ...]
 
 
@@ -307,7 +307,7 @@ def _polygon_from_surface(
     surface: dict,
     *,
     identifier: int,
-    role: Literal["primary", "secondary", "detector"],
+    role: Literal["primary", "secondary", "detector", "obscurer"],
     description: str,
 ) -> PlotPolygon:
     """Build one finite aperture polygon from a serialised tangent frame."""
@@ -502,6 +502,25 @@ def _camera_pixel_polygons(optical_model: dict) -> tuple[PlotPixel, ...]:
     return tuple(result)
 
 
+def _plot_obscurer(obscurer: dict, index: int) -> PlotObscurer:
+    """Validate one finite opaque cylinder for plotting."""
+    try:
+        identifier = int(obscurer["id"])
+        first = _vector3(obscurer["first_endpoint_m"], f"obscurer {index} first endpoint")
+        second = _vector3(obscurer["second_endpoint_m"], f"obscurer {index} second endpoint")
+        diameter = float(obscurer["diameter_m"])
+    except (KeyError, TypeError, ValueError) as error:
+        raise ValueError(f"invalid obscurer {index}") from error
+    if (
+        not 0 <= identifier < 4294967295
+        or not math.isfinite(diameter)
+        or diameter <= 0.0
+        or first == second
+    ):
+        raise ValueError(f"invalid obscurer {index}")
+    return PlotObscurer(identifier, first, second, diameter)
+
+
 def load_plot_optical_model(path: Path) -> PlotOpticalModel:
     """Load only finite geometry explicitly represented by a compiled model.
 
@@ -559,9 +578,18 @@ def load_plot_optical_model(path: Path) -> PlotOpticalModel:
                 else "detector",
                 "opaque_cylinder": "cylinder_obscurers",
             }.get(role)
-            if expected is None or component.get("source") != f"trace_model.{expected}":
+            allowed_sources = (
+                {"trace_model.primary_to_secondary_planes", "trace_model.incoming_obscurer_planes"}
+                if role == "obscurer" and kind == "axisymmetric"
+                else {"trace_model.primary_to_secondary_cylinders"}
+                if role == "opaque_cylinder" and kind == "axisymmetric"
+                else {f"trace_model.{expected}"}
+                if expected is not None
+                else set()
+            )
+            if component.get("source") not in allowed_sources:
                 raise ValueError(f"{path}: invalid plot_geometry component source")
-            source = trace_model.get(expected)
+            source = trace_model.get(component["source"].removeprefix("trace_model."))
             identifier = component.get("id")
             if (
                 not isinstance(identifier, int)
@@ -614,16 +642,9 @@ def load_plot_optical_model(path: Path) -> PlotOpticalModel:
                 )
                 for index, detector in enumerate(detectors)
             )
-            obscurer_rows = []
-            for index, obscurer in enumerate(obscurers):
-                first = _vector3(obscurer["first_endpoint_m"], f"obscurer {index} first endpoint")
-                second = _vector3(
-                    obscurer["second_endpoint_m"], f"obscurer {index} second endpoint"
-                )
-                diameter = float(obscurer["diameter_m"])
-                if not math.isfinite(diameter) or diameter <= 0.0 or first == second:
-                    raise ValueError(f"invalid obscurer {index}")
-                obscurer_rows.append(PlotObscurer(int(obscurer["id"]), first, second, diameter))
+            obscurer_rows = tuple(
+                _plot_obscurer(obscurer, index) for index, obscurer in enumerate(obscurers)
+            )
             identifiers = [polygon.identifier for polygon in polygons]
             identifiers.extend(obscurer.identifier for obscurer in obscurer_rows)
             if len(identifiers) != len(set(identifiers)):
@@ -640,6 +661,16 @@ def load_plot_optical_model(path: Path) -> PlotOpticalModel:
                 origin,
                 camera_pixels,
             )
+        obscurer_planes = tuple(
+            _polygon_from_surface(
+                plane,
+                identifier=plane["id"],
+                role="obscurer",
+                description="compiled obscurer plane",
+            )
+            for field in ("primary_to_secondary_planes", "incoming_obscurer_planes")
+            for plane in trace_model.get(field, [])
+        )
         surfaces = tuple(
             _axisymmetric_surface(trace_model[source], role)
             for source, role in (
@@ -663,7 +694,13 @@ def load_plot_optical_model(path: Path) -> PlotOpticalModel:
             )
             for plane in trace_model.get("detector_surfaces", [])
         )
+        mask_polygons += obscurer_planes
+        obscurer_cylinders = tuple(
+            _plot_obscurer(cylinder, index)
+            for index, cylinder in enumerate(trace_model.get("primary_to_secondary_cylinders", []))
+        )
         mask_ids = [polygon.identifier for polygon in mask_polygons]
+        mask_ids.extend(obscurer.identifier for obscurer in obscurer_cylinders)
         if len(mask_ids) != len(set(mask_ids)):
             raise ValueError("finite mask component IDs must be unique")
         return PlotOpticalModel(
@@ -672,7 +709,7 @@ def load_plot_optical_model(path: Path) -> PlotOpticalModel:
             model_sha,
             mask_polygons,
             surfaces,
-            (),
+            obscurer_cylinders,
             unavailable,
             legacy,
             origin,
@@ -733,7 +770,7 @@ _ROLE_STYLE = {
     "primary": {"color": "#607d8b", "label": "M1"},
     "secondary": {"color": "#455a64", "label": "M2"},
     "detector": {"color": "#e69f00", "label": "detector"},
-    "obscurer": {"color": "#a14b3b", "label": "opaque cylinder"},
+    "obscurer": {"color": "#a14b3b", "label": "obscurer"},
 }
 
 
@@ -845,7 +882,7 @@ def _draw_optical_model_assembly(axis, optical_model: PlotOpticalModel) -> None:
     """Draw a restrained orthographic 3-D optical model without synthetic hardware."""
     from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 
-    for role in ("primary", "secondary", "detector"):
+    for role in ("primary", "secondary", "detector", "obscurer"):
         polygons = [
             polygon.vertices_m for polygon in optical_model.polygons if polygon.role == role
         ]
@@ -923,7 +960,7 @@ def _cylinder_footprint(obscurer: PlotObscurer, horizontal: int, vertical: int):
 def _draw_optical_model_section(axis, optical_model: PlotOpticalModel, coordinate: int = 0) -> None:
     """Draw finite surface boundaries in one telescope-frame axial projection."""
     horizontal = "xy"[coordinate]
-    for role in ("primary", "secondary", "detector"):
+    for role in ("primary", "secondary", "detector", "obscurer"):
         style = _ROLE_STYLE[role]
         polygons = [item for item in optical_model.polygons if item.role == role]
         for index, polygon in enumerate(polygons):
@@ -1009,7 +1046,7 @@ def _draw_optical_model_pupil(
     from matplotlib.collections import PolyCollection
     from matplotlib.patches import Circle
 
-    for role in ("primary", "secondary", "detector"):
+    for role in ("primary", "secondary", "detector", "obscurer"):
         polygons = [
             [(vertex[0], vertex[1]) for vertex in polygon.vertices_m]
             for polygon in optical_model.polygons

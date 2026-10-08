@@ -114,6 +114,30 @@ class DiagnosticTests(unittest.TestCase):
             "secondary": surface,
             "detector": surface,
             "detector_surfaces": [plane],
+            "primary_to_secondary_planes": [
+                {
+                    **plane,
+                    "id": 11,
+                    "centre_m": [0, 0, 2],
+                    "diameter_m": 1.0,
+                }
+            ],
+            "incoming_obscurer_planes": [
+                {
+                    **plane,
+                    "id": 12,
+                    "centre_m": [0, 0, 3],
+                    "diameter_m": 1.0,
+                }
+            ],
+            "primary_to_secondary_cylinders": [
+                {
+                    "id": 13,
+                    "first_endpoint_m": [0, 0, 1],
+                    "second_endpoint_m": [0, 0, 2],
+                    "diameter_m": 0.2,
+                }
+            ],
         }
         fixture["trace_model"] = trace
         fixture["camera"] = {"entrance_surfaces": [plane]}
@@ -125,6 +149,11 @@ class DiagnosticTests(unittest.TestCase):
         )
         self.assertEqual(compiled.polygons[0].identifier, 10)
         self.assertEqual(compiled.camera_pixels[0].identifier, 42)
+        self.assertEqual(
+            [(item.identifier, item.role) for item in compiled.polygons[1:]],
+            [(11, "obscurer"), (12, "obscurer")],
+        )
+        self.assertEqual(compiled.obscurers[0].identifier, 13)
         self.assertEqual(
             compiled.camera_pixels[0].vertices_xy_m,
             tuple((p[0], p[1]) for p in compiled.polygons[0].vertices_m),

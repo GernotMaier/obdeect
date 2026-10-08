@@ -1222,6 +1222,19 @@ def build_plot_geometry(trace_model: dict[str, Any], report: dict[str, Any]) -> 
             {"id": item["id"], "role": "detector", "source": "trace_model.detector_surfaces"}
             for item in trace_model.get("detector_surfaces", [])
         )
+        for field in ("primary_to_secondary_planes", "incoming_obscurer_planes"):
+            components.extend(
+                {"id": item["id"], "role": "obscurer", "source": f"trace_model.{field}"}
+                for item in trace_model.get(field, [])
+            )
+        components.extend(
+            {
+                "id": item["id"],
+                "role": "opaque_cylinder",
+                "source": "trace_model.primary_to_secondary_cylinders",
+            }
+            for item in trace_model.get("primary_to_secondary_cylinders", [])
+        )
     unavailable = []
     if any("physical detector surfaces and materials" in item for item in report["trace_blockers"]):
         unavailable.append("physical_pixel_boundaries")
