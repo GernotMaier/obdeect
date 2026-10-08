@@ -39,6 +39,9 @@ validation matrix for architectural or scientific changes.
 ## Changes and validation
 
 - Make the narrowest complete change and preserve unrelated work.
+- Do not add incidental `docs/changes/` snippets or changelog fragments. Only
+  create them when the user explicitly requests release-note or changelog
+  material.
 - Add or update a focused test for every behavioural change. Establish analytic
   kernel and primitive tests before optical-model, cross-tool, or performance tests.
 - Preserve results across photon ordering, blocks, and thread counts. Record
