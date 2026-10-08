@@ -1133,16 +1133,20 @@ trace_axisymmetric_optical_model(const Ray &input, std::uint64_t photon_id,
     record.final_direction = ray.direction;
     return record;
   }
-  auto obscurer = optical_model.primary_to_secondary_planes
-                      ? optical_model.primary_to_secondary_planes->intersect(ray)
-                      : std::optional<DetectorSurfaceHit>{};
+  std::optional<DetectorSurfaceHit> obscurer{};
+  if (optical_model.primary_to_secondary_planes)
+    obscurer = optical_model.primary_to_secondary_planes->intersect(ray);
   for (const auto &cylinder : optical_model.primary_to_secondary_cylinders) {
     const auto distance = intersect_closed_finite_cylinder(
         ray, cylinder.first_endpoint_m, cylinder.second_endpoint_m, cylinder.diameter_m * 0.5);
-    if (!distance ||
-        (obscurer && (*distance > obscurer->distance_m ||
-                      (*distance == obscurer->distance_m && cylinder.id >= obscurer->surface_id))))
+    if (!distance)
       continue;
+    if (obscurer) {
+      const auto &current = *obscurer;
+      if (*distance > current.distance_m ||
+          (*distance == current.distance_m && cylinder.id >= current.surface_id))
+        continue;
+    }
     const Vec3 point = ray.position_m + ray.direction * *distance;
     const Vec3 axis = *normalised_checked(cylinder.second_endpoint_m - cylinder.first_endpoint_m);
     const double projection = dot(point - cylinder.first_endpoint_m, axis);
@@ -1154,19 +1158,22 @@ trace_axisymmetric_optical_model(const Ray &input, std::uint64_t photon_id,
             : *normalised_checked(point - cylinder.first_endpoint_m - axis * projection);
     obscurer = DetectorSurfaceHit{cylinder.id, *distance, point, normal};
   }
-  if (obscurer && (!secondary || obscurer->distance_m < secondary->distance_m)) {
-    record.points_m[2] = obscurer->point_m;
-    record.point_count = 3;
-    record.path_length_m += obscurer->distance_m;
-    record.status = PhotonStatus::blocked_obscurer;
-    record.terminal_surface_id = obscurer->surface_id;
-    record.interaction_surface_ids[1] = obscurer->surface_id;
-    record.interaction_kinds[1] = OpticalInteractionKind::obscurer;
-    record.interaction_normals[1] = obscurer->unit_normal;
-    record.interaction_incoming_directions[1] = ray.direction;
-    record.interaction_outgoing_directions[1] = ray.direction;
-    record.interaction_throughput[1] = record.surviving_throughput;
-    return record;
+  if (obscurer) {
+    const auto hit = *obscurer;
+    if (!secondary || hit.distance_m < secondary->distance_m) {
+      record.points_m[2] = hit.point_m;
+      record.point_count = 3;
+      record.path_length_m += hit.distance_m;
+      record.status = PhotonStatus::blocked_obscurer;
+      record.terminal_surface_id = hit.surface_id;
+      record.interaction_surface_ids[1] = hit.surface_id;
+      record.interaction_kinds[1] = OpticalInteractionKind::obscurer;
+      record.interaction_normals[1] = hit.unit_normal;
+      record.interaction_incoming_directions[1] = ray.direction;
+      record.interaction_outgoing_directions[1] = ray.direction;
+      record.interaction_throughput[1] = record.surviving_throughput;
+      return record;
+    }
   }
   if (!secondary) {
     record.status = PhotonStatus::missed_secondary;
