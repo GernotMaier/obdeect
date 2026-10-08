@@ -177,6 +177,8 @@ if(OBDEECT_BUILD_TESTING)
 
   obdeect_add_test_target(obdeect_segmented_optical_model_tests cpp/tests/test_segmented_optical_model.cpp)
 
+  obdeect_add_test_target(obdeect_json_tests cpp/tests/test_json.cpp)
+
   obdeect_add_test_target(obdeect_optical_model_file_tests cpp/tests/test_optical_model_file.cpp)
 
   obdeect_add_test_target(obdeect_optical_model_tests cpp/tests/test_optical_model.cpp)

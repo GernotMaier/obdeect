@@ -18,7 +18,6 @@
 #include <map>
 #include <numbers>
 #include <optional>
-#include <sstream>
 #include <string>
 #include <string_view>
 #include <unordered_set>
@@ -42,11 +41,14 @@ struct AxisymmetricOpticalModel {
   std::optional<CompiledDetectorPlanes> detector_planes{};
   std::optional<MirrorScatter> primary_scatter{}, secondary_scatter{};
   std::optional<CameraResponse> camera_response{};
+  std::optional<CompiledDetectorPlanes> primary_to_secondary_planes{};
+  std::vector<ImportedCylinderObscurer> primary_to_secondary_cylinders{};
+  std::optional<CompiledDetectorPlanes> incoming_obscurer_planes{};
 };
 
 namespace detail {
 
-inline void append_json_string(std::string &output, std::string_view value) {
+template <class Output> inline void append_json_string(Output &output, std::string_view value) {
   static constexpr char hex[] = "0123456789abcdef";
   output.push_back('"');
   for (const unsigned char character : value) {
@@ -86,21 +88,23 @@ inline void append_json_string(std::string &output, std::string_view value) {
   output.push_back('"');
 }
 
-inline void append_canonical_json(const json::Value &value, std::string &output,
+template <class Output>
+inline void append_canonical_json(const json::Value &value, Output &output,
                                   bool omit_root_hash = false, bool root = true) {
-  switch (value.kind) {
+  switch (value.kind()) {
   case json::Value::Kind::null:
     output += "null";
     break;
   case json::Value::Kind::boolean:
-    output += value.boolean ? "true" : "false";
+    output += value.boolean() ? "true" : "false";
     break;
   case json::Value::Kind::number: {
-    if (!value.number_text.empty()) {
-      output += value.number_text;
+    if (!value.number_text().empty()) {
+      output += value.number_text();
     } else {
       std::array<char, 64> buffer{};
-      const auto result = std::to_chars(buffer.data(), buffer.data() + buffer.size(), value.number);
+      const auto result =
+          std::to_chars(buffer.data(), buffer.data() + buffer.size(), value.number());
       if (result.ec != std::errc{})
         return;
       output.append(buffer.data(), result.ptr);
@@ -108,21 +112,21 @@ inline void append_canonical_json(const json::Value &value, std::string &output,
     break;
   }
   case json::Value::Kind::string:
-    append_json_string(output, value.string);
+    append_json_string(output, value.string());
     break;
   case json::Value::Kind::array:
     output.push_back('[');
-    for (std::size_t index = 0; index < value.array.size(); ++index) {
+    for (std::size_t index = 0; index < value.array().size(); ++index) {
       if (index != 0)
         output.push_back(',');
-      append_canonical_json(value.array[index], output, false, false);
+      append_canonical_json(value.array()[index], output, false, false);
     }
     output.push_back(']');
     break;
   case json::Value::Kind::object: {
     std::vector<const std::pair<std::string, json::Value> *> entries;
-    entries.reserve(value.object.size());
-    for (const auto &entry : value.object) {
+    entries.reserve(value.object().size());
+    for (const auto &entry : value.object()) {
       if (root && omit_root_hash && entry.first == "optical_model_sha256")
         continue;
       entries.push_back(&entry);
@@ -259,14 +263,35 @@ private:
   return digest.finish();
 }
 
+// Feed canonical tokens directly into SHA-256 instead of allocating a second
+// serialization of the complete optical-model artifact.
+class CanonicalHashOutput {
+public:
+  void operator+=(std::string_view token) { digest_.update(token); }
+  void push_back(char character) { digest_.update(std::string_view{&character, 1}); }
+  void append(const char *first, const char *last) {
+    digest_.update(std::string_view{first, static_cast<std::size_t>(last - first)});
+  }
+  std::string finish() { return digest_.finish(); }
+
+private:
+  Sha256 digest_;
+};
+
+[[nodiscard]] inline std::string canonical_json_hash(const json::Value &root) {
+  CanonicalHashOutput output;
+  append_canonical_json(root, output, true);
+  return output.finish();
+}
+
 [[nodiscard]] inline const json::Value *field(const json::Value &value, std::string_view name) {
   return value.find(name);
 }
 
 [[nodiscard]] inline bool fields_supported(const json::Value &value,
                                            std::initializer_list<std::string_view> allowed) {
-  return value.kind == json::Value::Kind::object &&
-         std::all_of(value.object.begin(), value.object.end(), [&](const auto &field) {
+  return value.kind() == json::Value::Kind::object &&
+         std::all_of(value.object().begin(), value.object().end(), [&](const auto &field) {
            return std::find(allowed.begin(), allowed.end(), field.first) != allowed.end();
          });
 }
@@ -274,15 +299,15 @@ private:
 [[nodiscard]] inline const std::string *string_field(const json::Value &value,
                                                      std::string_view name) {
   const auto *result = field(value, name);
-  return result && result->kind == json::Value::Kind::string ? &result->string : nullptr;
+  return result && result->kind() == json::Value::Kind::string ? &result->string() : nullptr;
 }
 
 [[nodiscard]] inline std::optional<double> number_field(const json::Value &value,
                                                         std::string_view name) {
   const auto *result = field(value, name);
-  if (!result || result->kind != json::Value::Kind::number || !std::isfinite(result->number))
+  if (!result || result->kind() != json::Value::Kind::number || !std::isfinite(result->number()))
     return std::nullopt;
-  return result->number;
+  return result->number();
 }
 
 [[nodiscard]] inline std::optional<std::uint32_t> uint_field(const json::Value &value,
@@ -297,15 +322,15 @@ private:
 [[nodiscard]] inline std::optional<Vec3> vec3_field(const json::Value &value,
                                                     std::string_view name) {
   const auto *result = field(value, name);
-  if (!result || result->kind != json::Value::Kind::array || result->array.size() != 3)
+  if (!result || result->kind() != json::Value::Kind::array || result->array().size() != 3)
     return std::nullopt;
   Vec3 vector{};
   double *components[] = {&vector.x, &vector.y, &vector.z};
   for (std::size_t index = 0; index < 3; ++index) {
-    if (result->array[index].kind != json::Value::Kind::number ||
-        !std::isfinite(result->array[index].number))
+    if (result->array()[index].kind() != json::Value::Kind::number ||
+        !std::isfinite(result->array()[index].number()))
       return std::nullopt;
-    *components[index] = result->array[index].number;
+    *components[index] = result->array()[index].number();
   }
   return vector;
 }
@@ -327,7 +352,7 @@ private:
 
 [[nodiscard]] inline std::optional<ModelProvenance> provenance(const json::Value &root) {
   const auto *source = field(root, "provenance");
-  if (!source || source->kind != json::Value::Kind::object)
+  if (!source || source->kind() != json::Value::Kind::object)
     return std::nullopt;
   const auto *model = string_field(*source, "model");
   const auto *version = string_field(*source, "model_version");
@@ -341,13 +366,13 @@ private:
 [[nodiscard]] inline std::optional<SpectralResponse> response_field(const json::Value &value,
                                                                     std::string_view name) {
   const auto *response = field(value, name);
-  if (!response || response->kind != json::Value::Kind::array)
+  if (!response || response->kind() != json::Value::Kind::array)
     return std::nullopt;
   SpectralResponse result;
   const bool angular =
-      !response->array.empty() && response->array.front().find("incidence_angle_deg");
+      !response->array().empty() && response->array().front().find("incidence_angle_deg");
   std::map<double, std::map<double, double>> grid;
-  for (const auto &entry : response->array) {
+  for (const auto &entry : response->array()) {
     if (!fields_supported(entry, {"wavelength_nm", "response", "incidence_angle_deg"}))
       return std::nullopt;
     const auto wavelength = number_field(entry, "wavelength_nm");
@@ -420,10 +445,10 @@ private:
       return std::nullopt;
   }
   if (const auto *knots = value->find("lightguide_efficiency")) {
-    if (knots->kind != json::Value::Kind::array)
+    if (knots->kind() != json::Value::Kind::array)
       return std::nullopt;
     CameraIncidenceResponse guide;
-    for (const auto &knot : knots->array) {
+    for (const auto &knot : knots->array()) {
       const auto angle = number_field(knot, "incidence_angle_deg"),
                  response = number_field(knot, "response");
       if (!angle || !response || !fields_supported(knot, {"incidence_angle_deg", "response"}))
@@ -437,14 +462,14 @@ private:
 }
 
 [[nodiscard]] inline std::optional<std::vector<ImportedDetectorSurface>>
-detector_fields(const json::Value &trace) {
-  const auto *entries = trace.find("detector_surfaces");
+detector_fields(const json::Value &trace, std::string_view name = "detector_surfaces") {
+  const auto *entries = trace.find(name);
   if (!entries)
     return std::vector<ImportedDetectorSurface>{};
-  if (entries->kind != json::Value::Kind::array)
+  if (entries->kind() != json::Value::Kind::array)
     return std::nullopt;
   std::vector<ImportedDetectorSurface> result;
-  for (const auto &entry : entries->array) {
+  for (const auto &entry : entries->array()) {
     if (!fields_supported(entry, {"id", "centre_m", "normal", "tangent", "diameter_m", "shape",
                                   "enabled", "source_pixel_id", "source_type_id"}))
       return std::nullopt;
@@ -452,7 +477,7 @@ detector_fields(const json::Value &trace) {
       if (entry.find(name) && !uint_field(entry, name))
         return std::nullopt;
     if (const auto *enabled = entry.find("enabled"))
-      if (enabled->kind != json::Value::Kind::boolean || !enabled->boolean)
+      if (enabled->kind() != json::Value::Kind::boolean || !enabled->boolean())
         return std::nullopt;
     const auto id = uint_field(entry, "id");
     const auto centre = vec3_field(entry, "centre_m");
@@ -479,7 +504,7 @@ axisymmetric_surface(const json::Value &value) {
   const auto scale = number_field(value, "radial_scale_m");
   const auto *coefficients = field(value, "coefficient_m");
   if (!vertex || !inner || !outer || !scale || !coefficients ||
-      coefficients->kind != json::Value::Kind::array || coefficients->array.size() != 13)
+      coefficients->kind() != json::Value::Kind::array || coefficients->array().size() != 13)
     return std::nullopt;
   AxisymmetricMirror result{};
   result.vertex_z_m = *vertex;
@@ -487,10 +512,10 @@ axisymmetric_surface(const json::Value &value) {
   result.outer_radius_m = *outer;
   result.surface.radial_scale_m = *scale;
   for (std::size_t index = 0; index < result.surface.coefficient_m.size(); ++index) {
-    const auto &coefficient = coefficients->array[index];
-    if (coefficient.kind != json::Value::Kind::number || !std::isfinite(coefficient.number))
+    const auto &coefficient = coefficients->array()[index];
+    if (coefficient.kind() != json::Value::Kind::number || !std::isfinite(coefficient.number()))
       return std::nullopt;
-    result.surface.coefficient_m[index] = coefficient.number;
+    result.surface.coefficient_m[index] = coefficient.number();
   }
   return is_valid(result) ? std::optional{result} : std::nullopt;
 }
@@ -500,10 +525,10 @@ segment_fields(const json::Value &trace, std::string_view name) {
   const auto *entries = trace.find(name);
   if (!entries)
     return std::vector<AxisymmetricSegment>{};
-  if (entries->kind != json::Value::Kind::array)
+  if (entries->kind() != json::Value::Kind::array)
     return std::nullopt;
   std::vector<AxisymmetricSegment> result;
-  for (const auto &entry : entries->array) {
+  for (const auto &entry : entries->array()) {
     const auto id = uint_field(entry, "id");
     const auto *shape = string_field(entry, "shape");
     if (!id || *id == PhotonResultBlock::kNoSurfaceId || !shape)
@@ -517,14 +542,14 @@ segment_fields(const json::Value &trace, std::string_view name) {
       const auto *centre = entry.find("centre_xy_m");
       const auto diameter = number_field(entry, "diameter_m");
       const auto rotation = number_field(entry, "rotation_deg");
-      if (!centre || centre->kind != json::Value::Kind::array || centre->array.size() != 2 ||
-          centre->array[0].kind != json::Value::Kind::number ||
-          centre->array[1].kind != json::Value::Kind::number ||
-          !std::isfinite(centre->array[0].number) || !std::isfinite(centre->array[1].number) ||
-          !diameter || *diameter <= 0 || !rotation)
+      if (!centre || centre->kind() != json::Value::Kind::array || centre->array().size() != 2 ||
+          centre->array()[0].kind() != json::Value::Kind::number ||
+          centre->array()[1].kind() != json::Value::Kind::number ||
+          !std::isfinite(centre->array()[0].number()) ||
+          !std::isfinite(centre->array()[1].number()) || !diameter || *diameter <= 0 || !rotation)
         return std::nullopt;
       segment.shape = AxisymmetricSegmentShape::hexagon;
-      segment.centre_m = {centre->array[0].number, centre->array[1].number, 0};
+      segment.centre_m = {centre->array()[0].number(), centre->array()[1].number(), 0};
       segment.diameter_m = *diameter;
       segment.rotation_rad = *rotation * radians_per_degree;
     } else if (*shape == "annular_sector") {
@@ -545,9 +570,9 @@ segment_fields(const json::Value &trace, std::string_view name) {
       segment.span_rad = *span * radians_per_degree;
       segment.gap_m = *gap;
       if (const auto *edge = entry.find("gap_at_start")) {
-        if (edge->kind != json::Value::Kind::boolean)
+        if (edge->kind() != json::Value::Kind::boolean)
           return std::nullopt;
-        segment.gap_at_start = edge->boolean;
+        segment.gap_at_start = edge->boolean();
       }
     } else
       return std::nullopt;
@@ -557,13 +582,21 @@ segment_fields(const json::Value &trace, std::string_view name) {
 }
 
 [[nodiscard]] inline std::optional<json::Value> read_json(const std::string &path) {
-  std::ifstream input(path);
-  if (!input)
-    return std::nullopt;
-  std::stringstream buffer;
-  buffer << input.rdbuf();
-  const auto root = json::Parser{buffer.str()}.parse();
-  if (!root || root->kind != json::Value::Kind::object || !string_field(*root, "format") ||
+  std::optional<json::Value> root;
+  {
+    std::ifstream input(path, std::ios::binary | std::ios::ate);
+    if (!input)
+      return std::nullopt;
+    const auto size = input.tellg();
+    if (size < 0)
+      return std::nullopt;
+    std::string document(static_cast<std::size_t>(size), '\0');
+    input.seekg(0);
+    if (!input.read(document.data(), static_cast<std::streamsize>(document.size())))
+      return std::nullopt;
+    root = json::Parser{document}.parse();
+  }
+  if (!root || root->kind() != json::Value::Kind::object || !string_field(*root, "format") ||
       *string_field(*root, "format") != "obdeect.compiled-optical-model.v1")
     return std::nullopt;
   const auto *hash = string_field(*root, "optical_model_sha256");
@@ -573,25 +606,20 @@ segment_fields(const json::Value &trace, std::string_view name) {
                     return !((character >= '0' && character <= '9') ||
                              (character >= 'a' && character <= 'f'));
                   }) ||
-      sha256(canonical_json_without_hash(*root)) != *hash) {
+      canonical_json_hash(*root) != *hash) {
     return std::nullopt;
   }
   return root;
 }
 
-} // namespace detail
-
 // Read the single versioned JSON artifact emitted by obdeect-compile-optical-model.
 // Its trace_model section is directly consumable; the remainder is retained for
 // provenance, validation and inspection.
 inline std::optional<CompiledSegmentedOpticalModel>
-read_segmented_optical_model(const std::string &path) {
-  const auto root = detail::read_json(path);
-  if (!root)
-    return std::nullopt;
-  const auto model_provenance = detail::provenance(*root);
-  const auto *trace = detail::field(*root, "trace_model");
-  if (!model_provenance || !trace || trace->kind != json::Value::Kind::object ||
+segmented_optical_model_from_json(const json::Value &root) {
+  const auto model_provenance = detail::provenance(root);
+  const auto *trace = detail::field(root, "trace_model");
+  if (!model_provenance || !trace || trace->kind() != json::Value::Kind::object ||
       !detail::string_field(*trace, "kind") ||
       *detail::string_field(*trace, "kind") != "segmented" ||
       !detail::fields_supported(*trace, {"kind", "primary_facets", "detector_surfaces",
@@ -602,12 +630,12 @@ read_segmented_optical_model(const std::string &path) {
   const auto *detector_values = detail::field(*trace, "detector_surfaces");
   const auto *obscurer_values = detail::field(*trace, "cylinder_obscurers");
   if (!facet_values || !detector_values || !obscurer_values ||
-      facet_values->kind != json::Value::Kind::array ||
-      detector_values->kind != json::Value::Kind::array ||
-      obscurer_values->kind != json::Value::Kind::array)
+      facet_values->kind() != json::Value::Kind::array ||
+      detector_values->kind() != json::Value::Kind::array ||
+      obscurer_values->kind() != json::Value::Kind::array)
     return std::nullopt;
   std::vector<ImportedFacet> facets;
-  for (const auto &value : facet_values->array) {
+  for (const auto &value : facet_values->array()) {
     if (!detail::fields_supported(value, {"id", "centre_m", "normal", "tangent", "diameter_m",
                                           "focal_length_m", "shape"}))
       return std::nullopt;
@@ -628,7 +656,7 @@ read_segmented_optical_model(const std::string &path) {
   if (!detectors)
     return std::nullopt;
   std::vector<ImportedCylinderObscurer> obscurers;
-  for (const auto &value : obscurer_values->array) {
+  for (const auto &value : obscurer_values->array()) {
     if (!detail::fields_supported(value,
                                   {"id", "first_endpoint_m", "second_endpoint_m", "diameter_m"}))
       return std::nullopt;
@@ -642,8 +670,8 @@ read_segmented_optical_model(const std::string &path) {
   }
   const auto *reflectivity_value = detail::field(*trace, "primary_reflectivity");
   const auto reflectivity = detail::response_field(*trace, "primary_reflectivity");
-  if ((reflectivity_value && reflectivity_value->kind != json::Value::Kind::array) ||
-      (reflectivity_value && !reflectivity_value->array.empty() && !reflectivity) ||
+  if ((reflectivity_value && reflectivity_value->kind() != json::Value::Kind::array) ||
+      (reflectivity_value && !reflectivity_value->array().empty() && !reflectivity) ||
       facets.empty() || detectors->empty())
     return std::nullopt;
   auto compiled = compile_segmented_optical_model({*model_provenance, std::move(facets), *detectors,
@@ -665,21 +693,19 @@ read_segmented_optical_model(const std::string &path) {
 }
 
 [[nodiscard]] inline std::optional<AxisymmetricOpticalModel>
-read_axisymmetric_optical_model(const std::string &path) {
-  const auto root = detail::read_json(path);
-  if (!root)
-    return std::nullopt;
-  const auto model_provenance = detail::provenance(*root);
-  const auto *trace = detail::field(*root, "trace_model");
-  if (!model_provenance || !trace || trace->kind != json::Value::Kind::object ||
+axisymmetric_optical_model_from_json(const json::Value &root) {
+  const auto model_provenance = detail::provenance(root);
+  const auto *trace = detail::field(root, "trace_model");
+  if (!model_provenance || !trace || trace->kind() != json::Value::Kind::object ||
       !detail::string_field(*trace, "kind") ||
       *detail::string_field(*trace, "kind") != "axisymmetric" ||
       !detail::fields_supported(
-          *trace,
-          {"kind", "primary", "secondary", "detector", "primary_segments", "secondary_segments",
-           "primary_surface_id", "secondary_surface_id", "detector_surface_id",
-           "block_incoming_secondary", "detector_surfaces", "primary_reflectivity",
-           "secondary_reflectivity", "primary_scatter", "secondary_scatter", "camera_response"}))
+          *trace, {"kind", "primary", "secondary", "detector", "primary_segments",
+                   "secondary_segments", "primary_surface_id", "secondary_surface_id",
+                   "detector_surface_id", "block_incoming_secondary", "detector_surfaces",
+                   "primary_reflectivity", "secondary_reflectivity", "primary_scatter",
+                   "secondary_scatter", "camera_response", "primary_to_secondary_planes",
+                   "primary_to_secondary_cylinders", "incoming_obscurer_planes"}))
     return std::nullopt;
   const auto *primary = detail::field(*trace, "primary");
   const auto *secondary = detail::field(*trace, "secondary");
@@ -693,10 +719,10 @@ read_axisymmetric_optical_model(const std::string &path) {
   const auto *secondary_response = detail::field(*trace, "secondary_reflectivity");
   const auto primary_reflectivity = detail::response_field(*trace, "primary_reflectivity");
   const auto secondary_reflectivity = detail::response_field(*trace, "secondary_reflectivity");
-  if ((primary_response && primary_response->kind != json::Value::Kind::array) ||
-      (secondary_response && secondary_response->kind != json::Value::Kind::array) ||
-      (primary_response && !primary_response->array.empty() && !primary_reflectivity) ||
-      (secondary_response && !secondary_response->array.empty() && !secondary_reflectivity) ||
+  if ((primary_response && primary_response->kind() != json::Value::Kind::array) ||
+      (secondary_response && secondary_response->kind() != json::Value::Kind::array) ||
+      (primary_response && !primary_response->array().empty() && !primary_reflectivity) ||
+      (secondary_response && !secondary_response->array().empty() && !secondary_reflectivity) ||
       !primary_surface || !secondary_surface || !detector_surface)
     return std::nullopt;
   auto primary_segments = detail::segment_fields(*trace, "primary_segments");
@@ -733,9 +759,9 @@ read_axisymmetric_optical_model(const std::string &path) {
     if (id != PhotonResultBlock::kNoSurfaceId && !segment_ids.insert(id).second)
       return std::nullopt;
   if (const auto *shadow = trace->find("block_incoming_secondary")) {
-    if (shadow->kind != json::Value::Kind::boolean)
+    if (shadow->kind() != json::Value::Kind::boolean)
       return std::nullopt;
-    model.block_incoming_secondary = shadow->boolean;
+    model.block_incoming_secondary = shadow->boolean();
   }
   const auto detectors = detail::detector_fields(*trace);
   if (!detectors)
@@ -749,6 +775,48 @@ read_axisymmetric_optical_model(const std::string &path) {
       return std::nullopt;
   }
   model.primary_scatter = detail::scatter_field(*trace, "primary_scatter");
+  const auto obscurer_planes = detail::detector_fields(*trace, "primary_to_secondary_planes");
+  if (!obscurer_planes)
+    return std::nullopt;
+  if (!obscurer_planes->empty()) {
+    for (const auto &plane : *obscurer_planes)
+      if (!segment_ids.insert(plane.id).second)
+        return std::nullopt;
+    model.primary_to_secondary_planes = compile_detector_planes(*obscurer_planes);
+    if (!model.primary_to_secondary_planes)
+      return std::nullopt;
+  }
+  if (const auto *entries = trace->find("primary_to_secondary_cylinders")) {
+    if (entries->kind() != json::Value::Kind::array)
+      return std::nullopt;
+    for (const auto &entry : entries->array()) {
+      if (!detail::fields_supported(entry,
+                                    {"id", "first_endpoint_m", "second_endpoint_m", "diameter_m"}))
+        return std::nullopt;
+      const auto id = detail::uint_field(entry, "id");
+      const auto first = detail::vec3_field(entry, "first_endpoint_m");
+      const auto second = detail::vec3_field(entry, "second_endpoint_m");
+      const auto diameter = detail::number_field(entry, "diameter_m");
+      if (!id || *id == PhotonResultBlock::kNoSurfaceId || !first || !second || !diameter ||
+          !segment_ids.insert(*id).second)
+        return std::nullopt;
+      const ImportedCylinderObscurer cylinder{*id, *first, *second, *diameter};
+      if (!is_valid(cylinder))
+        return std::nullopt;
+      model.primary_to_secondary_cylinders.push_back(cylinder);
+    }
+  }
+  const auto incoming_planes = detail::detector_fields(*trace, "incoming_obscurer_planes");
+  if (!incoming_planes)
+    return std::nullopt;
+  if (!incoming_planes->empty()) {
+    for (const auto &plane : *incoming_planes)
+      if (!segment_ids.insert(plane.id).second)
+        return std::nullopt;
+    model.incoming_obscurer_planes = compile_detector_planes(*incoming_planes);
+    if (!model.incoming_obscurer_planes)
+      return std::nullopt;
+  }
   model.secondary_scatter = detail::scatter_field(*trace, "secondary_scatter");
   model.camera_response = detail::camera_response_field(*trace, "camera_response");
   if ((trace->find("primary_scatter") && !model.primary_scatter) ||
@@ -761,12 +829,9 @@ read_axisymmetric_optical_model(const std::string &path) {
 // Explicit nonsequential media/interfaces are generic data. Existing CTAO
 // compatibility response tables cannot establish these physical interfaces.
 [[nodiscard]] inline std::optional<CompiledOpticalModel>
-read_nonsequential_optical_model(const std::string &path) {
-  const auto root = detail::read_json(path);
-  if (!root)
-    return std::nullopt;
-  const auto provenance = detail::provenance(*root);
-  const auto *trace = root->find("trace_model");
+nonsequential_optical_model_from_json(const json::Value &root) {
+  const auto provenance = detail::provenance(root);
+  const auto *trace = root.find("trace_model");
   using detail::fields_supported;
   if (!provenance || !trace || !detail::string_field(*trace, "kind") ||
       *detail::string_field(*trace, "kind") != "nonsequential" ||
@@ -777,17 +842,17 @@ read_nonsequential_optical_model(const std::string &path) {
   const auto *surfaces = trace->find("surfaces");
   const auto limit = detail::uint_field(*trace, "max_interactions");
   const auto entrance_medium = detail::uint_field(*trace, "entrance_medium_id");
-  if (!materials || materials->kind != json::Value::Kind::array || !surfaces ||
-      surfaces->kind != json::Value::Kind::array || !limit || !entrance_medium)
+  if (!materials || materials->kind() != json::Value::Kind::array || !surfaces ||
+      surfaces->kind() != json::Value::Kind::array || !limit || !entrance_medium)
     return std::nullopt;
   ImportedOpticalModel model{*provenance, {}, *limit, {}, *entrance_medium};
   const auto curve = [&](const json::Value &material,
                          std::string_view name) -> std::optional<MaterialCurve> {
     const auto *values = material.find(name);
-    if (!values || values->kind != json::Value::Kind::array)
+    if (!values || values->kind() != json::Value::Kind::array)
       return std::nullopt;
     MaterialCurve result;
-    for (const auto &knot : values->array) {
+    for (const auto &knot : values->array()) {
       const auto wavelength = detail::number_field(knot, "wavelength_nm");
       const auto value = detail::number_field(knot, "value");
       if (!wavelength || !value || !fields_supported(knot, {"wavelength_nm", "value"}))
@@ -797,7 +862,7 @@ read_nonsequential_optical_model(const std::string &path) {
     }
     return result;
   };
-  for (const auto &material : materials->array) {
+  for (const auto &material : materials->array()) {
     const auto id = detail::uint_field(material, "id");
     auto phase = curve(material, "phase_index");
     auto group = curve(material, "group_index");
@@ -807,7 +872,7 @@ read_nonsequential_optical_model(const std::string &path) {
       return std::nullopt;
     model.materials.push_back({*id, std::move(*phase), std::move(*group), std::move(*absorption)});
   }
-  for (const auto &surface : surfaces->array) {
+  for (const auto &surface : surfaces->array()) {
     const auto id = detail::uint_field(surface, "id");
     const auto diameter = detail::number_field(surface, "diameter_m");
     const auto shape = detail::facet_shape(surface);
@@ -870,9 +935,9 @@ read_nonsequential_optical_model(const std::string &path) {
       return std::nullopt;
     for (const auto name : {"transmission", "reflectivity"})
       if (const auto *response = surface.find(name)) {
-        if (response->kind != json::Value::Kind::array)
+        if (response->kind() != json::Value::Kind::array)
           return std::nullopt;
-        for (const auto &knot : response->array)
+        for (const auto &knot : response->array())
           if (!fields_supported(knot, {"wavelength_nm", "response", "incidence_angle_deg"}))
             return std::nullopt;
       }
@@ -890,6 +955,63 @@ read_nonsequential_optical_model(const std::string &path) {
     model.surfaces.push_back(std::move(record));
   }
   return compile_optical_model(model);
+}
+
+} // namespace detail
+
+struct LoadedOpticalModel {
+  std::optional<CompiledSegmentedOpticalModel> segmented;
+  std::optional<AxisymmetricOpticalModel> axisymmetric;
+  std::optional<CompiledOpticalModel> nonsequential;
+  bool production_ready{};
+};
+
+// Verify the artifact once, compile its declared trace model and release the
+// JSON tree before tracing. Readiness is covered by the same content hash.
+[[nodiscard]] inline std::optional<LoadedOpticalModel> read_optical_model(const std::string &path) {
+  const auto root = detail::read_json(path);
+  if (!root)
+    return std::nullopt;
+  const auto *trace = root->find("trace_model");
+  const auto *kind = trace ? detail::string_field(*trace, "kind") : nullptr;
+  if (!kind)
+    return std::nullopt;
+  LoadedOpticalModel loaded;
+  if (*kind == "segmented")
+    loaded.segmented = detail::segmented_optical_model_from_json(*root);
+  else if (*kind == "axisymmetric")
+    loaded.axisymmetric = detail::axisymmetric_optical_model_from_json(*root);
+  else if (*kind == "nonsequential") {
+    if (auto model = detail::nonsequential_optical_model_from_json(*root))
+      loaded.nonsequential.emplace(std::move(*model));
+  }
+  if (!loaded.segmented && !loaded.axisymmetric && !loaded.nonsequential)
+    return std::nullopt;
+  const auto *report = root->find("report");
+  const auto *readiness = report ? report->find("production_trace_ready") : nullptr;
+  const auto *blockers = report ? report->find("trace_blockers") : nullptr;
+  loaded.production_ready =
+      readiness && readiness->kind() == json::Value::Kind::boolean && readiness->boolean() &&
+      blockers && blockers->kind() == json::Value::Kind::array && blockers->array().empty();
+  return loaded;
+}
+
+[[nodiscard]] inline std::optional<CompiledSegmentedOpticalModel>
+read_segmented_optical_model(const std::string &path) {
+  const auto root = detail::read_json(path);
+  return root ? detail::segmented_optical_model_from_json(*root) : std::nullopt;
+}
+
+[[nodiscard]] inline std::optional<AxisymmetricOpticalModel>
+read_axisymmetric_optical_model(const std::string &path) {
+  const auto root = detail::read_json(path);
+  return root ? detail::axisymmetric_optical_model_from_json(*root) : std::nullopt;
+}
+
+[[nodiscard]] inline std::optional<CompiledOpticalModel>
+read_nonsequential_optical_model(const std::string &path) {
+  const auto root = detail::read_json(path);
+  return root ? detail::nonsequential_optical_model_from_json(*root) : std::nullopt;
 }
 
 [[nodiscard]] inline PathRecord
@@ -916,6 +1038,23 @@ trace_axisymmetric_optical_model(const Ray &input, std::uint64_t photon_id,
     record.status = PhotonStatus::intersection_failure;
     record.final_direction = ray.direction;
     return record;
+  }
+  if (optical_model.incoming_obscurer_planes) {
+    const auto shadow = optical_model.incoming_obscurer_planes->intersect(ray);
+    if (shadow && (!primary || shadow->distance_m < primary->distance_m)) {
+      record.points_m[1] = shadow->point_m;
+      record.point_count = 2;
+      record.path_length_m = shadow->distance_m;
+      record.status = PhotonStatus::blocked_obscurer;
+      record.final_direction = ray.direction;
+      record.terminal_surface_id = shadow->surface_id;
+      record.interaction_surface_ids[0] = shadow->surface_id;
+      record.interaction_kinds[0] = OpticalInteractionKind::obscurer;
+      record.interaction_normals[0] = shadow->unit_normal;
+      record.interaction_incoming_directions[0] = ray.direction;
+      record.interaction_outgoing_directions[0] = ray.direction;
+      return record;
+    }
   }
   if (optical_model.block_incoming_secondary) {
     bool shadow_failure = false;
@@ -992,6 +1131,41 @@ trace_axisymmetric_optical_model(const Ray &input, std::uint64_t photon_id,
   if (secondary_failure) {
     record.status = PhotonStatus::intersection_failure;
     record.final_direction = ray.direction;
+    return record;
+  }
+  auto obscurer = optical_model.primary_to_secondary_planes
+                      ? optical_model.primary_to_secondary_planes->intersect(ray)
+                      : std::optional<DetectorSurfaceHit>{};
+  for (const auto &cylinder : optical_model.primary_to_secondary_cylinders) {
+    const auto distance = intersect_closed_finite_cylinder(
+        ray, cylinder.first_endpoint_m, cylinder.second_endpoint_m, cylinder.diameter_m * 0.5);
+    if (!distance ||
+        (obscurer && (*distance > obscurer->distance_m ||
+                      (*distance == obscurer->distance_m && cylinder.id >= obscurer->surface_id))))
+      continue;
+    const Vec3 point = ray.position_m + ray.direction * *distance;
+    const Vec3 axis = *normalised_checked(cylinder.second_endpoint_m - cylinder.first_endpoint_m);
+    const double projection = dot(point - cylinder.first_endpoint_m, axis);
+    const double length = norm(cylinder.second_endpoint_m - cylinder.first_endpoint_m);
+    const Vec3 normal =
+        projection <= kEpsilon ? axis * -1
+        : projection >= length - kEpsilon
+            ? axis
+            : *normalised_checked(point - cylinder.first_endpoint_m - axis * projection);
+    obscurer = DetectorSurfaceHit{cylinder.id, *distance, point, normal};
+  }
+  if (obscurer && (!secondary || obscurer->distance_m < secondary->distance_m)) {
+    record.points_m[2] = obscurer->point_m;
+    record.point_count = 3;
+    record.path_length_m += obscurer->distance_m;
+    record.status = PhotonStatus::blocked_obscurer;
+    record.terminal_surface_id = obscurer->surface_id;
+    record.interaction_surface_ids[1] = obscurer->surface_id;
+    record.interaction_kinds[1] = OpticalInteractionKind::obscurer;
+    record.interaction_normals[1] = obscurer->unit_normal;
+    record.interaction_incoming_directions[1] = ray.direction;
+    record.interaction_outgoing_directions[1] = ray.direction;
+    record.interaction_throughput[1] = record.surviving_throughput;
     return record;
   }
   if (!secondary) {

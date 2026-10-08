@@ -55,7 +55,7 @@ int main(int argc, char **argv) {
           .parse();
   require(root.has_value(), "fixture parses");
   auto *hash = const_cast<obdeect::json::Value *>(root->find("optical_model_sha256"));
-  hash->string = obdeect::detail::sha256(obdeect::detail::canonical_json_without_hash(*root));
+  hash->string() = obdeect::detail::sha256(obdeect::detail::canonical_json_without_hash(*root));
   {
     std::string json;
     obdeect::detail::append_canonical_json(*root, json);
@@ -256,9 +256,9 @@ int main(int argc, char **argv) {
   require(contents(screen).find("7;10") != std::string::npos,
           "custom screen ID follows obscurers as well as optical surfaces");
   auto *report = const_cast<obdeect::json::Value *>(root->find("report"));
-  const_cast<obdeect::json::Value *>(report->find("production_trace_ready"))->boolean = true;
-  const_cast<obdeect::json::Value *>(report->find("trace_blockers"))->array.clear();
-  hash->string = obdeect::detail::sha256(obdeect::detail::canonical_json_without_hash(*root));
+  const_cast<obdeect::json::Value *>(report->find("production_trace_ready"))->boolean() = true;
+  const_cast<obdeect::json::Value *>(report->find("trace_blockers"))->array().clear();
+  hash->string() = obdeect::detail::sha256(obdeect::detail::canonical_json_without_hash(*root));
   {
     std::string json;
     obdeect::detail::append_canonical_json(*root, json);
@@ -279,7 +279,7 @@ int main(int argc, char **argv) {
           R"({"format":"obdeect.compiled-optical-model.v1","optical_model_sha256":"","provenance":{"model":"synthetic-finite-window","model_version":"1"},"trace_model":{"kind":"nonsequential","max_interactions":8,"entrance_medium_id":4294967295,"materials":[{"id":1,"phase_index":[{"wavelength_nm":300,"value":1.5},{"wavelength_nm":500,"value":1.5}],"group_index":[{"wavelength_nm":300,"value":1.8},{"wavelength_nm":500,"value":1.8}],"absorption_per_m":[{"wavelength_nm":300,"value":0.2},{"wavelength_nm":500,"value":0.2}]}],"surfaces":[{"id":1,"role":"refractive_interface","shape":"circle","diameter_m":4,"front_medium_id":4294967295,"back_medium_id":1,"frame":{"origin_m":[0,0,2],"x_axis":[1,0,0],"y_axis":[0,1,0],"z_axis":[0,0,1]}},{"id":2,"role":"refractive_interface","shape":"circle","diameter_m":4,"front_medium_id":1,"back_medium_id":4294967295,"frame":{"origin_m":[0,0,1],"x_axis":[1,0,0],"y_axis":[0,1,0],"z_axis":[0,0,1]}},{"id":3,"role":"detector","shape":"circle","diameter_m":4,"frame":{"origin_m":[0,0,0],"x_axis":[1,0,0],"y_axis":[0,1,0],"z_axis":[0,0,1]}}]}})"}
           .parse();
   require(window_root.has_value(), "synthetic finite window schema parses");
-  const_cast<obdeect::json::Value *>(window_root->find("optical_model_sha256"))->string =
+  const_cast<obdeect::json::Value *>(window_root->find("optical_model_sha256"))->string() =
       obdeect::detail::sha256(obdeect::detail::canonical_json_without_hash(*window_root));
   {
     std::string json;
@@ -313,5 +313,40 @@ int main(int argc, char **argv) {
           "native window preserves geometric, phase and group transport separately");
   require(contents(window_interactions).find("refractive_interface") != std::string::npos,
           "actual finite refractive interactions are recorded");
+  require(run(1, directory / "unsupported-image.csv", false, " --focal-surface-image") != 0,
+          "focal-surface imaging rejects non-axisymmetric optical models");
+  auto image_root =
+      obdeect::json::Parser{
+          R"({"format":"obdeect.compiled-optical-model.v1","optical_model_sha256":"","provenance":{"model":"synthetic-imaging-boundary","model_version":"1"},"report":{"production_trace_ready":true,"trace_blockers":[]},"trace_model":{"kind":"axisymmetric","primary_surface_id":10,"secondary_surface_id":11,"detector_surface_id":12,"block_incoming_secondary":false,"primary":{"vertex_z_m":0,"inner_radius_m":0,"outer_radius_m":2,"radial_scale_m":1,"coefficient_m":[0,0,0,0,0,0,0,0,0,0,0,0,0]},"secondary":{"vertex_z_m":2,"inner_radius_m":0,"outer_radius_m":2,"radial_scale_m":1,"coefficient_m":[0,0,0,0,0,0,0,0,0,0,0,0,0]},"detector":{"vertex_z_m":1,"inner_radius_m":0,"outer_radius_m":2,"radial_scale_m":1,"coefficient_m":[0,0,0,0,0,0,0,0,0,0,0,0,0]},"detector_surfaces":[{"id":13,"shape":"circle","centre_m":[1,0,1],"normal":[0,0,1],"tangent":[1,0,0],"diameter_m":0.1}],"primary_reflectivity":[{"wavelength_nm":300,"response":0.8},{"wavelength_nm":500,"response":0.8}],"secondary_reflectivity":[{"wavelength_nm":300,"response":0.9},{"wavelength_nm":500,"response":0.9}]}})"}
+          .parse();
+  require(image_root.has_value(), "imaging boundary fixture parses");
+  const_cast<obdeect::json::Value *>(image_root->find("optical_model_sha256"))->string() =
+      obdeect::detail::sha256(obdeect::detail::canonical_json_without_hash(*image_root));
+  {
+    std::string json;
+    obdeect::detail::append_canonical_json(*image_root, json);
+    std::ofstream output(model);
+    output << json;
+  }
+  const auto image_model = contents(model);
+  const auto image_csv = directory / "image.csv";
+  require(run(1, image_csv, false, " --focal-surface-image") == 0 && contents(model) == image_model,
+          "continuous focal-surface diagnostic preserves the compiled optical model");
+  std::ifstream image_input(image_csv);
+  std::getline(image_input, line);
+  const auto image_header = fields(line);
+  std::getline(image_input, line);
+  const auto image_row = fields(line);
+  const auto image_value = [&](const char *name) {
+    const auto found = std::find(image_header.begin(), image_header.end(), name);
+    require(found != image_header.end(), "imaging CSV field exists");
+    return image_row.at(found - image_header.begin());
+  };
+  require(image_value("status") == "detected" &&
+              image_value("detector_boundary") == "continuous_focal_surface" &&
+              std::abs(std::stod(image_value("throughput")) - 0.72) < 1.e-12,
+          "imaging diagnostic ignores finite pixel acceptance and preserves mirror response");
+  require(run(1, directory / "gated-image.csv", true, " --focal-surface-image") != 0,
+          "production gate rejects an overridden imaging boundary");
   std::filesystem::remove_all(directory);
 }

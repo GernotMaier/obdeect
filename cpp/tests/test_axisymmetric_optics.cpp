@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <iostream>
+#include <numbers>
 
 namespace {
 
@@ -91,6 +92,39 @@ int main() {
           "SCTS secondary profile finite");
   require(kMstNectarCam.family == TelescopeOpticalFamily::mst_modified_davies_cotton,
           "MST reference must retain Davies-Cotton family");
+
+  // T-ASP-003: distant oblique rays retain local intersection precision.
+  // The analytic paraboloid contains (1, 0, 0.25), regardless of launch distance.
+  for (const double angle_deg : {0.0, 0.5, 1.0, 2.0, 3.0}) {
+    const double angle = angle_deg * std::numbers::pi / 180.0;
+    const Vec3 direction{std::sin(angle), 0, -std::cos(angle)};
+    for (const double launch_distance : {10.0, 1.e4, 1.e7}) {
+      const Vec3 target{1, 0, 0.25};
+      const Ray distant{target - direction * launch_distance, direction};
+      bool failure = false;
+      const auto hit = intersect_axisymmetric_mirror(
+          distant, horizontal_surface, kEpsilon, [](const Vec3 &) { return true; }, &failure);
+      require(hit && !failure, "distant off-axis paraboloid intersection must not fail");
+      // Input coordinates at 10,000 km have nanometre-scale representation error.
+      require(norm(hit->point_m - target) < 1.e-8,
+              "distant launch must preserve the analytic local intersection");
+      require(std::abs(hit->distance_m - launch_distance) < 1.e-8,
+              "distant intersection must preserve full travel distance");
+      require(std::abs(hit->point_m.z - horizontal_surface.surface.sag(
+                                            std::hypot(hit->point_m.x, hit->point_m.y))) < 1.e-10,
+              "distant intersection retains the original surface residual tolerance");
+    }
+  }
+  // Versioned SSTS reference coefficients reproduce the 7.0.0 distant-ray
+  // failure: expansion alone left the local sag residual above 1e-10 m.
+  const AxisymmetricMirror sst_primary{0, 0, ssts.primary_diameter_m * 0.5, ssts.primary};
+  bool failed_distant_asphere = false;
+  const auto distant_asphere = intersect_axisymmetric_mirror(
+      {{-524076.55125975102, 0.12236330347260739, 1.e7},
+       {0.052335956242943842, 0, -0.99862953475457394}},
+      sst_primary, kEpsilon, [](const Vec3 &) { return true; }, &failed_distant_asphere);
+  require(distant_asphere && !failed_distant_asphere,
+          "high-order distant asphere root must satisfy the unchanged residual tolerance");
 
   std::cout << "axisymmetric optics tests passed\n";
 }
