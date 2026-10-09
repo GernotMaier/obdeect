@@ -92,6 +92,7 @@ struct CompiledSegmentedOpticalModel {
   std::optional<CameraResponse> camera_response{};
 
   std::shared_ptr<const CompiledDetectorPlanes> detector_planes{};
+  std::optional<double> imaging_plane_z_m{};
 
   CompiledSegmentedOpticalModel(
       ModelProvenance compiled_provenance, std::vector<ImportedFacet> compiled_facets,
@@ -170,7 +171,8 @@ struct CompiledSegmentedOpticalModel {
   }
   if ((optical_model.primary_reflectivity && !optical_model.primary_reflectivity->is_valid()) ||
       (optical_model.primary_scatter && !optical_model.primary_scatter->is_valid()) ||
-      (optical_model.camera_response && !optical_model.camera_response->is_valid()))
+      (optical_model.camera_response && !optical_model.camera_response->is_valid()) ||
+      (optical_model.imaging_plane_z_m && !std::isfinite(*optical_model.imaging_plane_z_m)))
     return false;
   return true;
 }
@@ -413,6 +415,17 @@ intersect_detector_surface(const Ray &ray, const ImportedDetectorSurface &surfac
 [[nodiscard]] inline std::optional<DetectorSurfaceHit>
 intersect_detector_surfaces_unchecked(const Ray &ray,
                                       const CompiledSegmentedOpticalModel &optical_model) {
+  if (optical_model.imaging_plane_z_m) {
+    if (std::abs(ray.direction.z) <= kEpsilon || optical_model.detector_surfaces.empty())
+      return std::nullopt;
+    const double distance = (*optical_model.imaging_plane_z_m - ray.position_m.z) / ray.direction.z;
+    if (!std::isfinite(distance) || distance <= kEpsilon)
+      return std::nullopt;
+    return DetectorSurfaceHit{optical_model.detector_surfaces.front().id,
+                              distance,
+                              ray.position_m + ray.direction * distance,
+                              {0.0, 0.0, 1.0}};
+  }
   std::optional<DetectorSurfaceHit> nearest;
   for (const auto &surface : optical_model.detector_surfaces) {
     const auto candidate = intersect_detector_surface_unchecked(ray, surface);

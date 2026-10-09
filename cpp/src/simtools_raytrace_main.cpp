@@ -33,7 +33,7 @@ void usage() {
       << "  --optical-model FILE  compiled obdeect optical-model JSON\n"
       << "  --require-production-ready  reject optical models lacking a completed production "
          "report\n"
-      << "  --focal-surface-image  axisymmetric imaging diagnostic before pixel acceptance and "
+      << "  --focal-surface-image  optical imaging diagnostic before pixel acceptance and "
          "camera response\n"
       << "  --photon-input FILE --input-block-size N  replay telescope-local CSV photons\n"
       << "  --photon-output FILE  save every resolved input photon before optical tracing\n"
@@ -224,14 +224,26 @@ int main(int argc, char **argv) {
       loaded ? std::move(loaded->nonsequential) : std::optional<obdeect::CompiledOpticalModel>{};
   production_ready = loaded && loaded->production_ready;
   if (focal_surface_image) {
-    if (!axisymmetric_optical_model) {
-      std::cerr << "--focal-surface-image requires a compiled axisymmetric optical model\n";
+    if (imported_optical_model && loaded->imaging_plane_z_m &&
+        !imported_optical_model->detector_surfaces.empty()) {
+      const auto detector =
+          *std::min_element(imported_optical_model->detector_surfaces.begin(),
+                            imported_optical_model->detector_surfaces.end(),
+                            [](const auto &a, const auto &b) { return a.id < b.id; });
+      imported_optical_model->detector_surfaces = {detector};
+      imported_optical_model->imaging_plane_z_m = loaded->imaging_plane_z_m;
+      imported_optical_model->detector_planes.reset();
+      imported_optical_model->camera_response.reset();
+    } else if (axisymmetric_optical_model) {
+      axisymmetric_optical_model->detector_planes.reset();
+      axisymmetric_optical_model->camera_response.reset();
+    } else {
+      std::cerr
+          << "--focal-surface-image requires a compiled focal surface or detector_vertex_z_m\n";
       return 2;
     }
     // An imaging-list diagnostic ends on the continuous focal prescription,
     // before pixel acceptance and measured camera response are applied.
-    axisymmetric_optical_model->detector_planes.reset();
-    axisymmetric_optical_model->camera_response.reset();
     production_ready = false;
   }
   if (nonsequential_optical_model && photon_input_path.empty() && !launch_pupil_radius_set) {
@@ -408,7 +420,7 @@ int main(int argc, char **argv) {
     output << "x" << point << "_m,y" << point << "_m,z" << point << "_m" << ',';
   output << "run_id,event_id,array_id,telescope_id,bunch_id,arrival_time_ns,terminal_surface_id,"
             "final_dx,final_dy,final_dz,interaction_surface_ids,response_loss_fraction,terminal_"
-            "loss_fraction,optical_path_m,detector_boundary\n";
+            "loss_fraction,optical_path_m,detector_boundary,launch_area_m2\n";
   std::size_t detected = 0;
   std::size_t traced_count = 0;
   std::unique_ptr<obdeect::CsvPhotonReader> reader;
@@ -534,7 +546,10 @@ int main(int argc, char **argv) {
         output << ',' << 1.0 - path.surviving_throughput << ','
                << (path.status == obdeect::PhotonStatus::detected ? 0.0 : path.surviving_throughput)
                << ',' << (path.material_transport ? path.optical_path_m : path.path_length_m) << ','
-               << (focal_surface_image ? "continuous_focal_surface" : "compiled_detector") << '\n';
+               << (focal_surface_image ? "continuous_focal_surface" : "compiled_detector") << ',';
+        if (source == "star" && !sampled_source)
+          output << std::numbers::pi * pupil_radius * pupil_radius;
+        output << '\n';
         return true;
       };
       if (nonsequential_optical_model) {

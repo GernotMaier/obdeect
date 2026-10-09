@@ -89,6 +89,19 @@ int main() {
   auto overlapping_facet = far;
   overlapping_facet.id = 12;
   const ImportedDetectorSurface detector_a{20, {0, 0, 4}, {0, 0, 1}, 2, FacetShape::circle};
+  auto imaging = compile_segmented_optical_model({provenance, {near}, {detector_a}});
+  require(imaging.has_value(), "imaging plane fixture compiles");
+  const Ray outside_pixel{{3, 0, 5}, {0, 0, -1}};
+  require(!intersect_detector_surfaces(outside_pixel, *imaging),
+          "finite detector rejects photons outside its aperture");
+  imaging->imaging_plane_z_m = 4;
+  const auto image_hit = intersect_detector_surfaces(outside_pixel, *imaging);
+  require(image_hit && image_hit->distance_m == 1 && image_hit->point_m.x == 3 &&
+              image_hit->point_m.z == 4,
+          "imaging plane records photons beyond the camera boundary at the declared plane");
+  require(!intersect_detector_surfaces({{0, 0, 5}, {1, 0, 0}}, *imaging) &&
+              !intersect_detector_surfaces({{0, 0, 5}, {0, 0, 1}}, *imaging),
+          "imaging plane rejects parallel and backward intersections");
   auto detector_b = detector_a;
   detector_b.id = 21;
   const ImportedCylinderObscurer cylinder_a{30, {0, 0, 3}, {0, 0, 4}, 1};

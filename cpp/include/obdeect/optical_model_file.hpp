@@ -964,6 +964,7 @@ struct LoadedOpticalModel {
   std::optional<AxisymmetricOpticalModel> axisymmetric;
   std::optional<CompiledOpticalModel> nonsequential;
   bool production_ready{};
+  std::optional<double> imaging_plane_z_m{};
 };
 
 // Verify the artifact once, compile its declared trace model and release the
@@ -977,6 +978,7 @@ struct LoadedOpticalModel {
   if (!kind)
     return std::nullopt;
   LoadedOpticalModel loaded;
+  loaded.imaging_plane_z_m = detail::number_field(*root, "detector_vertex_z_m");
   if (*kind == "segmented")
     loaded.segmented = detail::segmented_optical_model_from_json(*root);
   else if (*kind == "axisymmetric")

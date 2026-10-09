@@ -29,6 +29,22 @@ def test_read_arrival_exposes_optical_boundary(tmp_path: Path) -> None:
     assert arrivals[0].optical_weight == 1.5
 
 
+@pytest.mark.parametrize("area", ["12.5", "", "0", "-1", "nan", "invalid"])
+def test_read_arrival_launch_area(tmp_path: Path, area: str) -> None:
+    path = tmp_path / "area.csv"
+    path.write_text(
+        HEADER.rstrip()
+        + ",launch_area_m2\n"
+        + f"obdeect-arrival-v1,0,star,400,0,1,1,detected,2,4,0,0,1,0.1,0.2,2,{area}\n",
+        encoding="utf-8",
+    )
+    if area in {"12.5", ""}:
+        assert read_arrivals(path)[0].launch_area_m2 == (12.5 if area else None)
+    else:
+        with pytest.raises(ArrivalContractError, match="launch_area_m2"):
+            read_arrivals(path)
+
+
 def test_read_arrival_accepts_cpp_escaped_optical_model_status(tmp_path: Path) -> None:
     arrivals = read_arrivals(
         write_trace(
