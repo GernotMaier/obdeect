@@ -11,6 +11,7 @@ from obdeect.optical_model_compiler import (
     OpticalModelCompileError,
     _dual_reflector_surfaces,
     _secondary_segment_frame,
+    apply_panel_alignment,
     build_plot_geometry,
     build_trace_model,
     compile_optical_model,
@@ -47,6 +48,7 @@ class TestOpticalModelCompiler(unittest.TestCase):
                         "focal_length_m": 16.0,
                         "nominal_centre_m": [0.0, 0.0, 0.0],
                         "nominal_normal": [0.0, 0.0, 1.0],
+                        "nominal_tangent": [1.0, 0.0, 0.0],
                     }
                 ]
             },
@@ -116,6 +118,7 @@ class TestOpticalModelCompiler(unittest.TestCase):
                         "focal_length_m": 16.0,
                         "nominal_centre_m": [0.0, 0.0, 0.0],
                         "nominal_normal": [0.0, 0.0, 1.0],
+                        "nominal_tangent": [1.0, 0.0, 0.0],
                     }
                 ]
             },
@@ -126,6 +129,90 @@ class TestOpticalModelCompiler(unittest.TestCase):
         self.assertEqual(trace_model["kind"], "segmented")
         self.assertEqual(trace_model["primary_facets"][0]["shape"], "hexagon_flat_y")
         self.assertEqual(trace_model["detector_surfaces"][0]["shape"], "circle")
+
+    def test_alignment_exact_frame_seed_and_order_independence(self):
+        import copy
+
+        facets = [{"id": 1, "centre_m": [2.0, 3.0, 0.0]}, {"id": 2, "centre_m": [-3.0, 1.0, 0.0]}]
+        parameters = {
+            "focal_length": {"value": 16.0, "unit": "m"},
+            "dish_shape_length": {"value": 16.0, "unit": "m"},
+            "mirror_offset": {"value": 0.0, "unit": "m"},
+            "parabolic_dish": {"value": True},
+        }
+        derive_nominal_single_reflector(facets, parameters)
+        facet = facets[0]
+        phi = math.atan2(3, 2)
+        inclination = math.acos(facet["nominal_normal"][2])
+        expected = [
+            math.cos(phi) ** 2 * math.cos(inclination) + math.sin(phi) ** 2,
+            math.cos(phi) * math.sin(phi) * (math.cos(inclination) - 1),
+            math.cos(phi) * math.sin(inclination),
+        ]
+        for actual, value in zip(facet["nominal_tangent"], expected):
+            self.assertAlmostEqual(actual, value, places=14)
+        errors = {
+            name: {"value": [0.01, 28.0, 0.0, 0.0], "unit": ["deg", "deg", "null", "null"]}
+            for name in ("mirror_align_random_horizontal", "mirror_align_random_vertical")
+        }
+        reversed_facets = copy.deepcopy(facets[::-1])
+        nominal = copy.deepcopy(facets)
+        apply_panel_alignment(facets, errors, 4, None)
+        apply_panel_alignment(reversed_facets, errors, 4, None)
+        self.assertEqual(facets, reversed_facets[::-1])
+        self.assertNotEqual(facets[0]["nominal_normal"], nominal[0]["nominal_normal"])
+        for facet in facets:
+            self.assertAlmostEqual(
+                sum(a * b for a, b in zip(facet["nominal_normal"], facet["nominal_tangent"])),
+                0,
+                places=14,
+            )
+        errors["mirror_align_random_horizontal"]["value"][2] = 0.01
+        with self.assertRaisesRegex(OpticalModelCompileError, "alignment zenith"):
+            apply_panel_alignment(nominal, errors, 4, None)
+        apply_panel_alignment(nominal, errors, 4, 20)
+
+    def test_segmented_housing_uses_incoming_planes_and_telescope_frame(self):
+        optical_model = {
+            "report": {"facet_geometry_evidence": {"normal_status": "nominal_unperturbed"}},
+            "primary": {
+                "facets": [
+                    {
+                        "id": 0,
+                        "shape": "circle",
+                        "diameter_m": 1,
+                        "focal_length_m": 16,
+                        "nominal_centre_m": [0, 0, 0],
+                        "nominal_normal": [0, 0, 1],
+                        "nominal_tangent": [1, 0, 0],
+                    }
+                ]
+            },
+            "camera": {
+                "pixel_types": [{"id": 0, "funnel_diameter_m": 0.1}],
+                "pixels": [{"type_id": 0, "centre_xy_m": [0, 0]}],
+            },
+            "focal_length_m": 16,
+        }
+        optical_model["camera"]["rotation_deg"] = 17
+        optical_model["camera"]["housing"] = {
+            "shape": "square",
+            "diameter_m": 2,
+            "front_z_m": 15,
+            "depth_m": 1,
+        }
+        with TemporaryDirectory() as directory:
+            with self.assertRaisesRegex(OpticalModelCompileError, "use JSON"):
+                write_native_optical_model(optical_model, Path(directory) / "surfaces.csv")
+        trace = build_trace_model(optical_model)
+        planes = trace["incoming_obscurer_planes"]
+        self.assertEqual([p["centre_m"][2] for p in planes], [15, 16])
+        self.assertEqual(planes[0]["tangent"], [1, 0, 0])
+        self.assertEqual(planes[0]["shape"], "square")
+        components = build_plot_geometry(trace, {"trace_blockers": []})["components"]
+        self.assertEqual(
+            [p["id"] for p in planes], [c["id"] for c in components if c["role"] == "obscurer"]
+        )
 
     def test_plot_index_contains_only_native_finite_components(self):
         trace = {
@@ -235,7 +322,7 @@ class TestOpticalModelCompiler(unittest.TestCase):
             )
         return resolve_model(root, "GENERIC", "1.0.0")
 
-    def test_measured_scatter_requires_explicit_seed_and_preserves_units(self):
+    def test_measured_scatter_is_enabled_by_default_and_preserves_units(self):
         with TemporaryDirectory() as directory:
             root = Path(directory)
             self.make_ir(root)
@@ -258,8 +345,8 @@ class TestOpticalModelCompiler(unittest.TestCase):
             record.write_text(json.dumps(parameter))
             ir = resolve_model(root, "GENERIC", "1.0.0")
             nominal = compile_optical_model(ir, root)
-            self.assertIn(name, nominal["report"]["deferred"])
-            self.assertNotIn("scatter", nominal["primary"])
+            self.assertIn(name, nominal["report"]["consumed"])
+            self.assertEqual(nominal["primary"]["scatter"]["seed"], 0)
             compiled = compile_optical_model(ir, root, scatter_seed=21)
             scatter = compiled["primary"]["scatter"]
             self.assertEqual(scatter["seed"], 21)
@@ -405,7 +492,7 @@ class TestOpticalModelCompiler(unittest.TestCase):
             optical_model = compile_optical_model(self.make_ir(root), root)
         facet = optical_model["primary"]["facets"][0]
         self.assertEqual(optical_model["format"], "obdeect.compiled-optical-model.v1")
-        self.assertEqual(facet["shape"], "hexagon_flat_y")
+        self.assertEqual(facet["shape"], "hexagon_flat_x")
         self.assertEqual(facet["centre_m"], [0.0, 1.0, 0.2])
         self.assertEqual(facet["diameter_m"], 1.2)
         self.assertEqual(facet["focal_length_m"], 16.0)
@@ -434,6 +521,7 @@ class TestOpticalModelCompiler(unittest.TestCase):
             for facet in optical_model["primary"]["facets"]:
                 facet["nominal_centre_m"] = [*facet["centre_m"][:2], 0.0]
                 facet["nominal_normal"] = [0.0, 0.0, 1.0]
+                facet["nominal_tangent"] = [1.0, 0.0, 0.0]
             trace_model = build_trace_model(optical_model)
         self.assertEqual(trace_model["kind"], "segmented")
         self.assertEqual(trace_model["primary_facets"][0]["id"], 0)
@@ -603,7 +691,7 @@ class TestOpticalModelCompiler(unittest.TestCase):
             fallback_focal_length_m=16.0,
         )
         self.assertEqual(facets[0]["centre_m"], [10.2249, -4.62, 0.0])
-        self.assertEqual(facets[0]["shape"], "hexagon_flat_x")
+        self.assertEqual(facets[0]["shape"], "hexagon_flat_y")
         self.assertAlmostEqual(facets[1]["centre_m"][0], -6.208)
         self.assertEqual(facets[1]["centre_m"][1:], [0.0, 0.0])
         self.assertEqual(facets[1]["focal_length_m"], 16.0)
@@ -618,7 +706,7 @@ class TestOpticalModelCompiler(unittest.TestCase):
             fallback_focal_length_m=None,
         )
         self.assertEqual(facets[0]["id"], 0)
-        self.assertEqual(facets[0]["shape"], "hexagon_flat_x")
+        self.assertEqual(facets[0]["shape"], "hexagon_flat_y")
         self.assertEqual(facets[0]["focal_length_m"], 16.0)
 
     def test_rejects_invalid_optional_mirror_height(self):

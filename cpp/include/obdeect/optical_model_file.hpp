@@ -622,9 +622,10 @@ segmented_optical_model_from_json(const json::Value &root) {
   if (!model_provenance || !trace || trace->kind() != json::Value::Kind::object ||
       !detail::string_field(*trace, "kind") ||
       *detail::string_field(*trace, "kind") != "segmented" ||
-      !detail::fields_supported(*trace, {"kind", "primary_facets", "detector_surfaces",
-                                         "cylinder_obscurers", "primary_reflectivity",
-                                         "primary_scatter", "camera_response"}))
+      !detail::fields_supported(*trace,
+                                {"kind", "primary_facets", "detector_surfaces",
+                                 "cylinder_obscurers", "primary_reflectivity", "primary_scatter",
+                                 "camera_response", "incoming_obscurer_planes"}))
     return std::nullopt;
   const auto *facet_values = detail::field(*trace, "primary_facets");
   const auto *detector_values = detail::field(*trace, "detector_surfaces");
@@ -682,6 +683,27 @@ segmented_optical_model_from_json(const json::Value &root) {
   if (!planes)
     return std::nullopt;
   compiled->detector_planes = std::make_shared<const CompiledDetectorPlanes>(std::move(*planes));
+  const auto incoming = detail::detector_fields(*trace, "incoming_obscurer_planes");
+  if (!incoming)
+    return std::nullopt;
+  if (!incoming->empty()) {
+    auto shadows = compile_detector_planes(*incoming);
+    if (!shadows)
+      return std::nullopt;
+    for (const auto &surface : *incoming) {
+      for (const auto &facet : compiled->primary_facets)
+        if (facet.id == surface.id)
+          return std::nullopt;
+      for (const auto &detector : *detectors)
+        if (detector.id == surface.id)
+          return std::nullopt;
+      for (const auto &cylinder : compiled->cylinder_obscurers)
+        if (cylinder.id == surface.id)
+          return std::nullopt;
+    }
+    compiled->incoming_obscurer_planes =
+        std::make_shared<const CompiledDetectorPlanes>(std::move(*shadows));
+  }
   compiled->primary_scatter = detail::scatter_field(*trace, "primary_scatter");
   compiled->camera_response = detail::camera_response_field(*trace, "camera_response");
   if ((trace->find("primary_scatter") && !compiled->primary_scatter) ||

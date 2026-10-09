@@ -92,6 +92,7 @@ struct CompiledSegmentedOpticalModel {
   std::optional<CameraResponse> camera_response{};
 
   std::shared_ptr<const CompiledDetectorPlanes> detector_planes{};
+  std::shared_ptr<const CompiledDetectorPlanes> incoming_obscurer_planes{};
   std::optional<double> imaging_plane_z_m{};
 
   CompiledSegmentedOpticalModel(

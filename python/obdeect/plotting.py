@@ -580,7 +580,7 @@ def load_plot_optical_model(path: Path) -> PlotOpticalModel:
             }.get(role)
             allowed_sources = (
                 {"trace_model.primary_to_secondary_planes", "trace_model.incoming_obscurer_planes"}
-                if role == "obscurer" and kind == "axisymmetric"
+                if role == "obscurer"
                 else {"trace_model.primary_to_secondary_cylinders"}
                 if role == "opaque_cylinder" and kind == "axisymmetric"
                 else {f"trace_model.{expected}"}
@@ -641,6 +641,15 @@ def load_plot_optical_model(path: Path) -> PlotOpticalModel:
                     description=f"detector surface {index}",
                 )
                 for index, detector in enumerate(detectors)
+            )
+            polygons += tuple(
+                _polygon_from_surface(
+                    plane,
+                    identifier=plane["id"],
+                    role="obscurer",
+                    description="incoming camera housing",
+                )
+                for plane in trace_model.get("incoming_obscurer_planes", [])
             )
             obscurer_rows = tuple(
                 _plot_obscurer(obscurer, index) for index, obscurer in enumerate(obscurers)

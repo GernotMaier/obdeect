@@ -49,8 +49,24 @@ trace_segmented_path(const Ray &input, std::uint64_t photon_id, double wavelengt
     const auto incoming_obscurer =
         obdeect::intersect_cylinder_obscurers_unchecked(ray, optical_model);
     const auto primary_hit = obdeect::intersect_segmented_primary_unchecked(ray, optical_model);
-    if (incoming_obscurer &&
-        (!primary_hit || incoming_obscurer->distance_m < primary_hit->distance_m)) {
+    const auto camera_shadow = optical_model.incoming_obscurer_planes
+                                   ? optical_model.incoming_obscurer_planes->intersect(ray)
+                                   : std::optional<DetectorSurfaceHit>{};
+    if (camera_shadow && (!primary_hit || camera_shadow->distance_m < primary_hit->distance_m) &&
+        (!incoming_obscurer || camera_shadow->distance_m < incoming_obscurer->distance_m)) {
+      path.points_m[1] = camera_shadow->point_m;
+      path.point_count = 2;
+      path.path_length_m = camera_shadow->distance_m;
+      path.terminal_surface_id = camera_shadow->surface_id;
+      path.interaction_surface_ids[0] = camera_shadow->surface_id;
+      path.interaction_kinds[0] = OpticalInteractionKind::obscurer;
+      path.interaction_normals[0] = camera_shadow->unit_normal;
+      path.interaction_incoming_directions[0] = *direction;
+      path.interaction_outgoing_directions[0] = *direction;
+      path.status = PhotonStatus::blocked_obscurer;
+      path.final_direction = *direction;
+    } else if (incoming_obscurer &&
+               (!primary_hit || incoming_obscurer->distance_m < primary_hit->distance_m)) {
       path.points_m[1] = ray.position_m + ray.direction * incoming_obscurer->distance_m;
       path.point_count = 2;
       path.path_length_m = incoming_obscurer->distance_m;

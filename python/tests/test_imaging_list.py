@@ -158,3 +158,23 @@ def test_launch_plane_is_above_obscurers(tmp_path: Path) -> None:
     assert metadata.entrance_z_m > 22
     with pytest.raises(ValueError, match="source distance"):
         load_imaging_metadata(path, 10, 0, 0)
+
+
+def test_missing_mirror_effects_rejected_and_seeds_recorded(tmp_path: Path) -> None:
+    path = model_file(tmp_path)
+    model = json.loads(path.read_text())
+    model["report"] = {
+        "trace_blockers": ["run-specific panel alignment and distance are not compiled"]
+    }
+    path.write_text(json.dumps(model))
+    with pytest.raises(ValueError, match="recompile"):
+        load_imaging_metadata(path, 10000, 0, 0)
+    model["report"]["trace_blockers"] = []
+    model["primary"] = {"alignment": {"seed": 12, "zenith_angle_deg": None}}
+    model["trace_model"]["primary_scatter"] = {"seed": 13}
+    path.write_text(json.dumps(model))
+    metadata = load_imaging_metadata(path, 10000, 0, 0)
+    output = tmp_path / "image.lis"
+    write_imaging_list(arrivals_file(tmp_path), output, metadata, 3)
+    assert "# panel_alignment_seed = 12" in output.read_text()
+    assert "# mirror_scatter_seed = 13" in output.read_text()

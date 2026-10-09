@@ -254,5 +254,22 @@ int main() {
                        .terminal_loss_weight[static_cast<std::size_t>(PhotonStatus::no_detector)] -
                    1.6) < 1.e-12,
       "response loss is accounted even when the reflected photon misses detection");
+  // Incoming housing masks must not clip rays on their way to the image.
+  auto shadow_model = *detected_optical_model;
+  const ImportedDetectorSurface housing{30,  {1, 2, 8},          {0, 0, 1},
+                                        0.4, FacetShape::square, {1, 0, 0}};
+  auto housing_planes = compile_detector_planes({housing});
+  require(housing_planes.has_value(), "finite camera housing compiles");
+  shadow_model.incoming_obscurer_planes =
+      std::make_shared<const CompiledDetectorPlanes>(std::move(*housing_planes));
+  const auto blocked = trace_segmented_path({{1, 2, 10}, {0, 0, -1}}, 0, 400, shadow_model);
+  require(blocked.status == PhotonStatus::blocked_obscurer && blocked.point_count == 2 &&
+              blocked.terminal_surface_id == 30 && std::abs(blocked.path_length_m - 2) < 1.e-12,
+          "housing records its actual incoming intersection and loss");
+  const auto below = trace_segmented_path({{1, 2, 7}, {0, 0, -1}}, 0, 400, shadow_model);
+  const auto unmasked =
+      trace_segmented_path({{1, 2, 7}, {0, 0, -1}}, 0, 400, *detected_optical_model);
+  require(below.status == unmasked.status && below.path_length_m == unmasked.path_length_m,
+          "incoming-only housing cannot intercept reflected rays");
   std::cout << "segmented optical_model tests passed\n";
 }

@@ -24,6 +24,8 @@ class ImagingListMetadata:
     off_axis_x_deg: float
     off_axis_y_deg: float
     zenith_angle_deg: float = 0.0
+    mirror_scatter_seed: int | None = None
+    panel_alignment_seed: int | None = None
 
 
 def load_imaging_metadata(
@@ -39,6 +41,21 @@ def load_imaging_metadata(
     mirror catalogue extent. This adapter convention does not change the core.
     """
     model = json.loads(path.read_text(encoding="utf-8"))
+    blockers = model.get("report", {}).get("trace_blockers", [])
+    if any(
+        "scatter requires" in item or "panel alignment and distance" in item for item in blockers
+    ):
+        raise ValueError(
+            "optical model omits configured mirror effects; recompile the optical model"
+        )
+    alignment = model.get("primary", {}).get("alignment", {})
+    alignment_zenith = alignment.get("zenith_angle_deg")
+    if alignment_zenith is not None and not math.isclose(
+        alignment_zenith, zenith_angle_deg - off_axis_x_deg, abs_tol=1e-12
+    ):
+        raise ValueError(
+            "optical model panel alignment was compiled for a different telescope zenith"
+        )
     trace = model["trace_model"]
     kind = trace["kind"]
     if kind == "segmented":
@@ -89,6 +106,8 @@ def load_imaging_metadata(
         off_axis_x_deg,
         off_axis_y_deg,
         zenith_angle_deg,
+        trace.get("primary_scatter", {}).get("seed"),
+        alignment.get("seed"),
     )
 
 
@@ -207,6 +226,8 @@ def write_imaging_list(
             "# source = finite_distance_star\n"
             "# source_sampling = keyed_uniform_disk\n"
             "# source_seed = 0\n"
+            f"# mirror_scatter_seed = {metadata.mirror_scatter_seed}\n"
+            f"# panel_alignment_seed = {metadata.panel_alignment_seed}\n"
             f"# optical_model_sha256 = {metadata.optical_model_sha256}\n"
             f"# Focal_length = {metadata.focal_length_m * 100:.17g} cm\n"
             f"# Camera rotation angle = {metadata.camera_rotation_deg:.17g} deg\n"

@@ -70,14 +70,17 @@ int main() {
   {
     std::ofstream output(segmented_path);
     output << with_valid_hash(
-        R"({"format":"obdeect.compiled-optical-model.v1","optical_model_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","provenance":{"model":"LSTN-design","model_version":"7.0.0"},"trace_model":{"kind":"segmented","primary_facets":[{"id":0,"shape":"circle","centre_m":[0,0,0],"normal":[0,0,1],"tangent":[1,0,0],"diameter_m":1,"focal_length_m":10}],"detector_surfaces":[{"id":1,"shape":"circle","centre_m":[0,0,10],"normal":[0,0,1],"tangent":[1,0,0],"diameter_m":1}],"cylinder_obscurers":[{"id":2,"first_endpoint_m":[0,0,2],"second_endpoint_m":[0,0,3],"diameter_m":0.1}],"primary_reflectivity":[{"wavelength_nm":300,"response":0.8},{"wavelength_nm":500,"response":0.9}]}})");
+        R"({"format":"obdeect.compiled-optical-model.v1","optical_model_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","provenance":{"model":"LSTN-design","model_version":"7.0.0"},"trace_model":{"kind":"segmented","primary_facets":[{"id":0,"shape":"circle","centre_m":[0,0,0],"normal":[0,0,1],"tangent":[1,0,0],"diameter_m":1,"focal_length_m":10}],"detector_surfaces":[{"id":1,"shape":"circle","centre_m":[0,0,10],"normal":[0,0,1],"tangent":[1,0,0],"diameter_m":1}],"cylinder_obscurers":[{"id":2,"first_endpoint_m":[0,0,2],"second_endpoint_m":[0,0,3],"diameter_m":0.1}],"incoming_obscurer_planes":[{"id":3,"shape":"square","centre_m":[0.3,0,5],"normal":[0,0,1],"tangent":[1,0,0],"diameter_m":0.1}],"primary_reflectivity":[{"wavelength_nm":300,"response":0.8},{"wavelength_nm":500,"response":0.9}]}})");
   }
   const auto segmented = obdeect::read_segmented_optical_model(segmented_path);
+  assert(segmented && segmented->incoming_obscurer_planes &&
+         segmented->incoming_obscurer_planes->surfaces().front().id == 3);
   const auto loaded_segmented = obdeect::read_optical_model(segmented_path);
   assert(loaded_segmented && loaded_segmented->segmented && !loaded_segmented->axisymmetric &&
          !loaded_segmented->nonsequential && !loaded_segmented->production_ready);
   assert_unknown_fields_rejected(segmented_path, obdeect::read_segmented_optical_model,
-                                 {"", "primary_facets", "detector_surfaces", "cylinder_obscurers"});
+                                 {"", "primary_facets", "detector_surfaces", "cylinder_obscurers",
+                                  "incoming_obscurer_planes"});
   if (!segmented || segmented->primary_facets.size() != 1 ||
       segmented->detector_surfaces.size() != 1 || segmented->cylinder_obscurers.size() != 1 ||
       !segmented->primary_reflectivity ||
