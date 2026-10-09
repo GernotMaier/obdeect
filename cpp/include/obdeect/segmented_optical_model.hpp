@@ -1,5 +1,8 @@
 #pragma once
 
+#include "obdeect/obscurers.hpp"
+#include "obdeect/spatial_response.hpp"
+
 #include "obdeect/intersections.hpp"
 #include "obdeect/math.hpp"
 #include "obdeect/mirror_scatter.hpp"
@@ -36,6 +39,7 @@ struct ImportedFacet {
   // Positive radius of the panel's spherical optical surface. A zero value
   // represents a planar panel and is retained for generic plane optical_models.
   double curvature_radius_m{};
+  Vec3 response_basis_u{}, response_basis_v{};
 };
 
 // A generic finite planar optical-arrival surface. Its placement and aperture
@@ -81,6 +85,7 @@ struct ImportedSegmentedOpticalModel {
 };
 
 class CompiledDetectorPlanes;
+struct PixelResponses;
 
 struct CompiledSegmentedOpticalModel {
   ModelProvenance provenance;
@@ -94,6 +99,10 @@ struct CompiledSegmentedOpticalModel {
   std::shared_ptr<const CompiledDetectorPlanes> detector_planes{};
   std::shared_ptr<const CompiledDetectorPlanes> incoming_obscurer_planes{};
   std::optional<double> imaging_plane_z_m{};
+  std::vector<OpaqueSurface> opaque_obscurers{};
+  std::optional<SpatialResponse> primary_degradation{}, camera_degradation{};
+  bool primary_degradation_in_facet_frame{};
+  std::shared_ptr<const PixelResponses> pixel_responses{};
 
   CompiledSegmentedOpticalModel(
       ModelProvenance compiled_provenance, std::vector<ImportedFacet> compiled_facets,
@@ -170,6 +179,21 @@ struct CompiledSegmentedOpticalModel {
     if (!is_valid(obscurer) || !ids.insert(obscurer.id).second)
       return false;
   }
+  for (const auto &surface : optical_model.opaque_obscurers)
+    if (!is_valid(surface) || !ids.insert(surface.id).second)
+      return false;
+  if ((optical_model.primary_degradation && !optical_model.primary_degradation->is_valid()) ||
+      (optical_model.camera_degradation && !optical_model.camera_degradation->is_valid()))
+    return false;
+  if (optical_model.primary_degradation_in_facet_frame)
+    for (const auto &facet : optical_model.primary_facets) {
+      const auto &u = facet.response_basis_u, &v = facet.response_basis_v;
+      if (!normalised_checked(u) || !normalised_checked(v) || std::abs(norm(u) - 1) > kEpsilon ||
+          std::abs(norm(v) - 1) > kEpsilon || std::abs(dot(u, v)) > kEpsilon ||
+          std::abs(dot(u, facet.unit_normal)) > kEpsilon ||
+          std::abs(dot(v, facet.unit_normal)) > kEpsilon)
+        return false;
+    }
   if ((optical_model.primary_reflectivity && !optical_model.primary_reflectivity->is_valid()) ||
       (optical_model.primary_scatter && !optical_model.primary_scatter->is_valid()) ||
       (optical_model.camera_response && !optical_model.camera_response->is_valid()) ||

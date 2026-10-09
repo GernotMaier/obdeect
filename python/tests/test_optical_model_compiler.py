@@ -28,6 +28,43 @@ from obdeect.optical_model_compiler import (
 
 
 class TestOpticalModelCompiler(unittest.TestCase):
+    def test_derived_reference_parameters_are_accounted_without_changing_transport(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            baseline = compile_optical_model(self.make_ir(root), root)
+            production = root / "productions/1.0.0/GENERIC.json"
+            manifest = json.loads(production.read_text())
+            manifest["parameters"]["GENERIC"]["effective_focal_length"] = "1.0.0"
+            production.write_text(json.dumps(manifest))
+            path = root / (
+                "model_parameters/GENERIC/effective_focal_length/effective_focal_length-1.0.0.json"
+            )
+            path.parent.mkdir()
+            path.write_text(
+                json.dumps({
+                    "instrument": "GENERIC",
+                    "parameter": "effective_focal_length",
+                    "parameter_version": "1.0.0",
+                    "type": "float64",
+                    "unit": "cm",
+                    "file": False,
+                    "value": 1601,
+                })
+            )
+            model = compile_optical_model(resolve_model(root, "GENERIC", "1.0.0"), root)
+            report = model["report"]
+            self.assertNotIn("effective_focal_length", report["deferred"])
+            self.assertNotIn("effective_focal_length", report["consumed"])
+            self.assertEqual(
+                report["field_coverage"]["effective_focal_length"]["disposition"],
+                "reference_diagnostic",
+            )
+            self.assertIn(
+                "sha256",
+                report["reference_diagnostics"]["effective_focal_length"]["parameter_record"],
+            )
+            self.assertEqual(model["primary"], baseline["primary"])
+
     def test_parses_model_obscuration_cylinders_in_metres(self):
         cylinders = parse_obscuration_cylinders(
             "# %ECSV 1.0\nid group x1 y1 z1 x2 y2 z2 diameter\nmast-1 mast 0 0 1 0 0 4 0.2\n"
@@ -482,6 +519,24 @@ class TestOpticalModelCompiler(unittest.TestCase):
                 trace["primary_to_secondary_cylinders"][0]["second_endpoint_m"][2], 2.0
             )
             self.assertNotIn("camera_depth", optical_model["report"]["deferred"])
+            shadow_path = root / (
+                "model_parameters/GENERIC/secondary_mirror_shadow_diameter/"
+                "secondary_mirror_shadow_diameter-1.0.0.json"
+            )
+            shadow_parameter = json.loads(shadow_path.read_text())
+            shadow_parameter["value"] = -1
+            shadow_path.write_text(json.dumps(shadow_parameter))
+            automatic = compile_optical_model(resolve_model(root, "GENERIC", "1.0.0"), root)
+            self.assertAlmostEqual(automatic["secondary"]["incoming_shadow"]["diameter_m"], 1.8)
+            surface_path = root / (
+                "model_parameters/GENERIC/secondary_mirror_parameters/"
+                "secondary_mirror_parameters-1.0.0.json"
+            )
+            surface_parameter = json.loads(surface_path.read_text())
+            surface_parameter.update(value=[250, -0.01], unit=["cm", "cm"])
+            surface_path.write_text(json.dumps(surface_parameter))
+            convex = compile_optical_model(resolve_model(root, "GENERIC", "1.0.0"), root)
+            self.assertEqual(convex["secondary"]["incoming_shadow"]["z_m"], 2.5)
             with self.assertRaisesRegex(OpticalModelCompileError, "use compiled JSON"):
                 write_native_optical_model(optical_model, root / "unsupported.csv")
 
@@ -563,10 +618,18 @@ class TestOpticalModelCompiler(unittest.TestCase):
 
         trace_model = build_trace_model(optical_model)
         self.assertEqual(
-            trace_model["primary_reflectivity"], optical_model["primary"]["reflectivity"]
+            [
+                {k: v for k, v in row.items() if k != "interpolation"}
+                for row in trace_model["primary_reflectivity"]
+            ],
+            optical_model["primary"]["reflectivity"],
         )
         self.assertEqual(
-            trace_model["secondary_reflectivity"], optical_model["secondary"]["reflectivity"]
+            [
+                {k: v for k, v in row.items() if k != "interpolation"}
+                for row in trace_model["secondary_reflectivity"]
+            ],
+            optical_model["secondary"]["reflectivity"],
         )
 
     def test_structured_segments_preserve_units_counts_and_secondary_gap_edge(self):
@@ -617,18 +680,52 @@ class TestOpticalModelCompiler(unittest.TestCase):
             "focal_surface": surface,
         }
         trace = build_trace_model(model)
-        self.assertEqual(trace["primary_reflectivity"], response)
-        self.assertEqual(trace["secondary_reflectivity"], response)
+        self.assertEqual(
+            [
+                {k: v for k, v in row.items() if k != "interpolation"}
+                for row in trace["primary_reflectivity"]
+            ],
+            response,
+        )
+        self.assertEqual(
+            [
+                {k: v for k, v in row.items() if k != "interpolation"}
+                for row in trace["secondary_reflectivity"]
+            ],
+            response,
+        )
+        self.assertEqual(trace["secondary_reflectivity"][0]["interpolation"]["boundary"], "clamp")
         measured = [{**row, "reflectivity_rms": 0.02} for row in response]
         model["primary"]["reflectivity"] = measured
         model["secondary"]["reflectivity"] = measured
         trace = build_trace_model(model)
-        self.assertEqual(trace["primary_reflectivity"], response)
-        self.assertEqual(trace["secondary_reflectivity"], response)
+        self.assertEqual(
+            [
+                {k: v for k, v in row.items() if k != "interpolation"}
+                for row in trace["primary_reflectivity"]
+            ],
+            response,
+        )
+        self.assertEqual(trace["primary_reflectivity"][0]["interpolation"]["boundary"], "clamp")
+        self.assertEqual(
+            [
+                {k: v for k, v in row.items() if k != "interpolation"}
+                for row in trace["secondary_reflectivity"]
+            ],
+            response,
+        )
+        self.assertEqual(trace["secondary_reflectivity"][0]["interpolation"]["boundary"], "clamp")
         self.assertEqual(model["primary"]["reflectivity"][0]["reflectivity_rms"], 0.02)
         model["camera"] = {"filter_response": response}
         camera_response = build_trace_model(model)["camera_response"]
-        self.assertEqual(camera_response["camera_filter"], response)
+        self.assertEqual(
+            [
+                {k: v for k, v in row.items() if k != "interpolation"}
+                for row in camera_response["camera_filter"]
+            ],
+            response,
+        )
+        self.assertEqual(camera_response["camera_filter"][0]["interpolation"]["boundary"], "clamp")
         self.assertEqual(camera_response["camera_transmission"], 1.0)
         self.assertNotIn("lightguide_efficiency", camera_response)
         model["camera"] = {"transmission": 0.9}
@@ -770,7 +867,7 @@ class TestOpticalModelCompiler(unittest.TestCase):
         self.assertEqual(segments[1]["inner_radius_m"], 1.0)
         self.assertEqual(segments[2]["start_deg"], 90.0)
         self.assertAlmostEqual(segments[1]["gap_m"], 0.014)
-        with self.assertRaisesRegex(OpticalModelCompileError, "unsupported type"):
+        with self.assertRaisesRegex(OpticalModelCompileError, "polygon segment"):
             parse_simtel_segmentation("polygon 1 0 0 1 0\n")
 
     def test_defaults_omitted_segmentation_rotation_start_and_gap_to_zero(self):
@@ -907,12 +1004,9 @@ class TestOpticalModelCompiler(unittest.TestCase):
             )
             self.assertNotEqual(changed["optical_model_sha256"], overridden["optical_model_sha256"])
             (files / "response.dat").unlink()
-            self.assertEqual(
-                compile_optical_model(ir, root)["report"]["camera_layout_evidence"][
-                    "unresolved_response_files"
-                ],
-                ["response.dat"],
-            )
+            with self.assertRaisesRegex(OpticalModelCompileError, "missing or ambiguous"):
+                compile_optical_model(ir, root)
+            (files / "response.dat").write_text("300 0.5\n")
             count_record = root / "model_parameters/GENERIC/camera_pixels/camera_pixels-1.0.0.json"
             data = json.loads(count_record.read_text())
             data["value"] = 3

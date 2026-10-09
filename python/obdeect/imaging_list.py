@@ -81,6 +81,17 @@ def load_imaging_metadata(
     for field in ("incoming_obscurer_planes", "primary_to_secondary_planes"):
         for plane in trace.get(field, []):
             top = max(top, plane["centre_m"][2] + plane["diameter_m"] / 2)
+    for surface in trace.get("opaque_obscurers", []):
+        if surface["shape"] == "quadrilateral":
+            top = max(top, *(point[2] for point in surface["vertices_m"]))
+        elif surface["shape"] in ("hollow_frustum", "solid_frustum"):
+            top = max(
+                top,
+                surface["first_endpoint_m"][2] + surface["first_radius_m"] + surface["thickness_m"],
+                surface["second_endpoint_m"][2]
+                + surface["second_radius_m"]
+                + surface["thickness_m"],
+            )
     values = (
         radius,
         top,

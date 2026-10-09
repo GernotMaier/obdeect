@@ -9,6 +9,18 @@ from obdeect.optical_model_compiler import build_trace_model
 
 
 class TestCameraSurfaces(unittest.TestCase):
+    def test_global_camera_rotation_follows_inverse_reference_frame(self):
+        for reflected, expected_y in ((False, -1), (True, 1)):
+            camera = self.camera([1])
+            camera["rotation_deg"] = 90
+            plane = compile_camera_surfaces(
+                camera, dict(coefficient_m=[10], radial_scale_m=1), 1, reflected=reflected
+            )["entrance_surfaces"][0]
+            self.assertAlmostEqual(plane["centre_m"][0], 0)
+            self.assertAlmostEqual(plane["centre_m"][1], expected_y)
+            self.assertAlmostEqual(plane["tangent"][0], 0)
+            self.assertAlmostEqual(plane["tangent"][1], expected_y)
+
     def camera(self, positions):
         types = parse_camera_pixel_types({
             "value": [

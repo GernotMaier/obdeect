@@ -12,6 +12,17 @@ class ImportError(ValueError):
     """An input violates the simulation-models manifest contract."""
 
 
+# These are independently derived reference products, not prescriptions for
+# individual ray propagation. Retain their records/assets for comparison.
+REFERENCE_DIAGNOSTIC_PARAMETERS = frozenset({
+    "effective_focal_length",
+    "optics_properties",
+    "camera_filter_photon_incident_angle",
+    "primary_mirror_incidence_angle",
+    "secondary_mirror_incidence_angle",
+})
+
+
 # Optical transport ends at the physical detector surface.  This explicit
 # allow-list prevents camera electronics, trigger, gain, and calibration
 # settings from leaking into an optical model.
@@ -21,6 +32,7 @@ RAY_TRACING_PARAMETERS = frozenset({
     "camera_body_shape",
     "camera_depth",
     "camera_filter",
+    "camera_filter_photon_incident_angle",
     "camera_pixel_layout",
     "camera_pixel_types",
     "camera_pixels",
@@ -31,6 +43,7 @@ RAY_TRACING_PARAMETERS = frozenset({
     "focal_length",
     "focus_offset",
     "lightguide_efficiency_vs_incidence_angle",
+    "lightguide_efficiency_vs_wavelength",
     "mirror_align_random_distance",
     "mirror_align_random_horizontal",
     "mirror_align_random_vertical",
@@ -44,6 +57,15 @@ RAY_TRACING_PARAMETERS = frozenset({
     "optics_properties",
     "parabolic_dish",
     "random_focal_length",
+    "grading_of_focal_length",
+    "mirror_f_scale",
+    "mirror_opt",
+    "flip_mirrors",
+    "camera_scale_factor",
+    "camera_degraded_efficiency",
+    "camera_degraded_map",
+    "primary_degraded_map",
+    "secondary_degraded_map",
     "pixels_parallel",
     "primary_mirror_segmentation",
     "primary_mirror_degraded_map",
@@ -177,15 +199,29 @@ def resolve_model(root: Path, model: str, version: str) -> dict[str, Any]:
         records[f"parameter:{name}"] = record(parameter_path, root)
         if parameter["file"] and parameter["value"] is not None:
             value = parameter["value"]
-            if not component(value):
+            asset_name = value.partition("#rpol:")[0] if isinstance(value, str) else value
+            if asset_name != value and name not in {
+                "mirror_reflectivity",
+                "secondary_mirror_reflectivity",
+                "camera_filter",
+                "lightguide_efficiency_vs_incidence_angle",
+                "lightguide_efficiency_vs_wavelength",
+                "camera_degraded_map",
+                "primary_degraded_map",
+                "secondary_degraded_map",
+                "primary_mirror_degraded_map",
+                "secondary_mirror_degraded_map",
+            }:
+                raise ImportError(f"RPOL options are unsupported for asset {name}")
+            if not component(asset_name):
                 raise ImportError(f"unsafe or invalid asset name in {parameter_path}")
             # Historical exports use ``model_parameters/Files`` while current
             # simulation-models records commonly keep the asset beside the
             # parameter JSON. Support only these two documented locations;
             # never search arbitrary descendants or silently choose a file.
             candidates = (
-                root / "model_parameters" / "Files" / value,
-                parameter_path.parent / value,
+                root / "model_parameters" / "Files" / asset_name,
+                parameter_path.parent / asset_name,
             )
             existing = [
                 within_root(candidate, root) for candidate in candidates if candidate.is_file()

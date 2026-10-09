@@ -9,6 +9,27 @@ from obdeect import model_import as IMPORTER
 
 
 class TestSimulationModelsImport(unittest.TestCase):
+    def test_table_filename_options_preserve_asset_provenance(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.make_tree(root)
+            production = root / "productions/1.2.3/TEST.json"
+            manifest = json.loads(production.read_text())
+            manifest["parameters"]["TEST"]["mirror_reflectivity"] = "1.0.0"
+            production.write_text(json.dumps(manifest))
+            path = root / "model_parameters/TEST/mirror_list/mirror_list-1.0.0.json"
+            parameter = json.loads(path.read_text())
+            parameter["parameter"] = "mirror_reflectivity"
+            parameter["value"] = "mirrors.dat#rpol:clip,scheme=0"
+            path = root / "model_parameters/TEST/mirror_reflectivity/mirror_reflectivity-1.0.0.json"
+            path.parent.mkdir()
+            path.write_text(json.dumps(parameter))
+            model = IMPORTER.resolve_model(root, "TEST", "1.2.3")
+            self.assertEqual(
+                model["parameters"]["mirror_reflectivity"]["value"], parameter["value"]
+            )
+            self.assertTrue(model["assets"]["mirror_reflectivity"]["path"].endswith("mirrors.dat"))
+
     def make_tree(self, root: Path, *, asset_exists: bool = True):
         production = root / "productions" / "1.2.3"
         parameter = root / "model_parameters" / "TEST" / "focal_length"

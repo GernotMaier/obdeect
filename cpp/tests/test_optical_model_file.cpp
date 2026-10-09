@@ -147,6 +147,26 @@ int main() {
   auto unit_response = *axisymmetric;
   unit_response.primary_reflectivity.reset();
   unit_response.secondary_reflectivity.reset();
+  auto final_flight = unit_response;
+  final_flight.primary.surface.coefficient_m[1] = 0.1;
+  const auto unobstructed =
+      obdeect::trace_axisymmetric_optical_model({{0.5, 0, 10}, {0, 0, -1}}, 2, final_flight);
+  if (unobstructed.status != obdeect::PhotonStatus::detected)
+    return 1;
+  const auto mid = (unobstructed.points_m[2] + unobstructed.points_m[3]) * 0.5;
+  obdeect::OpaqueSurface final_plate;
+  final_plate.id = 70;
+  final_plate.vertices = {
+      mid + obdeect::Vec3{-0.001, -0.001, 0}, mid + obdeect::Vec3{0.001, -0.001, 0},
+      mid + obdeect::Vec3{0.001, 0.001, 0}, mid + obdeect::Vec3{-0.001, 0.001, 0}};
+  final_flight.opaque_obscurers.push_back(final_plate);
+  const auto final_loss =
+      obdeect::trace_axisymmetric_optical_model({{0.5, 0, 10}, {0, 0, -1}}, 2, final_flight);
+  if (final_loss.status != obdeect::PhotonStatus::blocked_obscurer || final_loss.point_count != 4 ||
+      final_loss.terminal_surface_id != 70 ||
+      obdeect::norm(final_loss.points_m[3] - mid) > 1.e-10 ||
+      final_loss.interaction_kinds[2] != obdeect::OpticalInteractionKind::obscurer)
+    return 1;
   assert(obdeect::trace_axisymmetric_optical_model({{0, 0, 10}, {0, 0, -1}}, 0, unit_response, 0)
              .status == obdeect::PhotonStatus::invalid_input);
   // Opaque primitives belong to an explicit flight, not to the detector flight.

@@ -24,8 +24,10 @@ from obdeect.camera_config import (
     parse_camera_pixel_types,
 )
 from obdeect.camera_surfaces import compile_camera_surfaces
+from obdeect.model_import import REFERENCE_DIAGNOSTIC_PARAMETERS, component, record, resolve_model
 from obdeect.model_import import ImportError as ModelImportError
-from obdeect.model_import import component, record, resolve_model
+from obdeect.pixel_response_compiler import bind_pixel_responses, measured_pixel_response
+from obdeect.simtel_tables import TableImportError, parse_rpol_table
 
 
 class OpticalModelCompileError(ValueError):
@@ -48,12 +50,55 @@ def parse_simtel_segmentation(contents: str) -> list[dict[str, Any]]:
         fields = source_line.split("#", 1)[0].split()
         if not fields:
             continue
-        kind = fields[0].lower()
-        if kind not in {"hex", "yhex", "ring"}:
+        token = fields[0].lower()
+        aliases = {
+            "hexsegments": "hex",
+            "yhexsegments": "yhex",
+            "ringsegments": "ring",
+            "squaresegments": "square",
+            "circularsegments": "circle",
+            "polygonsegments": "polygon",
+        }
+        kind = next((value for name, value in aliases.items() if name.startswith(token)), token)
+        if kind == "polygon":
+            try:
+                count = int(fields[1])
+                angle = math.radians(float(fields[2]))
+                values = [float(v) for v in " ".join(fields[3:]).replace(",", " ").split()]
+            except (ValueError, IndexError) as error:
+                raise OpticalModelCompileError("invalid polygon segment") from error
+            if (
+                count != 1
+                or len(values) < 6
+                or len(values) % 2
+                or not all(math.isfinite(v) for v in values)
+                or not math.isfinite(angle)
+            ):
+                raise OpticalModelCompileError("polygon segment requires one finite polygon")
+            vertices = [
+                [
+                    0.01 * (x * math.cos(angle) + y * math.sin(angle)),
+                    0.01 * (-x * math.sin(angle) + y * math.cos(angle)),
+                ]
+                for x, y in zip(values[::2], values[1::2])
+            ]
+            if vertices[0] == vertices[-1]:
+                vertices.pop()
+            turns = [
+                (b[0] - a[0]) * (c[1] - b[1]) - (b[1] - a[1]) * (c[0] - b[0])
+                for a, b, c in zip(
+                    vertices, vertices[1:] + vertices[:1], vertices[2:] + vertices[:2]
+                )
+            ]
+            if len(vertices) < 3 or not (all(v > 0 for v in turns) or all(v < 0 for v in turns)):
+                raise OpticalModelCompileError("polygon segment must be strictly convex")
+            segments.append({"id": len(segments), "shape": "polygon", "vertices_xy_m": vertices})
+            continue
+        if kind not in {"hex", "yhex", "ring", "square", "circle"}:
             raise OpticalModelCompileError(
                 f"segmentation line {line_number}: unsupported type {fields[0]}"
             )
-        expected_fields = {5, 6} if kind in {"hex", "yhex"} else {5, 6, 7}
+        expected_fields = {5, 6} if kind != "ring" else {5, 6, 7}
         if len(fields) not in expected_fields:
             raise OpticalModelCompileError(f"segmentation line {line_number}: wrong field count")
         try:
@@ -67,7 +112,7 @@ def parse_simtel_segmentation(contents: str) -> list[dict[str, Any]]:
             raise OpticalModelCompileError(
                 f"segmentation line {line_number}: invalid count or value"
             )
-        if kind in {"hex", "yhex"}:
+        if kind in {"hex", "yhex", "square", "circle"}:
             x_cm, y_cm, diameter_cm, rotation_deg = (*values, 0.0)[0:4]
             if count != 1 or diameter_cm <= 0.0:
                 raise OpticalModelCompileError(
@@ -75,7 +120,7 @@ def parse_simtel_segmentation(contents: str) -> list[dict[str, Any]]:
                 )
             segments.append({
                 "id": len(segments),
-                "shape": "hexagon",
+                "shape": {"square": "square", "circle": "circle"}.get(kind, "hexagon"),
                 "centre_xy_m": [x_cm * 0.01, y_cm * 0.01],
                 "diameter_m": diameter_cm * 0.01,
                 "rotation_deg": rotation_deg + (90.0 if kind == "yhex" else 0.0),
@@ -116,12 +161,14 @@ def parse_model_segmentation(parameter: dict[str, Any]) -> list[dict[str, Any]]:
             raise OpticalModelCompileError("structured segmentation group must be an object")
         kind = group.get("kind")
         required = {"kind", "count"} | (
-            {"x", "y", "diameter"} if kind in {"hex", "yhex"} else {"r_min", "r_max", "dphi"}
+            {"x", "y", "diameter"}
+            if kind in {"hex", "yhex", "square", "circle"}
+            else {"r_min", "r_max", "dphi"}
         )
-        optional = {"rotation"} if kind in {"hex", "yhex"} else {"phi0", "gap"}
+        optional = {"rotation"} if kind in {"hex", "yhex", "square", "circle"} else {"phi0", "gap"}
         count = group.get("count")
         if (
-            kind not in {"hex", "yhex", "ring"}
+            kind not in {"hex", "yhex", "ring", "square", "circle"}
             or not required.issubset(group)
             or set(group) - required - optional
             or isinstance(count, bool)
@@ -155,7 +202,12 @@ def _secondary_segment_frame(segments: list[dict[str, Any]]) -> list[dict[str, A
     """Apply simtel secondary's pi rotation about y to finite local footprints."""
     transformed = []
     for segment in segments:
-        if segment["shape"] == "hexagon":
+        if segment["shape"] == "polygon":
+            transformed.append({
+                **segment,
+                "vertices_xy_m": [[-x, y] for x, y in segment["vertices_xy_m"]],
+            })
+        elif segment["shape"] in {"hexagon", "square", "circle"}:
             transformed.append({
                 **segment,
                 "centre_xy_m": [-segment["centre_xy_m"][0], segment["centre_xy_m"][1]],
@@ -195,18 +247,19 @@ def _signed_length_m(parameter: dict[str, Any], name: str) -> float:
 
 
 def parse_simtel_mirror_list(
-    contents: str, *, fallback_focal_length_m: float | None
+    contents: str, *, fallback_focal_length_m: float | None, allow_automatic: bool = False
 ) -> list[dict[str, Any]]:
     """Parse the documented sim_telarray mirror-list columns, in centimetres.
 
-    The sim_telarray reader consumes five required columns (x, y, diameter,
-    focal length, shape) and an optional z position.  It ignores text after
+    The sim_telarray reader consumes four required columns (x, y, diameter,
+    focal length), an optional shape (default circle), and an optional z position.
+    It ignores text after
     those fields, which model files commonly use for comments and panel IDs.
     This parser retains only the documented geometric values: trailing data is
     deliberately not interpreted as a normal, rotation, or alignment.
 
-    Focal length zero is legal only when an explicit catalogue fallback is
-    supplied.  It is not a prescription for a facet normal.
+    Focal length zero requires an explicit catalogue fallback or automatic
+    prescription resolution. Negative values request a random focal-length error.
     """
     if fallback_focal_length_m is not None and (
         not math.isfinite(fallback_focal_length_m) or fallback_focal_length_m <= 0.0
@@ -215,21 +268,21 @@ def parse_simtel_mirror_list(
     facets: list[dict[str, Any]] = []
     for line_number, source_line in enumerate(contents.splitlines(), start=1):
         line = source_line.strip()
-        if not line or line.startswith("#"):
+        if not line or line.startswith(("#", "%")):
             continue
-        fields = line.split()
+        fields = line.split("#", 1)[0].split("%", 1)[0].split()
         # Astropy ECSV keeps its column names in one un-commented header row.
         # The numerical columns that follow have the same documented layout as
         # sim_telarray mirror lists, so skip only this exact header form.
         if fields[:5] == ["mirror_x", "mirror_y", "mirror_diameter", "focal_length", "shape_type"]:
             continue
-        if len(fields) < 5:
+        if len(fields) < 4:
             raise OpticalModelCompileError(
-                f"mirror list line {line_number}: expected at least 5 columns"
+                f"mirror list line {line_number}: expected at least 4 columns"
             )
         try:
             x_cm, y_cm, diameter_cm, focal_cm = (float(item) for item in fields[:4])
-            shape_value = float(fields[4])
+            shape_value = float(fields[4]) if len(fields) >= 5 else 0.0
             shape_code = int(shape_value)
             # sim_telarray parses a sixth floating-point field when present.
             # A comment immediately after the required fields means no z was
@@ -257,14 +310,15 @@ def parse_simtel_mirror_list(
             raise OpticalModelCompileError(
                 f"mirror list line {line_number}: unsupported shape {shape_code}"
             )
-        focal_m = focal_cm * 0.01
+        catalogue_focal_m = focal_cm * 0.01
+        focal_m = abs(catalogue_focal_m)
         if focal_m == 0.0:
-            if fallback_focal_length_m is None:
+            if fallback_focal_length_m is None and not allow_automatic:
                 raise OpticalModelCompileError(
                     f"mirror list line {line_number}: zero focal length has no fallback"
                 )
-            focal_m = fallback_focal_length_m
-        if focal_m <= 0.0:
+            focal_m = fallback_focal_length_m or 0.0
+        if focal_m < 0.0:
             raise OpticalModelCompileError(
                 f"mirror list line {line_number}: focal length must be positive"
             )
@@ -274,6 +328,7 @@ def parse_simtel_mirror_list(
             "shape": _SHAPES[shape_code],
             "diameter_m": diameter_cm * 0.01,
             "focal_length_m": focal_m,
+            "catalogue_focal_length_m": catalogue_focal_m,
         }
         facets.append(facet)
     if not facets:
@@ -324,6 +379,118 @@ def parse_obscuration_cylinders(contents: str) -> list[dict[str, Any]]:
     return cylinders
 
 
+def parse_rectangular_response(
+    contents: str, name: str, *, filename_options: str = ""
+) -> dict[str, Any]:
+    """Normalize RPOL formats 2/3 and all declared grid interpolation options."""
+    try:
+        table = parse_rpol_table(contents, default_dimension=3, filename_options=filename_options)
+    except TableImportError as error:
+        raise OpticalModelCompileError(f"{name}: {error}") from error
+    if not table["y"]:
+        raise OpticalModelCompileError(f"{name} requires a two-dimensional table")
+    if any(not 0 <= value <= 1 for value in table["response"]):
+        raise OpticalModelCompileError(f"{name} response must be a fraction")
+    return {**table, "clip": table["interpolation"]["boundary"] == "zero"}
+
+
+def parse_spatial_response(
+    contents: str, name: str, *, filename_options: str = ""
+) -> dict[str, Any]:
+    table = parse_rectangular_response(contents, name, filename_options=filename_options)
+    return {
+        "x_m": [v * 0.01 for v in table["x"]],
+        "y_m": [v * 0.01 for v in table["y"]],
+        "response": table["response"],
+        "clip": table["clip"],
+        "interpolation": table["interpolation"],
+    }
+
+
+def parse_obscuration_quadrilaterals(contents: str) -> list[dict[str, Any]]:
+    """Read the production ECSV vertices in metres, retaining convex finite plates."""
+    header = None
+    result = []
+    names = [f"{axis}{index}" for index in range(1, 5) for axis in "xyz"]
+    for source in contents.splitlines():
+        line = source.split("#", 1)[0].strip()
+        if not line:
+            continue
+        fields = line.split()
+        if header is None:
+            header = fields
+            if not set(names).issubset(header):
+                raise OpticalModelCompileError("quadrilateral obscurers lack vertex columns")
+            continue
+        if len(fields) != len(header):
+            raise OpticalModelCompileError("quadrilateral obscurer has wrong column count")
+        row = dict(zip(header, fields, strict=True))
+        try:
+            vertices = [[float(row[f"{axis}{i}"]) for axis in "xyz"] for i in range(1, 5)]
+        except ValueError as error:
+            raise OpticalModelCompileError(
+                "quadrilateral obscurer has nonnumeric vertices"
+            ) from error
+        if any(not math.isfinite(v) for point in vertices for v in point):
+            raise OpticalModelCompileError("quadrilateral obscurer has nonfinite vertices")
+        edges = [
+            [b - a for a, b in zip(vertices[i], vertices[(i + 1) % 4], strict=True)]
+            for i in range(4)
+        ]
+
+        def cross(a, b):
+            return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
+
+        normal = cross(edges[0], edges[1])
+        magnitude = math.sqrt(sum(v * v for v in normal))
+        if magnitude <= 1e-12:
+            raise OpticalModelCompileError("quadrilateral obscurer is degenerate")
+        normal = [v / magnitude for v in normal]
+        if abs(sum(normal[j] * (vertices[3][j] - vertices[0][j]) for j in range(3))) > 1e-12:
+            raise OpticalModelCompileError("quadrilateral obscurer must be planar")
+        if any(
+            sum(a * b for a, b in zip(cross(edges[i], edges[(i + 1) % 4]), normal, strict=True))
+            <= 1e-12
+            for i in range(4)
+        ):
+            raise OpticalModelCompileError("quadrilateral obscurer must be convex")
+        result.append({"shape": "quadrilateral", "vertices_m": vertices})
+    return result
+
+
+def compile_secondary_baffle(
+    parameter: dict[str, Any], overall_offset_m: float
+) -> dict[str, Any] | None:
+    """Manual 12.3.3: open baffle with optional radial thickness and end radius."""
+    values, units = parameter.get("value"), parameter.get("unit")
+    if not isinstance(values, list) or not 3 <= len(values) <= 5:
+        raise OpticalModelCompileError("secondary baffle requires 3 to 5 lengths")
+    if isinstance(units, str):
+        units = [units] * len(values)
+    if (
+        not isinstance(units, list)
+        or len(units) != len(values)
+        or any(u not in _UNIT_TO_M for u in units)
+    ):
+        raise OpticalModelCompileError("secondary baffle requires length units")
+    z1, z2, r1, thickness, r2 = (
+        [_number(v, "secondary baffle") * _UNIT_TO_M[u] for v, u in zip(values, units)] + [0.0, 0.0]
+    )[:5]
+    if r1 == 0:
+        return None
+    r2 = r2 or r1
+    if r1 < 0 or r2 < 0 or thickness < 0 or z1 == z2:
+        raise OpticalModelCompileError("invalid secondary baffle")
+    return {
+        "shape": "hollow_frustum",
+        "first_endpoint_m": [0.0, 0.0, z1 - overall_offset_m],
+        "second_endpoint_m": [0.0, 0.0, z2 - overall_offset_m],
+        "first_radius_m": r1,
+        "second_radius_m": r2,
+        "thickness_m": thickness,
+    }
+
+
 def _validated_mirror_response(values: object, name: str) -> list[dict[str, float]]:
     """Validate spectral knots or a rectangular spectral/incidence grid."""
     if not isinstance(values, list) or len(values) < 2:
@@ -335,10 +502,14 @@ def _validated_mirror_response(values: object, name: str) -> list[dict[str, floa
         if (
             not isinstance(entry, dict)
             or not required.issubset(entry)
-            or set(entry) - required - _RESPONSE_METADATA
+            or set(entry) - required - _RESPONSE_METADATA - {"interpolation"}
         ):
             raise OpticalModelCompileError(f"invalid {name} reflectivity columns")
-        parsed = {key: _number(value, f"{name} {key}") for key, value in entry.items()}
+        parsed = {
+            key: _number(value, f"{name} {key}")
+            for key, value in entry.items()
+            if key != "interpolation"
+        }
         if (
             parsed["wavelength_nm"] <= 0
             or not 0 <= parsed["response"] <= 1
@@ -366,13 +537,50 @@ def _validated_mirror_response(values: object, name: str) -> list[dict[str, floa
         for first, second in zip(result, result[1:])
     ):
         raise OpticalModelCompileError(f"trace model found unordered {name} reflectivity")
+    if values and "interpolation" in values[0]:
+        result[0]["interpolation"] = values[0]["interpolation"]
     return result
 
 
 def parse_wavelength_response(
-    contents: str, name: str, value_column: str = "reflectivity"
+    contents: str, name: str, value_column: str = "reflectivity", *, filename_options: str = ""
 ) -> list[dict[str, float]]:
     """Read spectral response, preserving a complete incidence-angle grid when supplied."""
+    first = next((line.strip() for line in contents.splitlines() if line.strip()), "")
+    numeric = next(
+        (
+            line.strip()
+            for line in contents.splitlines()
+            if line.strip() and not line.lstrip().startswith(("#", "%"))
+        ),
+        "",
+    )
+    try:
+        float(numeric.split()[0])
+        plain = True
+    except ValueError, IndexError:
+        plain = False
+    if first.startswith("#@RPOL@") or plain:
+        try:
+            table = parse_rpol_table(contents, filename_options=filename_options)
+        except TableImportError as error:
+            raise OpticalModelCompileError(f"{name}: {error}") from error
+        rows = []
+        for i, wavelength in enumerate(table["x"]):
+            if table["y"]:
+                rows.extend(
+                    {
+                        "wavelength_nm": wavelength,
+                        "incidence_angle_deg": angle,
+                        "response": table["response"][i * len(table["y"]) + j],
+                    }
+                    for j, angle in enumerate(table["y"])
+                )
+            else:
+                rows.append({"wavelength_nm": wavelength, "response": table["response"][i]})
+        rows[0]["interpolation"] = table["interpolation"]
+        return _validated_mirror_response(rows, name)
+
     header: list[str] | None = None
     response: list[dict[str, float]] = []
     for line_number, source_line in enumerate(contents.splitlines(), start=1):
@@ -445,8 +653,40 @@ def parse_wavelength_response(
     return reduced
 
 
-def parse_angular_response(contents: str, name: str) -> list[dict[str, float]]:
+def parse_angular_response(
+    contents: str, name: str, *, filename_options: str = ""
+) -> list[dict[str, float]]:
     """Read measured lightguide response without adding geometric losses twice."""
+    numeric = next(
+        (
+            line.strip()
+            for line in contents.splitlines()
+            if line.strip() and not line.lstrip().startswith(("#", "%"))
+        ),
+        "",
+    )
+    try:
+        float(numeric.split()[0])
+        plain = True
+    except ValueError, IndexError:
+        plain = False
+    if "#@RPOL@" in contents or plain:
+        try:
+            table = parse_rpol_table(contents, filename_options=filename_options)
+        except TableImportError as error:
+            raise OpticalModelCompileError(f"{name}: {error}") from error
+        if (
+            table["y"]
+            or any(not 0 <= a <= 90 for a in table["x"])
+            or any(not 0 <= v <= 1 for v in table["response"])
+        ):
+            raise OpticalModelCompileError(f"invalid {name} angular response")
+        rows = [
+            {"incidence_angle_deg": x, "response": y} for x, y in zip(table["x"], table["response"])
+        ]
+        rows[0]["interpolation"] = table["interpolation"]
+        return rows
+
     header = None
     result = []
     for line in contents.splitlines():
@@ -538,7 +778,7 @@ def derive_nominal_single_reflector(
                     "panel centre lies outside Davies-Cotton dish radius"
                 )
             height = dish_length - math.sqrt(dish_length * dish_length - radius * radius)
-        distance = math.hypot(focal_length - height, radius)
+        distance = facet.get("resolved_focus_distance_m", math.hypot(focal_length - height, radius))
         if file_z > 0:
             z = file_z - offset
         else:
@@ -547,22 +787,155 @@ def derive_nominal_single_reflector(
         # direction (+z for a star) and the direction from the facet centre
         # to the focal point.  Derive it from the final placement, including
         # mirror_offset, so every chief ray reaches the compiled focal plane.
-        focal_distance = math.hypot(radius, focal_length - offset - z)
+        focal_distance = distance
         if not math.isfinite(focal_distance) or focal_distance <= 0.0:
             raise OpticalModelCompileError("facet has no finite focal-point direction")
-        outgoing_x = -x / focal_distance
-        outgoing_y = -y / focal_distance
-        outgoing_z = (focal_length - offset - z) / focal_distance
-        normal_length = math.sqrt(
-            outgoing_x * outgoing_x + outgoing_y * outgoing_y + (outgoing_z + 1.0) ** 2
+        opt = parameters.get("mirror_opt", {}).get("value", [0, 0, 0])
+        inclination = (
+            0.5 * math.asin(radius / focal_distance) * (1 + opt[0] * radius**2 / focal_length**2)
         )
-        if not math.isfinite(normal_length) or normal_length <= 0.0:
-            raise OpticalModelCompileError("facet has no finite nominal normal")
-        nx = outgoing_x / normal_length
-        ny = outgoing_y / normal_length
+        phi = math.atan2(y, x)
         facet["nominal_centre_m"] = [x, y, z]
-        facet["nominal_normal"] = [nx, ny, (outgoing_z + 1.0) / normal_length]
+        facet["nominal_normal"] = [
+            -math.cos(phi) * math.sin(inclination),
+            -math.sin(phi) * math.sin(inclination),
+            math.cos(inclination),
+        ]
     apply_panel_alignment(facets, {}, 0, None)
+
+
+def resolve_focus_offset(parameter: dict[str, Any], zenith_deg: float | None) -> float:
+    """Manual section 12.3.3: linear cosine/sine camera focus deformation."""
+    values, units = parameter["value"], parameter["unit"]
+    base = _number(values[0], "focus_offset") * _UNIT_TO_M[units[0]]
+    if not values[2] and not values[3]:
+        return base
+    if zenith_deg is None:
+        raise OpticalModelCompileError("zenith-dependent focus requires alignment zenith")
+    theta, reference = math.radians(_number(zenith_deg, "zenith")), math.radians(values[1])
+    return (
+        base
+        + _number(values[2], "focus_offset")
+        * _UNIT_TO_M[units[0] if units[2] == "null" else units[2]]
+        * (math.cos(theta) - math.cos(reference))
+        + _number(values[3], "focus_offset")
+        * _UNIT_TO_M[units[0] if units[3] == "null" else units[3]]
+        * (math.sin(theta) - math.sin(reference))
+    )
+
+
+def resolve_panel_prescription(
+    facets: list[dict[str, Any]], parameters: dict[str, Any], seed: int
+) -> None:
+    """Manual 11.7/12.3.3, with the exact tel_setup_primary selection rules.
+
+    A positive catalogue focal length is fixed. Zero is automatic; negative
+    fixes the nominal magnitude but requests a manufacturing-error draw.
+    Positive catalogue heights prohibit distance-error draws.
+    """
+    if isinstance(seed, bool) or not isinstance(seed, int) or not 0 <= seed < 2**64:
+        raise OpticalModelCompileError("panel prescription requires a uint64 seed")
+    flip = parameters.get("flip_mirrors", {}).get("value", False)
+    if flip not in (False, True, 0, 1):
+        raise OpticalModelCompileError("flip_mirrors must be boolean")
+    if flip:
+        for facet in facets:
+            facet["centre_m"][:2] = facet["centre_m"][:2][::-1]
+            facet["shape"] = {
+                "hexagon_flat_x": "hexagon_flat_y",
+                "hexagon_flat_y": "hexagon_flat_x",
+            }.get(facet["shape"], facet["shape"])
+    focal = _length_m(parameters["focal_length"], "focal_length")
+    dish = _length_m(parameters["dish_shape_length"], "dish_shape_length", allow_zero=True) or focal
+    radii = [math.hypot(*facet["centre_m"][:2]) for facet in facets]
+    minimum, maximum = min(radii), max(radii)
+    grading = (
+        _signed_length_m(parameters["grading_of_focal_length"], "grading_of_focal_length")
+        if "grading_of_focal_length" in parameters
+        else 0.0
+    )
+    distance_sigma = (
+        _length_m(
+            parameters["mirror_align_random_distance"],
+            "mirror_align_random_distance",
+            allow_zero=True,
+        )
+        if "mirror_align_random_distance" in parameters
+        else 0.0
+    )
+    error = parameters.get("random_focal_length", {"value": [0, 0], "unit": ["m", "m"]})
+    values, units = error["value"], error["unit"]
+    if (
+        not isinstance(values, list)
+        or len(values) != 2
+        or not isinstance(units, list)
+        or len(units) != 2
+        or any(unit not in _UNIT_TO_M for unit in units)
+    ):
+        raise OpticalModelCompileError(
+            "random_focal_length requires RMS and clipping width with length units"
+        )
+    sigma, limit = [
+        _number(v, "random_focal_length") * _UNIT_TO_M[u] for v, u in zip(values, units)
+    ]
+    if sigma < 0 or limit < 0:
+        raise OpticalModelCompileError("random_focal_length widths must be nonnegative")
+    scales = parameters.get("mirror_f_scale", {}).get("value", [1] * len(facets))
+    if not isinstance(scales, list):
+        scales = [scales] * len(facets)
+    if len(scales) != len(facets) or any(_number(v, "mirror_f_scale") <= 0 for v in scales):
+        raise OpticalModelCompileError("mirror_f_scale must give one positive scale per facet")
+    opt = parameters.get("mirror_opt", {}).get("value", [0, 0, 0])
+    if not isinstance(opt, list) or len(opt) != 3:
+        raise OpticalModelCompileError("mirror_opt requires three coefficients")
+    opt = [_number(v, "mirror_opt") for v in opt]
+    for facet, radius, scale in zip(facets, radii, scales):
+        z = facet["centre_m"][2]
+        if z:
+            height = abs(z)
+        elif parameters["parabolic_dish"]["value"]:
+            height = radius**2 / (4 * dish)
+        else:
+            if radius > dish:
+                raise OpticalModelCompileError("facet lies outside dish sphere")
+            height = dish - math.sqrt(dish * dish - radius * radius)
+        nominal_distance = math.hypot(focal - height, radius)
+        distance = nominal_distance * (1 + opt[2] + opt[1] * radius * radius / focal**2)
+        rng = random.Random(f"obdeect-panel-distance-v1:{seed}:{facet['id']}")
+        if z <= 0 and distance_sigma:
+            distance += rng.gauss(0, distance_sigma)
+        if distance <= radius or not math.isfinite(distance):
+            raise OpticalModelCompileError("resolved facet distance must exceed radial offset")
+        facet["resolved_focus_distance_m"] = distance
+        catalogue = facet.get("catalogue_focal_length_m", facet["focal_length_m"])
+        if catalogue > 0:
+            facet["focal_length_m"] = catalogue * scale
+            continue
+        nominal = (
+            abs(catalogue) * scale if catalogue < 0 else facet["focal_length_m"] or nominal_distance
+        )
+        if catalogue == 0 and maximum > minimum:
+            nominal += grading * (radius - 0.5 * (minimum + maximum)) / (maximum - minimum)
+        rng = random.Random(f"obdeect-panel-focal-v1:{seed}:{facet['id']}")
+        if limit > 100 * sigma:
+            error_draw = limit * (rng.random() - 0.5)
+        elif sigma:
+            # Exact clipped-normal draw by inverse CDF avoids unbounded rejection.
+            from statistics import NormalDist
+
+            normal = NormalDist()
+            lo = normal.cdf(-limit / sigma) if limit else 0.0
+            hi = normal.cdf(limit / sigma) if limit else 1.0
+            probability = max(
+                math.nextafter(0.0, 1.0),
+                min(math.nextafter(1.0, 0.0), lo + (hi - lo) * rng.random()),
+            )
+            error_draw = sigma * normal.inv_cdf(probability)
+        else:
+            error_draw = 0.0
+        facet["focal_length_m"] = nominal + error_draw
+        if facet["focal_length_m"] <= 0 or not math.isfinite(facet["focal_length_m"]):
+            raise OpticalModelCompileError("resolved facet focal length must be positive")
 
 
 def apply_panel_alignment(
@@ -585,7 +958,7 @@ def apply_panel_alignment(
         if (
             not isinstance(values, list)
             or len(values) != 4
-            or record.get("unit") != ["deg", "deg", "null", "null"]
+            or record.get("unit") not in (["deg", "deg", "null", "null"], ["deg"] * 4)
         ):
             raise OpticalModelCompileError(f"{name} requires four degree components")
         rms, reference, cosine, sine = [_number(v, name) for v in values]
@@ -608,12 +981,6 @@ def apply_panel_alignment(
                 )
             )
         )
-    # These independent prescriptions must never be mistaken for angular errors.
-    for name in ("mirror_align_random_distance", "random_focal_length"):
-        values = parameters.get(name, {}).get("value", 0)
-        values = values if isinstance(values, list) else [values]
-        if any(_number(v, name) != 0 for v in values):
-            raise OpticalModelCompileError(f"nonzero {name} is not supported")
     for facet in facets:
         normal = facet["nominal_normal"]
         x, y, _ = facet["nominal_centre_m"]
@@ -635,6 +1002,8 @@ def apply_panel_alignment(
         u = [c * ci, t * ci, si]
         v = [-t * cg + c * si * sg, c * cg + t * si * sg, -ci * sg]
         facet["nominal_tangent"] = [c * a - t * b for a, b in zip(u, v)]
+        facet["response_basis_u"] = u
+        facet["response_basis_v"] = v
 
 
 def _even_polynomial_surface(parameter: dict[str, Any], name: str) -> list[float]:
@@ -789,6 +1158,11 @@ def compile_optical_model(
         raise OpticalModelCompileError("IR model identity is invalid")
     if not isinstance(parameters, dict) or not isinstance(assets, dict):
         raise OpticalModelCompileError("IR parameters and assets must be objects")
+
+    def table_options(name):
+        value = parameters.get(name, {}).get("value")
+        return value.partition("#rpol:")[2] if isinstance(value, str) else ""
+
     root = source_root.resolve()
     # Keep the compiler's source-root contract aligned with the importer: a
     # released checkout may contain its data package in simulation-models/.
@@ -825,7 +1199,11 @@ def compile_optical_model(
     # Some dual-mirror catalogues set every panel focal-length column to zero
     # and provide the telescope focal length as the documented common value.
     # Use it only as an explicit fallback, never as an inferred prescription.
-    if fallback is None and isinstance(parameters.get("focal_length"), dict):
+    if (
+        fallback is None
+        and parameters.get("mirror_class", {}).get("value") != 0
+        and isinstance(parameters.get("focal_length"), dict)
+    ):
         fallback = _length_m(parameters["focal_length"], "focal_length")
     consumed = set()
     dual_surfaces = _dual_reflector_surfaces(parameters)
@@ -834,6 +1212,7 @@ def compile_optical_model(
         facets = parse_simtel_mirror_list(
             verified_assets["mirror_list"].read_text(encoding="utf-8"),
             fallback_focal_length_m=fallback,
+            allow_automatic=parameters.get("mirror_class", {}).get("value") == 0,
         )
         primary = {"kind": "segmented_mirror", "facets": facets}
         consumed.add("mirror_list")
@@ -846,6 +1225,7 @@ def compile_optical_model(
             "value"
         ) == 0 and nominal_fields.issubset(parameters)
         if nominal_geometry:
+            resolve_panel_prescription(facets, parameters, alignment_seed)
             derive_nominal_single_reflector(facets, parameters)
             apply_panel_alignment(facets, parameters, alignment_seed, alignment_zenith_deg)
             consumed.update(
@@ -855,6 +1235,10 @@ def compile_optical_model(
                     "mirror_align_random_vertical",
                     "mirror_align_random_distance",
                     "random_focal_length",
+                    "grading_of_focal_length",
+                    "mirror_f_scale",
+                    "flip_mirrors",
+                    "mirror_opt",
                 )
                 if name in parameters
             )
@@ -904,16 +1288,32 @@ def compile_optical_model(
             verified_assets["telescope_obscuration_cylinders"].read_text(encoding="utf-8")
         )
         consumed.add("telescope_obscuration_cylinders")
+    if "telescope_obscuration_quadrilaterals" in verified_assets:
+        primary["opaque_obscurers"] = parse_obscuration_quadrilaterals(
+            verified_assets["telescope_obscuration_quadrilaterals"].read_text(encoding="utf-8")
+        )
+        consumed.add("telescope_obscuration_quadrilaterals")
     if "mirror_reflectivity" in verified_assets:
         try:
             primary["reflectivity"] = parse_wavelength_response(
                 verified_assets["mirror_reflectivity"].read_text(encoding="utf-8"),
                 "mirror_reflectivity",
+                filename_options=table_options("mirror_reflectivity"),
             )
             consumed.add("mirror_reflectivity")
         except OpticalModelCompileError as error:
             if "incidence-dependent response" not in str(error):
                 raise
+    for name in ("primary_mirror_degraded_map", "primary_degraded_map"):
+        if name in verified_assets:
+            primary["degradation_map"] = parse_spatial_response(
+                verified_assets[name].read_text(encoding="utf-8"),
+                name,
+                filename_options=table_options(name),
+            )
+            consumed.add(name)
+        elif name in parameters and parameters[name].get("value") in (None, "none"):
+            consumed.add(name)
     if "mirror_degraded_reflection" in parameters:
         _apply_mirror_degradation(
             primary, parameters["mirror_degraded_reflection"], "mirror_degraded_reflection"
@@ -959,20 +1359,25 @@ def compile_optical_model(
         }
         shadow_fields = {"secondary_mirror_shadow_diameter", "secondary_mirror_shadow_offset"}
         if shadow_fields.issubset(parameters):
-            diameter = _length_m(
+            diameter = _signed_length_m(
                 parameters["secondary_mirror_shadow_diameter"],
                 "secondary_mirror_shadow_diameter",
-                allow_zero=True,
             )
+            if diameter < 0:
+                diameter = 2 * secondary["outer_radius_m"]
             offset = _signed_length_m(
                 parameters["secondary_mirror_shadow_offset"], "secondary_mirror_shadow_offset"
             )
             if offset <= 0:
                 radius = diameter * 0.5 / secondary["radial_scale_m"]
-                offset = sum(
-                    value * radius ** (2 * index)
-                    for index, value in enumerate(secondary["coefficient_m"])
-                )
+                offset = secondary["coefficient_m"][0]
+                # Only concave secondaries use their edge for the shadow plane;
+                # telescope-frame coefficients have the opposite local sag sign.
+                if secondary["coefficient_m"][1] < 0:
+                    offset = sum(
+                        value * radius ** (2 * index)
+                        for index, value in enumerate(secondary["coefficient_m"])
+                    )
             elif "mirror_offset" in parameters:
                 offset -= _signed_length_m(parameters["mirror_offset"], "mirror_offset")
             secondary["incoming_shadow"] = {"diameter_m": diameter, "z_m": offset}
@@ -982,6 +1387,7 @@ def compile_optical_model(
                 secondary["reflectivity"] = parse_wavelength_response(
                     verified_assets["secondary_mirror_reflectivity"].read_text(encoding="utf-8"),
                     "secondary_mirror_reflectivity",
+                    filename_options=table_options("secondary_mirror_reflectivity"),
                 )
                 consumed.add("secondary_mirror_reflectivity")
             except OpticalModelCompileError as error:
@@ -1026,6 +1432,26 @@ def compile_optical_model(
         if dual_surfaces is not None:
             secondary["scatter"] = dict(scatter)
         consumed.add("mirror_reflection_random_angle")
+    if dual_surfaces is not None and "secondary_mirror_baffle" in parameters:
+        overall = (
+            _signed_length_m(parameters["mirror_offset"], "mirror_offset")
+            if "mirror_offset" in parameters
+            else 0.0
+        )
+        baffle = compile_secondary_baffle(parameters["secondary_mirror_baffle"], overall)
+        if baffle is not None:
+            primary.setdefault("opaque_obscurers", []).append(baffle)
+        consumed.add("secondary_mirror_baffle")
+    for name in ("secondary_mirror_degraded_map", "secondary_degraded_map"):
+        if name in verified_assets and secondary is not None:
+            secondary["degradation_map"] = parse_spatial_response(
+                verified_assets[name].read_text(encoding="utf-8"),
+                name,
+                filename_options=table_options(name),
+            )
+            consumed.add(name)
+        elif name in parameters and parameters[name].get("value") in (None, "none"):
+            consumed.add(name)
     camera = None
     nested_assets = {}
     unresolved_references = []
@@ -1044,6 +1470,19 @@ def compile_optical_model(
         except CameraConfigError as error:
             raise OpticalModelCompileError(str(error)) from error
         consumed.add(camera_asset_name)
+        if "camera_scale_factor" in parameters:
+            scale = _number(parameters["camera_scale_factor"].get("value"), "camera_scale_factor")
+            if scale <= 0:
+                raise OpticalModelCompileError("camera_scale_factor must be positive")
+            for pixel in camera["pixels"]:
+                pixel["centre_xy_m"] = [value * scale for value in pixel["centre_xy_m"]]
+                if "z_offset_m" in pixel:
+                    pixel["z_offset_m"] *= scale
+            for pixel_type in camera["pixel_types"]:
+                for key in ("cathode_diameter_m", "funnel_diameter_m", "funnel_depth_m"):
+                    pixel_type[key] *= scale
+            camera["scale_factor"] = scale
+            consumed.add("camera_scale_factor")
         if "camera_rotate" in parameters:
             rotation = parameters["camera_rotate"]
             if rotation.get("unit") != "deg":
@@ -1066,6 +1505,9 @@ def compile_optical_model(
                     "camera layout references undefined physical pixel type"
                 )
             consumed.add("camera_pixel_types")
+            for pixel_type in camera["pixel_types"]:
+                for key in ("cathode_diameter_m", "funnel_diameter_m", "funnel_depth_m"):
+                    pixel_type[key] *= camera.get("scale_factor", 1.0)
         declared_pixels = parameters.get("camera_pixels", {}).get("value")
         if isinstance(declared_pixels, bool) or not isinstance(declared_pixels, int):
             raise OpticalModelCompileError("camera_pixels must be an integer count")
@@ -1088,6 +1530,17 @@ def compile_optical_model(
                 else:
                     unresolved_references.append(filename)
     if camera is not None:
+        if "camera_degraded_map" in verified_assets:
+            camera["degradation_map"] = parse_spatial_response(
+                verified_assets["camera_degraded_map"].read_text(encoding="utf-8"),
+                "camera_degraded_map",
+                filename_options=table_options("camera_degraded_map"),
+            )
+            consumed.add("camera_degraded_map")
+        elif "camera_degraded_map" in parameters and parameters["camera_degraded_map"].get(
+            "value"
+        ) in (None, "none"):
+            consumed.add("camera_degraded_map")
         housing_fields = {"camera_body_diameter", "camera_body_shape", "camera_depth"}
         if (dual_surfaces is not None or nominal_geometry) and housing_fields.issubset(parameters):
             shape = parameters["camera_body_shape"].get("value")
@@ -1117,6 +1570,7 @@ def compile_optical_model(
                 verified_assets["camera_filter"].read_text(encoding="utf-8"),
                 "camera_filter",
                 "transmission",
+                filename_options=table_options("camera_filter"),
             )
             consumed.add("camera_filter")
         if "lightguide_efficiency_vs_incidence_angle" in verified_assets:
@@ -1125,6 +1579,7 @@ def compile_optical_model(
                     encoding="utf-8"
                 ),
                 "lightguide_efficiency_vs_incidence_angle",
+                filename_options=table_options("lightguide_efficiency_vs_incidence_angle"),
             )
             consumed.add("lightguide_efficiency_vs_incidence_angle")
         if "camera_transmission" in parameters:
@@ -1133,7 +1588,105 @@ def compile_optical_model(
                 raise OpticalModelCompileError("camera_transmission must be a response fraction")
             camera["transmission"] = fraction
             consumed.add("camera_transmission")
-    deferred = sorted(set(parameters) - consumed)
+    if camera is not None and "camera_degraded_efficiency" in parameters:
+        factor = _number(
+            parameters["camera_degraded_efficiency"].get("value"), "camera_degraded_efficiency"
+        )
+        if not 0 <= factor <= 1:
+            raise OpticalModelCompileError("camera_degraded_efficiency must be a fraction")
+        camera["transmission"] = camera.get("transmission", 1.0) * factor
+        consumed.add("camera_degraded_efficiency")
+    if camera is not None and camera.get("pixel_types"):
+        tables = []
+        for pixel_type in camera["pixel_types"]:
+            fields = pixel_type.get("source_fields", {})
+            references = pixel_type.get("response_files", [])
+            angle_name = fields.get("lightguide_angle_parameter")
+            wavelength_name = fields.get("lightguide_wavelength_parameter")
+            angular_path = verified_assets.get(angle_name) if angle_name else None
+            wavelength_path = verified_assets.get(wavelength_name) if wavelength_name else None
+
+            def response_file(filename):
+                base = filename.partition("#rpol:")[0]
+                if not component(base):
+                    raise OpticalModelCompileError("unsafe pixel response filename")
+                known = {path.resolve() for path in verified_assets.values() if path.name == base}
+                if not known:
+                    candidates = (
+                        root / "model_parameters" / "Files" / base,
+                        verified_assets[camera_asset_name].parent / base,
+                    )
+                    known = {
+                        path.resolve()
+                        for path in candidates
+                        if path.is_file() and path.resolve().is_relative_to(root)
+                    }
+                if len(known) != 1:
+                    raise OpticalModelCompileError(
+                        f"pixel response file is missing or ambiguous: {filename}"
+                    )
+                path = known.pop()
+                nested_assets[filename] = record(path, root)
+                return path
+
+            if references:
+                angular_path = response_file(references[0])
+                wavelength_path = response_file(references[1]) if len(references) > 1 else None
+            if angular_path is None and angle_name is not None:
+                raise OpticalModelCompileError(
+                    f"pixel type references an unresolved angular response: {angle_name}"
+                )
+            if wavelength_path is None and wavelength_name is not None:
+                raise OpticalModelCompileError(
+                    f"pixel type references an unresolved spectral response: {wavelength_name}"
+                )
+            if angular_path is not None:
+                try:
+                    tables.append(
+                        measured_pixel_response(
+                            pixel_type["id"],
+                            angular_path.read_text(encoding="utf-8"),
+                            wavelength_path.read_text(encoding="utf-8")
+                            if wavelength_path is not None
+                            else None,
+                        )
+                    )
+                except TableImportError as error:
+                    raise OpticalModelCompileError(str(error)) from error
+                if angle_name:
+                    consumed.add(angle_name)
+                if wavelength_name:
+                    consumed.add(wavelength_name)
+            else:
+                transparency = fields.get(
+                    "funnel_transparency", pixel_type.get("funnel_transparency")
+                )
+                reflection = fields.get(
+                    "funnel_wall_reflectivity", pixel_type.get("funnel_wall_reflectivity")
+                )
+                if transparency is not None and reflection is not None:
+                    transparency = _number(transparency, "funnel transparency")
+                    reflection = _number(reflection, "funnel wall reflectivity")
+                    if not 0 <= transparency <= 1 or not 0 <= reflection <= 1:
+                        raise OpticalModelCompileError("numeric funnel response must be fractional")
+                    tables.append({
+                        "id": pixel_type["id"],
+                        "method": "single_reflection",
+                        "transparency": transparency,
+                        "wall_reflectivity": reflection,
+                    })
+        if tables:
+            unresolved_references = [
+                name for name in unresolved_references if name not in nested_assets
+            ]
+            if len(tables) != len(camera["pixel_types"]):
+                raise OpticalModelCompileError(
+                    "every physical pixel type needs its optical response"
+                )
+            camera["pixel_optical_response_tables"] = tables
+            camera.pop("lightguide_response", None)  # Already applied by the actual pixel type.
+    diagnostics = set(parameters) & REFERENCE_DIAGNOSTIC_PARAMETERS
+    deferred = sorted(set(parameters) - consumed - diagnostics)
     for name in deferred:
         if parameters[name].get("required_for_trace") is True:
             raise OpticalModelCompileError(
@@ -1151,11 +1704,25 @@ def compile_optical_model(
             if entry["disposition"] == "unsupported"
         ),
         "source_parameter_coverage": ir.get("source_parameter_coverage", {}),
+        "reference_diagnostics": {
+            name: {
+                "reason": "derived reference data; not an individual-ray optical prescription",
+                "parameter_record": records[f"parameter:{name}"],
+                "asset": assets.get(name),
+            }
+            for name in sorted(diagnostics)
+        },
         "field_coverage": {
             name: {
-                "disposition": "consumed" if name in consumed else "deferred",
+                "disposition": "reference_diagnostic"
+                if name in diagnostics
+                else "consumed"
+                if name in consumed
+                else "deferred",
                 "reason": "parsed into geometry"
                 if name in consumed
+                else "derived reference data retained for comparison"
+                if name in diagnostics
                 else "not applied by the optical tracer",
             }
             for name in sorted(parameters)
@@ -1167,7 +1734,6 @@ def compile_optical_model(
                 and "mirror_reflection_random_angle" not in consumed
                 else []
             ),
-            *(["secondary baffle remains deferred"] if "secondary_baffle" in parameters else []),
             *([] if nominal_geometry else ["facet surface normals and alignment are not compiled"]),
             "physical detector surfaces and materials remain deferred",
             *(
@@ -1178,14 +1744,10 @@ def compile_optical_model(
             *(
                 ["quadrilateral obscurers remain deferred"]
                 if "telescope_obscuration_quadrilaterals" in parameters
+                and "telescope_obscuration_quadrilaterals" not in consumed
                 else []
             ),
             *[f"camera response asset is missing: {name}" for name in unresolved_references],
-            *(
-                ["cylinder obscurers are not supported by axisymmetric native export"]
-                if dual_surfaces is not None and primary.get("cylinder_obscurers")
-                else []
-            ),
         ],
         "facet_geometry_evidence": evidence,
     }
@@ -1228,7 +1790,11 @@ def compile_optical_model(
         compiled["focal_surface"] = compiled_focal_surface
     if camera is not None:
         compiled["camera"] = camera
-    if camera is not None and camera.get("pixel_types") and "camera_pixel_types" in consumed:
+    if (
+        camera is not None
+        and camera.get("pixel_types")
+        and ("camera_pixel_types" in consumed or "camera_config_file" in consumed)
+    ):
         focus = parameters.get("focus_offset")
         if focus is None:
             report["trace_blockers"].append("physical camera placement lacks explicit focus offset")
@@ -1240,12 +1806,13 @@ def compile_optical_model(
                 or not isinstance(units, list)
                 or len(units) != 4
                 or units[0] not in _UNIT_TO_M
-                or any(_number(value, "focus_offset") != 0 for value in values[2:])
+                or units[1] != "deg"
+                or any(unit not in _UNIT_TO_M and unit != "null" for unit in units[2:])
             ):
                 raise OpticalModelCompileError(
                     "camera placement requires a resolved static focus offset"
                 )
-            offset = _number(values[0], "focus_offset") * _UNIT_TO_M[units[0]]
+            offset = resolve_focus_offset(focus, alignment_zenith_deg)
             if compiled_focal_surface is not None:
                 compiled_focal_surface["coefficient_m"][0] -= offset
                 focal = compiled_focal_surface
@@ -1275,7 +1842,7 @@ def compile_optical_model(
                 "guide_wall_profile": "unavailable",
             }
             report["consumed"] = sorted(consumed)
-            report["deferred"] = sorted(set(parameters) - consumed)
+            report["deferred"] = sorted(set(parameters) - consumed - diagnostics)
             for name in ("focus_offset", "pixels_parallel"):
                 if name in report["field_coverage"] and name in consumed:
                     report["field_coverage"][name] = {
@@ -1291,6 +1858,68 @@ def compile_optical_model(
             ]
     try:
         compiled["trace_model"] = build_trace_model(compiled)
+        trace = compiled["trace_model"]
+        identifiers = [
+            entry["id"]
+            for field, value in trace.items()
+            if isinstance(value, list)
+            for entry in value
+            if isinstance(entry, dict) and "id" in entry
+        ]
+        identifiers += [
+            trace[name]
+            for name in ("primary_surface_id", "secondary_surface_id", "detector_surface_id")
+            if name in trace
+        ]
+        next_identifier = max(identifiers, default=-1) + 1
+        trace["opaque_obscurers"] = [
+            dict(surface, id=next_identifier + index)
+            for index, surface in enumerate(primary.get("opaque_obscurers", []))
+        ]
+        if trace["kind"] == "axisymmetric":
+            for cylinder in primary.get("cylinder_obscurers", []):
+                radius = cylinder["diameter_m"] * 0.5
+                trace["opaque_obscurers"].append({
+                    "id": next_identifier + len(trace["opaque_obscurers"]),
+                    "shape": "solid_frustum",
+                    "first_endpoint_m": cylinder["first_endpoint_m"],
+                    "second_endpoint_m": cylinder["second_endpoint_m"],
+                    "first_radius_m": radius,
+                    "second_radius_m": radius,
+                    "thickness_m": 0.0,
+                })
+
+        for role, source in (("primary", primary), ("secondary", secondary), ("camera", camera)):
+            if source is not None and "degradation_map" in source:
+                trace[f"{role}_degradation"] = source["degradation_map"]
+                if role == "primary" and trace["kind"] == "segmented":
+                    trace["primary_degradation_in_facet_frame"] = True
+                if role == "camera":
+                    angle = math.radians(camera.get("rotation_deg", 0))
+                    sign = -1 if trace["kind"] == "segmented" else 1
+                    trace["camera_degradation"] = {
+                        **source["degradation_map"],
+                        "x_basis": [sign * math.cos(angle), -sign * math.sin(angle), 0.0],
+                        "y_basis": [math.sin(angle), math.cos(angle), 0.0],
+                    }
+                if role == "secondary":
+                    trace[f"{role}_degradation"] = {
+                        **source["degradation_map"],
+                        "x_basis": [-1.0, 0.0, 0.0],
+                        "y_basis": [0.0, 1.0, 0.0],
+                    }
+
+        if (
+            camera is not None
+            and camera.get("pixel_optical_response_tables")
+            and camera.get("cathode_surfaces")
+        ):
+            try:
+                pixel_response = bind_pixel_responses(camera, trace)
+            except TableImportError as error:
+                raise OpticalModelCompileError(str(error)) from error
+            if pixel_response is not None:
+                trace["pixel_responses"] = pixel_response
         compiled["report"]["trace_ready"] = True
         compiled["report"]["native_trace_ready"] = True
         compiled["plot_geometry"] = build_plot_geometry(compiled["trace_model"], report)
@@ -1344,6 +1973,10 @@ def build_plot_geometry(trace_model: dict[str, Any], report: dict[str, Any]) -> 
             }
             for item in trace_model.get("primary_to_secondary_cylinders", [])
         )
+    components.extend(
+        {"id": item["id"], "role": "opaque_surface", "source": "trace_model.opaque_obscurers"}
+        for item in trace_model.get("opaque_obscurers", [])
+    )
     unavailable = []
     if any("physical detector surfaces and materials" in item for item in report["trace_blockers"]):
         unavailable.append("physical_pixel_boundaries")
@@ -1429,6 +2062,14 @@ def trace_surface_rows(
             **({"tangent": facet["nominal_tangent"]} if "nominal_tangent" in facet else {}),
             "diameter_m": facet["diameter_m"],
             "focal_length_m": facet["focal_length_m"],
+            **(
+                {
+                    "response_basis_u": facet["response_basis_u"],
+                    "response_basis_v": facet["response_basis_v"],
+                }
+                if "response_basis_u" in facet
+                else {}
+            ),
         })
     camera = optical_model.get("camera", {})
     # ``parse_simtel_mirror_list`` retains the focal length for every facet;
@@ -1529,8 +2170,8 @@ def trace_surface_rows(
 
 
 def _trace_response(response: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Export applied values; retain measurement metadata in the imported optical model."""
-    return [
+    """Retain measured values and explicit simtel interpolation semantics."""
+    rows = [
         {
             key: entry[key]
             for key in ("wavelength_nm", "response", "incidence_angle_deg")
@@ -1538,6 +2179,19 @@ def _trace_response(response: list[dict[str, Any]]) -> list[dict[str, Any]]:
         }
         for entry in response
     ]
+    if rows:
+        rows[0]["interpolation"] = response[0].get(
+            "interpolation",
+            {
+                "boundary": "clamp",
+                "scheme": 1,
+                "x_log": False,
+                "y_log": False,
+                "value_log": False,
+                "coefficients": [],
+            },
+        )
+    return rows
 
 
 def _camera_response_fields(optical_model: dict[str, Any]) -> dict[str, Any]:
@@ -1590,9 +2244,27 @@ def build_trace_model(optical_model: dict[str, Any]) -> dict[str, Any]:
             "diameter_m": row["diameter_m"],
         }
         if row["role"] == "mirror":
-            facets.append({**surface, "focal_length_m": row["focal_length_m"]})
+            facets.append({
+                **surface,
+                "focal_length_m": row["focal_length_m"],
+                **(
+                    {
+                        "response_basis_u": row["response_basis_u"],
+                        "response_basis_v": row["response_basis_v"],
+                    }
+                    if "response_basis_u" in row
+                    else {}
+                ),
+            })
         else:
-            detectors.append(surface)
+            detectors.append({
+                **surface,
+                **{
+                    key: row[key]
+                    for key in ("source_pixel_id", "source_type_id", "enabled")
+                    if key in row
+                },
+            })
     incoming = []
     housing = optical_model.get("camera", {}).get("housing", {})
     if housing.get("diameter_m", 0) > 0:
@@ -1656,7 +2328,11 @@ def write_native_optical_model(optical_model: dict[str, Any], output: Path) -> N
         _write_native_axisymmetric_optical_model(optical_model, output)
         return
 
-    if primary.get("scatter") or optical_model.get("camera", {}).get("housing"):
+    if (
+        primary.get("scatter")
+        or primary.get("opaque_obscurers")
+        or optical_model.get("camera", {}).get("housing")
+    ):
         raise OpticalModelCompileError(
             "surface-table export cannot represent mirror scatter or camera housing; use JSON"
         )

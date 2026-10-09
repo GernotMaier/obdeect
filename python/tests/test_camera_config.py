@@ -27,7 +27,7 @@ class TestCameraConfig(unittest.TestCase):
         self.assertEqual(layout["deferred_directives"], {"MajorityTrigger": 1})
 
     def test_duplicate_and_unknown_directive_fail(self):
-        prefix = "PixType 1 0 2 0.6 2 0.7 0.1 1.0\n"
+        prefix = "PixType 1 0 2 0.6 2 0.7 0.1 1.0 1.0\n"
         with self.assertRaisesRegex(CameraConfigError, "duplicate Pixel"):
             parse_camera_layout(prefix + "Pixel 0 1 0 0\nPixel 0 1 1 1\n")
         with self.assertRaisesRegex(CameraConfigError, "unsupported directive"):

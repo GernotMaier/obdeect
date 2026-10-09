@@ -91,6 +91,19 @@ def compile_camera_surfaces(
             x = -x
             normal = [-normal[0], normal[1], -normal[2]]
             tangent = [-tangent[0], tangent[1], -tangent[2]]
+        camera_angle = -math.radians(camera.get("rotation_deg", 0.0))
+        cosine, sine = math.cos(camera_angle), math.sin(camera_angle)
+        x, y = cosine * x - sine * y, sine * x + cosine * y
+        normal = [
+            cosine * normal[0] - sine * normal[1],
+            sine * normal[0] + cosine * normal[1],
+            normal[2],
+        ]
+        tangent = [
+            cosine * tangent[0] - sine * tangent[1],
+            sine * tangent[0] + cosine * tangent[1],
+            tangent[2],
+        ]
         pixel_type = types[pixel["type_id"]]
         centre = [x, y, z]
         metadata = {

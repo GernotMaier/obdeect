@@ -1,5 +1,6 @@
 #pragma once
 
+#include "obdeect/interpolation.hpp"
 #include "obdeect/tables.hpp"
 
 #include <algorithm>
@@ -14,9 +15,18 @@ struct SpectralResponse {
   // Wavelength-major response values; an empty angle axis denotes a 1D table.
   std::vector<double> response;
   std::vector<double> incidence_angle_deg{};
+  TableInterpolation interpolation{};
 
   [[nodiscard]] bool is_valid() const {
     const std::size_t angles = incidence_angle_deg.empty() ? 1 : incidence_angle_deg.size();
+    if (!interpolation.is_valid(wavelength_nm.empty() ? 0 : wavelength_nm.size() - 1,
+                                !incidence_angle_deg.empty()))
+      return false;
+    if (interpolation.y_log && (incidence_angle_deg.empty() || incidence_angle_deg.front() <= 0))
+      return false;
+    if (interpolation.value_log &&
+        std::any_of(response.begin(), response.end(), [](double v) { return v <= 0; }))
+      return false;
     if (wavelength_nm.size() < 2 || (!incidence_angle_deg.empty() && angles < 2) ||
         response.size() / angles != wavelength_nm.size() || response.size() % angles != 0)
       return false;
@@ -36,29 +46,43 @@ struct SpectralResponse {
 
   // The caller has validated the immutable table once, before transport.
   [[nodiscard]] std::optional<double> at_unchecked(double wavelength, double angle_deg = 0) const {
-    if (!std::isfinite(wavelength) || wavelength < wavelength_nm.front() ||
-        wavelength > wavelength_nm.back() || !std::isfinite(angle_deg) || angle_deg < 0 ||
-        angle_deg > 90)
+    if (!std::isfinite(wavelength) || wavelength <= 0 || !std::isfinite(angle_deg) ||
+        angle_deg < 0 || angle_deg > 90)
       return std::nullopt;
+    if (incidence_angle_deg.empty())
+      return interpolate_curve_unchecked(wavelength_nm, response, wavelength, interpolation);
+    if (wavelength < wavelength_nm.front() || wavelength > wavelength_nm.back() ||
+        angle_deg < incidence_angle_deg.front() || angle_deg > incidence_angle_deg.back()) {
+      if (interpolation.boundary == TableBoundary::reject)
+        return std::nullopt;
+      if (interpolation.boundary == TableBoundary::zero)
+        return 0;
+      wavelength = std::clamp(wavelength, wavelength_nm.front(), wavelength_nm.back());
+      angle_deg = std::clamp(angle_deg, incidence_angle_deg.front(), incidence_angle_deg.back());
+    }
     const auto bracket = [](const std::vector<double> &axis, double value) {
       const auto upper = std::upper_bound(axis.begin(), axis.end(), value);
       return std::min(static_cast<std::size_t>(upper - axis.begin()), axis.size() - 1);
     };
     const auto w = bracket(wavelength_nm, wavelength);
     const double wf =
-        (wavelength - wavelength_nm[w - 1]) / (wavelength_nm[w] - wavelength_nm[w - 1]);
+        table_fraction(wavelength, wavelength_nm[w - 1], wavelength_nm[w], interpolation.x_log);
     const std::size_t angles = incidence_angle_deg.empty() ? 1 : incidence_angle_deg.size();
     const auto spectral = [&](std::size_t a) {
-      return response[(w - 1) * angles + a] * (1 - wf) + response[w * angles + a] * wf;
+      const auto value = [&](std::size_t i) {
+        return interpolation.value_log ? std::log(response[i]) : response[i];
+      };
+      return value((w - 1) * angles + a) * (1 - wf) + value(w * angles + a) * wf;
     };
     if (incidence_angle_deg.empty())
       return spectral(0);
     if (angle_deg < incidence_angle_deg.front() || angle_deg > incidence_angle_deg.back())
       return std::nullopt;
     const auto a = bracket(incidence_angle_deg, angle_deg);
-    const double af = (angle_deg - incidence_angle_deg[a - 1]) /
-                      (incidence_angle_deg[a] - incidence_angle_deg[a - 1]);
-    return spectral(a - 1) * (1 - af) + spectral(a) * af;
+    const double af = table_fraction(angle_deg, incidence_angle_deg[a - 1], incidence_angle_deg[a],
+                                     interpolation.y_log);
+    const double value = spectral(a - 1) * (1 - af) + spectral(a) * af;
+    return interpolation.value_log ? std::exp(value) : value;
   }
 
   [[nodiscard]] std::optional<double> at(double wavelength, double angle_deg = 0) const {
@@ -71,10 +95,17 @@ struct SpectralResponse {
 struct CameraIncidenceResponse {
   std::vector<double> incidence_angle_deg;
   std::vector<double> response;
+  TableInterpolation interpolation{};
 
   [[nodiscard]] Table1DView view() const { return {incidence_angle_deg, response}; }
   [[nodiscard]] bool is_valid() const {
-    return view().is_valid() && incidence_angle_deg.front() >= 0 &&
+    return interpolation.is_valid(incidence_angle_deg.empty() ? 0
+                                                              : incidence_angle_deg.size() - 1) &&
+           (!interpolation.x_log ||
+            (!incidence_angle_deg.empty() && incidence_angle_deg.front() > 0)) &&
+           (!interpolation.value_log ||
+            std::all_of(response.begin(), response.end(), [](double v) { return v > 0; })) &&
+           view().is_valid() && incidence_angle_deg.front() >= 0 &&
            incidence_angle_deg.back() <= 90 &&
            std::all_of(response.begin(), response.end(), [](double value) { return value <= 1; });
   }
@@ -109,7 +140,9 @@ struct CameraResponse {
       transmission *= *filter;
     }
     if (lightguide_efficiency) {
-      const auto guide = lightguide_efficiency->view().interpolate_unchecked(incidence_angle_deg);
+      const auto guide = interpolate_curve_unchecked(
+          lightguide_efficiency->incidence_angle_deg, lightguide_efficiency->response,
+          incidence_angle_deg, lightguide_efficiency->interpolation);
       if (!guide)
         return std::nullopt;
       transmission *= *guide;

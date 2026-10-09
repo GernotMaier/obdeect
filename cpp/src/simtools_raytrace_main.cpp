@@ -234,9 +234,13 @@ int main(int argc, char **argv) {
       imported_optical_model->imaging_plane_z_m = loaded->imaging_plane_z_m;
       imported_optical_model->detector_planes.reset();
       imported_optical_model->camera_response.reset();
+      imported_optical_model->camera_degradation.reset();
+      imported_optical_model->pixel_responses.reset();
     } else if (axisymmetric_optical_model) {
       axisymmetric_optical_model->detector_planes.reset();
       axisymmetric_optical_model->camera_response.reset();
+      axisymmetric_optical_model->camera_degradation.reset();
+      axisymmetric_optical_model->pixel_responses.reset();
     } else {
       std::cerr
           << "--focal-surface-image requires a compiled focal surface or detector_vertex_z_m\n";
