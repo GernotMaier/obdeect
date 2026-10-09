@@ -41,7 +41,7 @@ void usage() {
       << "  --source star|illuminator|laser  (default: star)\n"
       << "  --photons N --output FILE --field-x-deg D --field-y-deg D\n"
       << "  --distance-m D --wavelength-nm N[,N...] --divergence-deg D --panel-id N\n"
-      << "  --pupil-radius-m D  explicit launch disk for generic optical models\n"
+      << "  --launch-radius-m R  radius of the photon launch disk in metres\n"
       << "  --source-x-m D --source-y-m D --source-z-m D\n"
       << "  --screen-x-m D --screen-y-m D --screen-z-m D --screen-radius-m D\n"
       << "  --direction-x D --direction-y D --direction-z D  (laser axis)\n"
@@ -84,8 +84,8 @@ int main(int argc, char **argv) {
   std::string star_mode = "plane-wave";
   double beam_radius_m = 0, entrance_z_m = 50;
   bool beam_radius_set = false, first_id_set = false;
-  double launch_pupil_radius_m = 0;
-  bool launch_pupil_radius_set = false;
+  double launch_radius_m = 0;
+  bool launch_radius_set = false;
   bool require_production_ready = false;
   bool production_ready = false;
   bool focal_surface_image = false;
@@ -194,7 +194,7 @@ int main(int argc, char **argv) {
         *provided = true;
       return true;
     };
-    if (number("--pupil-radius-m", launch_pupil_radius_m, &launch_pupil_radius_set) ||
+    if (number("--launch-radius-m", launch_radius_m, &launch_radius_set) ||
         number("--emitted-weight", emitted_weight, &emitted_weight_set) ||
         number("--beam-radius-m", beam_radius_m, &beam_radius_set) ||
         number("--entrance-z-m", entrance_z_m) || number("--field-x-deg", field_x_deg) ||
@@ -246,9 +246,9 @@ int main(int argc, char **argv) {
     // before pixel acceptance and measured camera response are applied.
     production_ready = false;
   }
-  if (nonsequential_optical_model && photon_input_path.empty() && !launch_pupil_radius_set) {
+  if (nonsequential_optical_model && photon_input_path.empty() && !launch_radius_set) {
     std::cerr
-        << "nonsequential optical models require --photon-input or an explicit --pupil-radius-m\n";
+        << "nonsequential optical models require --photon-input or an explicit --launch-radius-m\n";
     return 2;
   }
   if ((!model && !imported_optical_model && !axisymmetric_optical_model &&
@@ -341,7 +341,7 @@ int main(int argc, char **argv) {
         std::make_shared<const obdeect::CompiledDetectorPlanes>(std::move(*planes));
   }
   const double radians_per_degree = std::numbers::pi / 180.0;
-  const double pupil_radius = launch_pupil_radius_set ? launch_pupil_radius_m : imported_optical_model
+  const double launch_radius = launch_radius_set ? launch_radius_m : imported_optical_model
                                   ? [&] {
                                       double radius = 0.0;
                                       for (const auto& facet : imported_optical_model->primary_facets)
@@ -351,7 +351,7 @@ int main(int argc, char **argv) {
                                     }()
                                   : axisymmetric_optical_model ? axisymmetric_optical_model->primary.outer_radius_m
                                                        : nonsequential_optical_model ? 1.0 : model->primary_outer_radius_m;
-  if (!std::isfinite(pupil_radius) || pupil_radius <= 0.0)
+  if (!std::isfinite(launch_radius) || launch_radius <= 0.0)
     return 1;
   std::vector<obdeect::OpticalPhoton> input;
   if (sampled_source) {
@@ -361,15 +361,15 @@ int main(int argc, char **argv) {
     input.resize(input_block_size);
   } else if (source == "star") {
     input =
-        obdeect::star_photons(photons_count, pupil_radius,
+        obdeect::star_photons(photons_count, launch_radius,
                               {field_x_deg * radians_per_degree, field_y_deg * radians_per_degree,
                                distance_m, wavelengths_nm.front()});
   } else if (source == "illuminator") {
     input = obdeect::illuminator_photons(
-        photons_count, pupil_radius,
+        photons_count, launch_radius,
         {{source_x_m, source_y_m, source_z_m}, wavelengths_nm.front(), 1.0});
   } else {
-    input = obdeect::laser_photons(photons_count, pupil_radius,
+    input = obdeect::laser_photons(photons_count, launch_radius,
                                    {{direction_x, direction_y, direction_z},
                                     {source_x_m, source_y_m, source_z_m},
                                     divergence_deg * radians_per_degree,
@@ -443,7 +443,7 @@ int main(int argc, char **argv) {
             std::optional<obdeect::OpticalPhoton> photon;
             if (source == "star" && star_mode == "finite") {
               photon = obdeect::sample_star(
-                  id, seed, pupil_radius,
+                  id, seed, launch_radius,
                   obdeect::FiniteStarSource{
                       {-distance_m * std::tan(field_x_deg * radians_per_degree),
                        -distance_m * std::tan(field_y_deg * radians_per_degree), distance_m},
@@ -452,7 +452,7 @@ int main(int argc, char **argv) {
                       emission_time_ns});
             } else if (source == "star") {
               photon =
-                  obdeect::sample_star(id, seed, pupil_radius,
+                  obdeect::sample_star(id, seed, launch_radius,
                                        obdeect::StarSource{field_x_deg * radians_per_degree,
                                                            field_y_deg * radians_per_degree,
                                                            distance_m, wavelengths_nm.front()});
@@ -460,7 +460,7 @@ int main(int argc, char **argv) {
                 photon->time_ns += emission_time_ns;
             } else if (source == "illuminator") {
               photon = obdeect::sample_illuminator(
-                  id, seed, pupil_radius,
+                  id, seed, launch_radius,
                   obdeect::PointIlluminator{
                       {source_x_m, source_y_m, source_z_m}, wavelengths_nm.front(), emitted_weight},
                   source_normalization_photons.value_or(photons_count));
@@ -468,7 +468,7 @@ int main(int argc, char **argv) {
                 photon->time_ns += emission_time_ns;
             } else {
               photon = obdeect::sample_laser(
-                  id, seed, beam_radius_set ? beam_radius_m : pupil_radius,
+                  id, seed, beam_radius_set ? beam_radius_m : launch_radius,
                   obdeect::LaserSource{{direction_x, direction_y, direction_z},
                                        {source_x_m, source_y_m, source_z_m},
                                        divergence_deg * radians_per_degree,
@@ -548,7 +548,7 @@ int main(int argc, char **argv) {
                << ',' << (path.material_transport ? path.optical_path_m : path.path_length_m) << ','
                << (focal_surface_image ? "continuous_focal_surface" : "compiled_detector") << ',';
         if (source == "star" && !sampled_source)
-          output << std::numbers::pi * pupil_radius * pupil_radius;
+          output << std::numbers::pi * launch_radius * launch_radius;
         output << '\n';
         return true;
       };

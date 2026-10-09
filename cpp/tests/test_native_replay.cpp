@@ -179,7 +179,7 @@ int main(int argc, char **argv) {
   const auto star_area_csv = directory / "star-area.csv";
   const std::string star_area_command =
       quoted(argv[1]) + " --optical-model " + quoted(model.string()) +
-      " --source star --photons 1 --pupil-radius-m 2 --output " + quoted(star_area_csv.string());
+      " --source star --photons 1 --launch-radius-m 2 --output " + quoted(star_area_csv.string());
   require(std::system(star_area_command.c_str()) == 0, "star launch-area fixture runs");
   std::ifstream star_area_input(star_area_csv);
   std::getline(star_area_input, line);
