@@ -51,7 +51,7 @@ int main(int argc, char **argv) {
   const auto model = directory / "model.json", photons = directory / "photons.csv";
   auto root =
       obdeect::json::Parser{
-          R"({"format":"obdeect.compiled-optical-model.v1","optical_model_sha256":"","random_seeds":{"detector_configuration_seed":17},"provenance":{"model":"generic-replay-fixture","model_version":"1"},"report":{"production_trace_ready":false,"trace_blockers":["nominal fixture"]},"trace_model":{"kind":"segmented","primary_facets":[{"id":7,"shape":"circle","centre_m":[0,0,0],"normal":[0,0,1],"tangent":[1,0,0],"diameter_m":2,"focal_length_m":10}],"detector_surfaces":[{"id":8,"shape":"circle","centre_m":[0,0,3],"normal":[0,0,1],"tangent":[1,0,0],"diameter_m":2}],"cylinder_obscurers":[{"id":9,"first_endpoint_m":[-0.1,0,0.9],"second_endpoint_m":[-0.1,0,1.1],"diameter_m":0.05}],"primary_reflectivity":[{"wavelength_nm":300,"response":0.8},{"wavelength_nm":500,"response":0.8}]}})"}
+          R"({"format":"obdeect.compiled-optical-model.v1","optical_model_sha256":"","random_seeds":{"detector_configuration_seed":4294967297},"provenance":{"model":"generic-replay-fixture","model_version":"1"},"report":{"production_trace_ready":false,"trace_blockers":["nominal fixture"]},"trace_model":{"kind":"segmented","primary_facets":[{"id":7,"shape":"circle","centre_m":[0,0,0],"normal":[0,0,1],"tangent":[1,0,0],"diameter_m":2,"focal_length_m":10}],"detector_surfaces":[{"id":8,"shape":"circle","centre_m":[0,0,3],"normal":[0,0,1],"tangent":[1,0,0],"diameter_m":2}],"cylinder_obscurers":[{"id":9,"first_endpoint_m":[-0.1,0,0.9],"second_endpoint_m":[-0.1,0,1.1],"diameter_m":0.05}],"primary_reflectivity":[{"wavelength_nm":300,"response":0.8},{"wavelength_nm":500,"response":0.8}]}})"}
           .parse();
   require(root.has_value(), "fixture parses");
   auto *hash = const_cast<obdeect::json::Value *>(root->find("optical_model_sha256"));
@@ -275,7 +275,7 @@ int main(int argc, char **argv) {
         require(column != columns.end(), "seed metadata column exists");
         return values.at(static_cast<std::size_t>(column - columns.begin()));
       };
-      require(value("detector_configuration_seed") == "17" && value("ray_tracing_seed") == "12345",
+      require(value("detector_configuration_seed") == "4294967297" && value("ray_tracing_seed") == "12345",
               "native arrivals identify both independent random seeds");
     }
     require(contents(generated_full) == contents(generated_blocked),

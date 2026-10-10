@@ -330,6 +330,19 @@ private:
   return static_cast<std::uint32_t>(*number);
 }
 
+[[nodiscard]] inline std::optional<std::uint64_t> uint64_field(const json::Value &value,
+                                                               std::string_view name) {
+  const auto *result = field(value, name);
+  if (!result || result->kind() != json::Value::Kind::number)
+    return std::nullopt;
+  std::uint64_t parsed{};
+  const auto &text = result->number_text();
+  const auto conversion = std::from_chars(text.data(), text.data() + text.size(), parsed);
+  if (text.empty() || conversion.ec != std::errc{} || conversion.ptr != text.data() + text.size())
+    return std::nullopt;
+  return parsed;
+}
+
 [[nodiscard]] inline std::optional<Vec3> vec3_field(const json::Value &value,
                                                     std::string_view name) {
   const auto *result = field(value, name);
@@ -598,7 +611,7 @@ opaque_fields(const json::Value &trace) {
 [[nodiscard]] inline std::optional<MirrorScatter> scatter_field(const json::Value &parent,
                                                                 std::string_view name) {
   const auto *value = parent.find(name);
-  if (!value || !fields_supported(*value, {"sigma1_rad", "sigma2_rad", "fraction2", "method"}))
+  if (!value || !fields_supported(*value, {"sigma1_rad", "sigma2_rad", "fraction2", "method", "seed"}))
     return std::nullopt;
   const auto first = number_field(*value, "sigma1_rad"),
              second = number_field(*value, "sigma2_rad"),
@@ -606,6 +619,10 @@ opaque_fields(const json::Value &trace) {
   const auto *method = string_field(*value, "method");
   if (!first || !second || !fraction || !method ||
       (*method != "outgoing_angles" && *method != "surface_slopes"))
+    return std::nullopt;
+  // v1 artifacts stored a compile-time scatter seed. Scatter is now seeded per
+  // trace, so accept the legacy metadata while deliberately ignoring it.
+  if (value->find("seed") && !uint64_field(*value, "seed"))
     return std::nullopt;
   MirrorScatter result{*first, *fraction, *second,
                        *method == "outgoing_angles" ? MirrorScatterMethod::outgoing_angles
@@ -1522,7 +1539,7 @@ struct LoadedOpticalModel {
     if (seeds->kind() != json::Value::Kind::object ||
         !detail::fields_supported(*seeds, {"detector_configuration_seed"}))
       return std::nullopt;
-    const auto seed = detail::uint_field(*seeds, "detector_configuration_seed");
+    const auto seed = detail::uint64_field(*seeds, "detector_configuration_seed");
     if (!seed)
       return std::nullopt;
     loaded.detector_configuration_seed = *seed;

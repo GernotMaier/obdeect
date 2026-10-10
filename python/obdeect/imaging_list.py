@@ -41,7 +41,9 @@ def load_imaging_metadata(
     """
     model = json.loads(path.read_text(encoding="utf-8"))
     blockers = model.get("report", {}).get("trace_blockers", [])
-    if any("panel alignment and distance" in item for item in blockers):
+    if any(
+        "panel alignment and distance" in item or "scatter requires" in item for item in blockers
+    ):
         raise ValueError(
             "optical model omits configured mirror effects; recompile the optical model"
         )
@@ -130,7 +132,10 @@ def load_imaging_metadata(
         off_axis_x_deg,
         off_axis_y_deg,
         zenith_angle_deg,
-        model.get("random_seeds", {}).get("detector_configuration_seed", 0),
+        model.get("random_seeds", {}).get(
+            "detector_configuration_seed",
+            model.get("primary", {}).get("alignment", {}).get("seed", 0),
+        ),
     )
 
 

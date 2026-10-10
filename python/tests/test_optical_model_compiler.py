@@ -1,5 +1,6 @@
 """Tests for the generic simulation-models optical model compiler."""
 
+import copy
 import json
 import math
 import unittest
@@ -84,6 +85,13 @@ class TestOpticalModelCompiler(unittest.TestCase):
             self.assertEqual(base["trace_model"]["camera_degradation"]["x_basis"], [1, 0, 0])
             self.assertEqual(base["trace_model"]["detector_surfaces"][0]["response_y_sign"], -1)
             original = json.dumps(base, sort_keys=True)
+            legacy = copy.deepcopy(base)
+            legacy_context = legacy["observing_geometry"]
+            legacy_context["alignment_seed"] = legacy_context.pop("detector_configuration_seed")
+            self.assertEqual(
+                resolve_observing_geometry(legacy, 17)["trace_model"],
+                resolve_observing_geometry(base, 17)["trace_model"],
+            )
             for angle in (17, 23, 0, -3):
                 with self.subTest(angle=angle):
                     resolved = resolve_observing_geometry(base, angle)
