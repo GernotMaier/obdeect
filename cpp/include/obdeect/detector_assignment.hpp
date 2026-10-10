@@ -138,8 +138,10 @@ private:
 inline DetectorAssignmentHandle &
 DetectorAssignmentHandle::operator=(std::shared_ptr<const CompiledDetectorAssignmentGrid> grid) {
   grid_ = std::move(grid);
-  validator_ = grid_ ? [](const CompiledDetectorAssignmentGrid *value) { return value->is_valid(); }
-                     : nullptr;
+  if (grid_)
+    validator_ = [](const CompiledDetectorAssignmentGrid *value) { return value->is_valid(); };
+  else
+    validator_ = nullptr;
   return *this;
 }
 
