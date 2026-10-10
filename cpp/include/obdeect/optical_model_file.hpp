@@ -1580,23 +1580,31 @@ trace_axisymmetric_optical_model(const Ray &input, std::uint64_t photon_id,
     return record;
   }
   {
-    auto shadow = optical_model.incoming_obscurer_planes
-                      ? optical_model.incoming_obscurer_planes->intersect(ray)
-                      : std::optional<DetectorSurfaceHit>{};
+    DetectorSurfaceHit shadow{};
+    bool has_shadow = false;
+    if (optical_model.incoming_obscurer_planes) {
+      const auto incoming_shadow = optical_model.incoming_obscurer_planes->intersect(ray);
+      if (incoming_shadow) {
+        shadow = *incoming_shadow;
+        has_shadow = true;
+      }
+    }
     const auto opaque = intersect_opaque_surfaces(ray, optical_model.opaque_obscurers);
-    if (opaque && (!shadow || opaque->distance_m < shadow->distance_m))
+    if (opaque && (!has_shadow || opaque->distance_m < shadow.distance_m)) {
       shadow = DetectorSurfaceHit{opaque->surface_id, opaque->distance_m, opaque->point_m,
                                   opaque->unit_normal};
-    if (shadow && (!primary || shadow->distance_m < primary->distance_m)) {
-      record.points_m[1] = shadow->point_m;
+      has_shadow = true;
+    }
+    if (has_shadow && (!primary || shadow.distance_m < primary->distance_m)) {
+      record.points_m[1] = shadow.point_m;
       record.point_count = 2;
-      record.path_length_m = shadow->distance_m;
+      record.path_length_m = shadow.distance_m;
       record.status = PhotonStatus::blocked_obscurer;
       record.final_direction = ray.direction;
-      record.terminal_surface_id = shadow->surface_id;
-      record.interaction_surface_ids[0] = shadow->surface_id;
+      record.terminal_surface_id = shadow.surface_id;
+      record.interaction_surface_ids[0] = shadow.surface_id;
       record.interaction_kinds[0] = OpticalInteractionKind::obscurer;
-      record.interaction_normals[0] = shadow->unit_normal;
+      record.interaction_normals[0] = shadow.unit_normal;
       record.interaction_incoming_directions[0] = ray.direction;
       record.interaction_outgoing_directions[0] = ray.direction;
       return record;
