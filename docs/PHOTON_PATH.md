@@ -97,8 +97,7 @@ obdeect-plot-reference --view telescope --panel focal-plane-hits --input arrival
 ## 4. Secondary mirror and inter-mirror transport
 
 For a dual-reflector model, the reflected ray propagates to the secondary
-profile. The configured secondary shadow and inter-mirror obscurers are tested
-along that segment; the nearest obstruction terminates the path. A secondary
+A configured incoming secondary shadow is tested on the incident ray before the primary. After primary reflection, inter-mirror obscurers are tested along the segment to the secondary; the nearest obstruction terminates the path.
 miss is recorded separately. At a secondary hit, its local normal sets the
 reflection, configured scatter perturbs the outgoing direction, and the
 wavelength/incidence reflectivity and spatial degradation multiply throughput.
