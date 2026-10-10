@@ -1,3 +1,4 @@
+#include "obdeect/detector_assignment.hpp"
 #include "obdeect/trace.hpp"
 
 #include <cmath>
@@ -25,6 +26,15 @@ int main() {
           "T-IR-001: compiler preserves generic facet geometry");
   require(!compile_segmented_optical_model({provenance, {facet, facet}}),
           "T-IR-002: duplicate facet IDs fail closed");
+  auto invalid_response_model = *optical_model;
+  invalid_response_model.pixel_responses = std::make_shared<const PixelResponses>();
+  require(!is_valid(invalid_response_model),
+          "T-IR-007: compiled model validation checks attached pixel responses");
+  auto invalid_assignment_model = *optical_model;
+  invalid_assignment_model.detector_assignment =
+      std::make_shared<const CompiledDetectorAssignmentGrid>();
+  require(!is_valid(invalid_assignment_model),
+          "compiled model rejects an invalid detector assignment grid");
   auto invalid = facet;
   invalid.unit_normal = {0.0, 0.0, 0.0};
   require(!compile_segmented_optical_model({provenance, {invalid}}),
@@ -89,6 +99,19 @@ int main() {
   auto overlapping_facet = far;
   overlapping_facet.id = 12;
   const ImportedDetectorSurface detector_a{20, {0, 0, 4}, {0, 0, 1}, 2, FacetShape::circle};
+  auto imaging = compile_segmented_optical_model({provenance, {near}, {detector_a}});
+  require(imaging.has_value(), "imaging plane fixture compiles");
+  const Ray outside_pixel{{3, 0, 5}, {0, 0, -1}};
+  require(!intersect_detector_surfaces(outside_pixel, *imaging),
+          "finite detector rejects photons outside its aperture");
+  imaging->imaging_plane_z_m = 4;
+  const auto image_hit = intersect_detector_surfaces(outside_pixel, *imaging);
+  require(image_hit && image_hit->distance_m == 1 && image_hit->point_m.x == 3 &&
+              image_hit->point_m.z == 4,
+          "imaging plane records photons beyond the camera boundary at the declared plane");
+  require(!intersect_detector_surfaces({{0, 0, 5}, {1, 0, 0}}, *imaging) &&
+              !intersect_detector_surfaces({{0, 0, 5}, {0, 0, 1}}, *imaging),
+          "imaging plane rejects parallel and backward intersections");
   auto detector_b = detector_a;
   detector_b.id = 21;
   const ImportedCylinderObscurer cylinder_a{30, {0, 0, 3}, {0, 0, 4}, 1};
@@ -143,6 +166,16 @@ int main() {
       {provenance, {near, far}, {farther_detector, nearer_detector}});
   require(detected_optical_model.has_value(), "optical_model with explicit detectors compiles");
   const auto detected = trace(*detected_optical_model, input);
+  auto air_model = *detected_optical_model;
+  air_model.propagation_group_index = 1.00023;
+  const auto air_result = trace(air_model, input);
+  require(std::abs(air_result.photons.time_ns[0] - (7.0 + 4.0 * air_model.propagation_group_index /
+                                                              kSpeedOfLightMPerNs)) < 1.e-12 &&
+              air_result.photons.position_m[0].z == detected.photons.position_m[0].z &&
+              air_result.photons.weight[0] == detected.photons.weight[0],
+          "ambient group index changes flight time without changing geometry or throughput");
+  air_model.propagation_group_index = 0.9;
+  require(!is_valid(air_model), "invalid ambient group index rejects");
   constexpr double speed_of_light_m_per_ns = 0.299792458;
   require(detected.photons.status[0] == PhotonStatus::detected &&
               detected.photons.surface_id[0] == nearer_detector.id &&
@@ -241,5 +274,22 @@ int main() {
                        .terminal_loss_weight[static_cast<std::size_t>(PhotonStatus::no_detector)] -
                    1.6) < 1.e-12,
       "response loss is accounted even when the reflected photon misses detection");
+  // Incoming housing masks must not clip rays on their way to the image.
+  auto shadow_model = *detected_optical_model;
+  const ImportedDetectorSurface housing{30,  {1, 2, 8},          {0, 0, 1},
+                                        0.4, FacetShape::square, {1, 0, 0}};
+  auto housing_planes = compile_detector_planes({housing});
+  require(housing_planes.has_value(), "finite camera housing compiles");
+  shadow_model.incoming_obscurer_planes =
+      std::make_shared<const CompiledDetectorPlanes>(std::move(*housing_planes));
+  const auto blocked = trace_segmented_path({{1, 2, 10}, {0, 0, -1}}, 0, 400, shadow_model);
+  require(blocked.status == PhotonStatus::blocked_obscurer && blocked.point_count == 2 &&
+              blocked.terminal_surface_id == 30 && std::abs(blocked.path_length_m - 2) < 1.e-12,
+          "housing records its actual incoming intersection and loss");
+  const auto below = trace_segmented_path({{1, 2, 7}, {0, 0, -1}}, 0, 400, shadow_model);
+  const auto unmasked =
+      trace_segmented_path({{1, 2, 7}, {0, 0, -1}}, 0, 400, *detected_optical_model);
+  require(below.status == unmasked.status && below.path_length_m == unmasked.path_length_m,
+          "incoming-only housing cannot intercept reflected rays");
   std::cout << "segmented optical_model tests passed\n";
 }

@@ -7,6 +7,19 @@ from typing import Any
 from obdeect.camera_config import PIXEL_APERTURE_SHAPES, CameraConfigError
 
 
+def _circumradius(diameter: float, shape_code: int) -> float:
+    """Return the aperture's maximum centre-to-edge distance."""
+    if shape_code == 0:  # circle
+        factor = 1.0
+    elif shape_code == 2:  # square, diameter is side length
+        factor = math.sqrt(2)
+    elif shape_code in (1, 3):  # hexagon, diameter is flat-to-flat
+        factor = 2 / math.sqrt(3)
+    else:
+        raise CameraConfigError(f"unsupported pixel aperture shape code: {shape_code}")
+    return diameter * factor / 2
+
+
 def compile_camera_surfaces(
     camera: dict[str, Any], focal: dict[str, Any], orientation_mode: int, *, reflected: bool
 ) -> dict[str, list[dict[str, Any]]]:
@@ -14,7 +27,7 @@ def compile_camera_surfaces(
 
     Modes 0/1 place pixels individually; modes 2/3 place their module fronts in
     one plane. Modes 1/3 keep all normals parallel to the optical axis. A prime
-    focus camera's pi rotation about y reflects x and the normal's z component.
+    focus camera reverses z and preserves both transverse coordinates.
     The focal polynomial already includes its telescope-frame vertex placement.
     """
     if isinstance(orientation_mode, bool) or orientation_mode not in (0, 1, 2, 3):
@@ -88,15 +101,33 @@ def compile_camera_surfaces(
             math.cos(rotation) * a + math.sin(rotation) * b for a, b in zip(u, v, strict=True)
         ]
         if reflected:
-            x = -x
-            normal = [-normal[0], normal[1], -normal[2]]
-            tangent = [-tangent[0], tangent[1], -tangent[2]]
+            # The prime-focus tracer reverses camera z and explicitly restores
+            # camera x before pixel assignment. Preserve both transverse axes.
+            normal = [normal[0], normal[1], -normal[2]]
+            tangent = [tangent[0], tangent[1], -tangent[2]]
+        camera_angle = math.radians(camera.get("rotation_deg", 0.0))
+        cosine, sine = math.cos(camera_angle), math.sin(camera_angle)
+        x, y = cosine * x - sine * y, sine * x + cosine * y
+        normal = [
+            cosine * normal[0] - sine * normal[1],
+            sine * normal[0] + cosine * normal[1],
+            normal[2],
+        ]
+        tangent = [
+            cosine * tangent[0] - sine * tangent[1],
+            sine * tangent[0] + cosine * tangent[1],
+            tangent[2],
+        ]
         pixel_type = types[pixel["type_id"]]
         centre = [x, y, z]
         metadata = {
             "source_pixel_id": pixel["id"],
             "source_type_id": pixel["type_id"],
             "enabled": pixel["enabled"],
+            "response_y_sign": -1 if reflected else 1,
+            "assignment_radius_m": _circumradius(
+                pixel_type["funnel_diameter_m"], pixel_type["funnel_shape_code"]
+            ),
             "normal": normal,
             "tangent": tangent,
         }
@@ -117,4 +148,37 @@ def compile_camera_surfaces(
         })
     if not entrances:
         raise CameraConfigError("physical camera has no enabled pixel entrances")
-    return {"entrance_surfaces": entrances, "cathode_surfaces": cathodes}
+    radius_by_type = {
+        identifier: _circumradius(entry["funnel_diameter_m"], entry["funnel_shape_code"])
+        for identifier, entry in types.items()
+    }
+    x_low = min(
+        0, *(pixel["centre_xy_m"][0] - radius_by_type[pixel["type_id"]] for pixel in pixels)
+    )
+    x_high = max(
+        0, *(pixel["centre_xy_m"][0] + radius_by_type[pixel["type_id"]] for pixel in pixels)
+    )
+    y_low = min(
+        0, *(pixel["centre_xy_m"][1] - radius_by_type[pixel["type_id"]] for pixel in pixels)
+    )
+    y_high = max(
+        0, *(pixel["centre_xy_m"][1] + radius_by_type[pixel["type_id"]] for pixel in pixels)
+    )
+    angle = math.radians(camera.get("rotation_deg", 0))
+    assignment = dict(
+        nx=int(math.sqrt(4 * len(pixels)) + 2),
+        ny=int(math.sqrt(4 * len(pixels)) + 2),
+        x_low_m=x_low,
+        x_high_m=x_high,
+        y_low_m=y_low,
+        y_high_m=y_high,
+        x_basis=[math.cos(angle), math.sin(angle), 0.0],
+        y_basis=[-math.sin(angle), math.cos(angle), 0.0],
+    )
+    if reflected:
+        assignment["reference_plane_z_m"] = coefficients[0]
+    return {
+        "entrance_surfaces": entrances,
+        "cathode_surfaces": cathodes,
+        "assignment_grid": assignment,
+    }

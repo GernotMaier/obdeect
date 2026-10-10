@@ -25,7 +25,7 @@ int main() {
   const auto ray = sample_star(3, 21, 2, finite);
   assert(ray);
   assert(std::abs(ray->ray.position_m.z - finite.entrance_z_m) < 1e-10);
-  const Vec3 target = sampled_pupil(3, 21, 2);
+  const Vec3 target = sampled_disk(3, 21, 2);
   const double flight = -ray->ray.position_m.z / ray->ray.direction.z;
   assert(norm(ray->ray.position_m + ray->ray.direction * flight - target) < 1e-10);
   assert(std::abs(ray->time_ns + flight / kSpeedOfLightMPerNs -

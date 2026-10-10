@@ -7,7 +7,7 @@ import shlex
 from collections import Counter
 from typing import Any
 
-PIXEL_APERTURE_SHAPES = {0: "circle", 1: "hexagon_flat_y", 2: "square", 3: "hexagon_flat_x"}
+PIXEL_APERTURE_SHAPES = {0: "circle", 1: "hexagon_flat_x", 2: "square", 3: "hexagon_flat_y"}
 
 
 class CameraConfigError(ValueError):
@@ -68,6 +68,19 @@ def parse_camera_layout(contents: str) -> dict[str, Any]:
                     float(field)
                 except ValueError:
                     references.append(field)
+            optical_response = {}
+            if not references:
+                if len(fields) != 10:
+                    raise CameraConfigError(
+                        "numeric PixType requires transparency and wall reflectivity"
+                    )
+                transparency, reflectivity = (_number(value, line_number) for value in fields[8:10])
+                if not 0 <= transparency <= 1 or not 0 <= reflectivity <= 1:
+                    raise CameraConfigError("PixType efficiencies must be fractions")
+                optical_response = {
+                    "funnel_transparency": transparency,
+                    "funnel_wall_reflectivity": reflectivity,
+                }
             pixel_types[identifier] = {
                 "id": identifier,
                 "cathode_shape_code": shape,
@@ -77,6 +90,7 @@ def parse_camera_layout(contents: str) -> dict[str, Any]:
                 "funnel_depth_m": depth * 0.01,
                 "response_files": references,
                 "source_columns": fields[2:],
+                **optical_response,
             }
         elif directive == "Pixel":
             if len(fields) < 5:
@@ -93,6 +107,14 @@ def parse_camera_layout(contents: str) -> dict[str, Any]:
                     _number(fields[4], line_number) * 0.01,
                 ],
                 "source_columns": fields[5:],
+                "module": _integer(fields[5], line_number) if len(fields) > 5 else 0,
+                "enabled": bool(_integer(fields[9], line_number)) if len(fields) > 9 else True,
+                "z_offset_m": _number(fields[12], line_number) * 0.01 if len(fields) > 12 else 0.0,
+                "rotation_deg": _number(fields[13], line_number) if len(fields) > 13 else 0.0,
+                "normal_slopes": [
+                    _number(fields[14], line_number) if len(fields) > 14 else 0.0,
+                    _number(fields[15], line_number) if len(fields) > 15 else 0.0,
+                ],
             })
         elif directive == "Rotate":
             if len(fields) != 2:

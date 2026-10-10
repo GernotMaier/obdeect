@@ -6,10 +6,11 @@
 #include <numbers>
 #include <optional>
 #include <span>
+#include <vector>
 
 namespace obdeect {
 
-enum class AxisymmetricSegmentShape { hexagon, annular_sector };
+enum class AxisymmetricSegmentShape { hexagon, annular_sector, circle, square, polygon };
 struct AxisymmetricSegment {
   std::uint32_t id{};
   AxisymmetricSegmentShape shape{};
@@ -22,6 +23,7 @@ struct AxisymmetricSegment {
   double span_rad{};
   double gap_m{};
   bool gap_at_start{};
+  std::vector<Vec3> vertices{};
 };
 
 // Ring boundary and gap convention matches sim_telarray/common/sim_imaging.c
@@ -30,6 +32,19 @@ struct AxisymmetricSegment {
 [[nodiscard]] inline bool contains_axisymmetric_segment(const AxisymmetricSegment &segment,
                                                         const AxisymmetricMirror &mirror,
                                                         const Vec3 &point) {
+  if (segment.shape == AxisymmetricSegmentShape::polygon) {
+    double sign = 0;
+    for (std::size_t i = 0; i < segment.vertices.size(); ++i) {
+      const Vec3 a = segment.vertices[i], b = segment.vertices[(i + 1) % segment.vertices.size()];
+      const double side = (b.x - a.x) * (point.y - a.y) - (b.y - a.y) * (point.x - a.x);
+      if (std::abs(side) <= kEpsilon)
+        continue;
+      if (sign && side * sign < 0)
+        return false;
+      sign = side;
+    }
+    return segment.vertices.size() >= 3;
+  }
   if (segment.shape == AxisymmetricSegmentShape::annular_sector) {
     const double radius = std::hypot(point.x, point.y);
     double angle = std::atan2(point.y, point.x) - segment.start_rad;
@@ -54,6 +69,10 @@ struct AxisymmetricSegment {
   const double u = x * std::cos(segment.rotation_rad) + y * std::sin(segment.rotation_rad);
   const double v = -x * std::sin(segment.rotation_rad) + y * std::cos(segment.rotation_rad);
   const double half = segment.diameter_m / 2;
+  if (segment.shape == AxisymmetricSegmentShape::circle)
+    return u * u + v * v <= half * half;
+  if (segment.shape == AxisymmetricSegmentShape::square)
+    return std::abs(u) <= half && std::abs(v) <= half;
   return std::abs(u) <= half && std::abs(0.5 * u + std::sqrt(3.0) / 2 * v) <= half &&
          std::abs(0.5 * u - std::sqrt(3.0) / 2 * v) <= half;
 }

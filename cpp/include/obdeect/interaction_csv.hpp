@@ -31,7 +31,7 @@ public:
 
   template <std::size_t Capacity>
   void write(const PhotonBatchContext &context, const OpticalPhoton &photon,
-             const BasicPathRecord<Capacity> &path) {
+             const BasicPathRecord<Capacity> &path, double propagation_group_index = 1.0) {
     double cumulative = 0, previous_throughput = 1;
     for (std::size_t i = 0; i + 1 < path.point_count; ++i) {
       const double segment = norm(path.points_m[i + 1] - path.points_m[i]);
@@ -58,8 +58,9 @@ public:
              << incoming.x << ',' << incoming.y << ',' << incoming.z << ',' << outgoing.x << ','
              << outgoing.y << ',' << outgoing.z << ',' << segment << ',' << cumulative << ','
              << (path.material_transport ? path.interaction_optical_path_m[i] : cumulative) << ','
-             << photon.time_ns + (path.material_transport ? path.interaction_group_delay_ns[i]
-                                                          : cumulative / kSpeedOfLightMPerNs)
+             << photon.time_ns + (path.material_transport
+                                      ? path.interaction_group_delay_ns[i]
+                                      : cumulative * propagation_group_index / kSpeedOfLightMPerNs)
              << ',' << photon.wavelength_nm << ',' << photon.weight * previous_throughput << ','
              << (kind == OpticalInteractionKind::obscurer
                      ? 0

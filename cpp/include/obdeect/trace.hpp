@@ -66,7 +66,9 @@ struct TraceResult {
     result.photons.position_m[index] = path.points_m[path.point_count - 1];
     result.photons.direction[index] = path.final_direction;
     result.photons.optical_path_m[index] = path.path_length_m;
-    result.photons.time_ns[index] = input.time_ns[index] + path.path_length_m / kSpeedOfLightMPerNs;
+    result.photons.time_ns[index] =
+        input.time_ns[index] +
+        path.path_length_m * optical_model.propagation_group_index / kSpeedOfLightMPerNs;
     const double remaining_weight = input.weight[index] * path.surviving_throughput;
     result.photons.weight[index] = path.status == PhotonStatus::detected ? remaining_weight : 0;
     result.photons.surface_id[index] = path.terminal_surface_id;

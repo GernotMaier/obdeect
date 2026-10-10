@@ -33,7 +33,7 @@ void usage() {
       << "  --optical-model FILE  compiled obdeect optical-model JSON\n"
       << "  --require-production-ready  reject optical models lacking a completed production "
          "report\n"
-      << "  --focal-surface-image  axisymmetric imaging diagnostic before pixel acceptance and "
+      << "  --focal-surface-image  optical imaging diagnostic before pixel acceptance and "
          "camera response\n"
       << "  --photon-input FILE --input-block-size N  replay telescope-local CSV photons\n"
       << "  --photon-output FILE  save every resolved input photon before optical tracing\n"
@@ -41,7 +41,7 @@ void usage() {
       << "  --source star|illuminator|laser  (default: star)\n"
       << "  --photons N --output FILE --field-x-deg D --field-y-deg D\n"
       << "  --distance-m D --wavelength-nm N[,N...] --divergence-deg D --panel-id N\n"
-      << "  --pupil-radius-m D  explicit launch disk for generic optical models\n"
+      << "  --sampling-radius-m R  radius of the photon sampling disk in metres\n"
       << "  --source-x-m D --source-y-m D --source-z-m D\n"
       << "  --screen-x-m D --screen-y-m D --screen-z-m D --screen-radius-m D\n"
       << "  --direction-x D --direction-y D --direction-z D  (laser axis)\n"
@@ -84,8 +84,8 @@ int main(int argc, char **argv) {
   std::string star_mode = "plane-wave";
   double beam_radius_m = 0, entrance_z_m = 50;
   bool beam_radius_set = false, first_id_set = false;
-  double launch_pupil_radius_m = 0;
-  bool launch_pupil_radius_set = false;
+  double sampling_radius_m = 0;
+  bool sampling_radius_set = false;
   bool require_production_ready = false;
   bool production_ready = false;
   bool focal_surface_image = false;
@@ -194,7 +194,7 @@ int main(int argc, char **argv) {
         *provided = true;
       return true;
     };
-    if (number("--pupil-radius-m", launch_pupil_radius_m, &launch_pupil_radius_set) ||
+    if (number("--sampling-radius-m", sampling_radius_m, &sampling_radius_set) ||
         number("--emitted-weight", emitted_weight, &emitted_weight_set) ||
         number("--beam-radius-m", beam_radius_m, &beam_radius_set) ||
         number("--entrance-z-m", entrance_z_m) || number("--field-x-deg", field_x_deg) ||
@@ -224,19 +224,52 @@ int main(int argc, char **argv) {
       loaded ? std::move(loaded->nonsequential) : std::optional<obdeect::CompiledOpticalModel>{};
   production_ready = loaded && loaded->production_ready;
   if (focal_surface_image) {
-    if (!axisymmetric_optical_model) {
-      std::cerr << "--focal-surface-image requires a compiled axisymmetric optical model\n";
+    const auto relative_mirror_response = [](auto &response) {
+      if (!response)
+        return;
+      if (response->incidence_angle_deg.empty())
+        response.reset();
+      else {
+        response->wavelength_sampling.reset();
+        response->relative_to_envelope = true;
+      }
+    };
+    if (imported_optical_model && loaded->imaging_plane_z_m &&
+        !imported_optical_model->detector_surfaces.empty()) {
+      const auto detector =
+          *std::min_element(imported_optical_model->detector_surfaces.begin(),
+                            imported_optical_model->detector_surfaces.end(),
+                            [](const auto &a, const auto &b) { return a.id < b.id; });
+      imported_optical_model->detector_surfaces = {detector};
+      imported_optical_model->imaging_plane_z_m = loaded->imaging_plane_z_m;
+      imported_optical_model->detector_planes.reset();
+      imported_optical_model->detector_assignment.reset();
+      imported_optical_model->camera_response.reset();
+      imported_optical_model->telescope_transmission.reset();
+      imported_optical_model->camera_degradation.reset();
+      imported_optical_model->pixel_responses.reset();
+      relative_mirror_response(imported_optical_model->primary_reflectivity);
+    } else if (axisymmetric_optical_model) {
+      axisymmetric_optical_model->detector_planes.reset();
+      axisymmetric_optical_model->detector_assignment.reset();
+      axisymmetric_optical_model->camera_response.reset();
+      axisymmetric_optical_model->telescope_transmission.reset();
+      axisymmetric_optical_model->camera_degradation.reset();
+      axisymmetric_optical_model->pixel_responses.reset();
+      relative_mirror_response(axisymmetric_optical_model->primary_reflectivity);
+      relative_mirror_response(axisymmetric_optical_model->secondary_reflectivity);
+    } else {
+      std::cerr
+          << "--focal-surface-image requires a compiled focal surface or detector_vertex_z_m\n";
       return 2;
     }
     // An imaging-list diagnostic ends on the continuous focal prescription,
     // before pixel acceptance and measured camera response are applied.
-    axisymmetric_optical_model->detector_planes.reset();
-    axisymmetric_optical_model->camera_response.reset();
     production_ready = false;
   }
-  if (nonsequential_optical_model && photon_input_path.empty() && !launch_pupil_radius_set) {
-    std::cerr
-        << "nonsequential optical models require --photon-input or an explicit --pupil-radius-m\n";
+  if (nonsequential_optical_model && photon_input_path.empty() && !sampling_radius_set) {
+    std::cerr << "nonsequential optical models require --photon-input or an explicit "
+                 "--sampling-radius-m\n";
     return 2;
   }
   if ((!model && !imported_optical_model && !axisymmetric_optical_model &&
@@ -329,17 +362,32 @@ int main(int argc, char **argv) {
         std::make_shared<const obdeect::CompiledDetectorPlanes>(std::move(*planes));
   }
   const double radians_per_degree = std::numbers::pi / 180.0;
-  const double pupil_radius = launch_pupil_radius_set ? launch_pupil_radius_m : imported_optical_model
+  const double model_sampling_radius = imported_optical_model
                                   ? [&] {
                                       double radius = 0.0;
-                                      for (const auto& facet : imported_optical_model->primary_facets)
+                                      for (const auto &facet : imported_optical_model->primary_facets) {
+                                        const double shape_factor =
+                                            facet.shape == obdeect::FacetShape::square
+                                                ? std::sqrt(2.0)
+                                                : (facet.shape == obdeect::FacetShape::hexagon_flat_x ||
+                                                           facet.shape == obdeect::FacetShape::hexagon_flat_y
+                                                       ? 2.0 / std::sqrt(3.0)
+                                                       : 1.0);
                                         radius = std::max(radius, std::hypot(facet.centre_m.x, facet.centre_m.y) +
-                                                                  facet.diameter_m * 0.5);
+                                                                  facet.diameter_m * shape_factor * 0.5);
+                                      }
                                       return radius;
                                     }()
-                                  : axisymmetric_optical_model ? axisymmetric_optical_model->primary.outer_radius_m
-                                                       : nonsequential_optical_model ? 1.0 : model->primary_outer_radius_m;
-  if (!std::isfinite(pupil_radius) || pupil_radius <= 0.0)
+                                  : axisymmetric_optical_model
+                                        ? axisymmetric_optical_model->primary.outer_radius_m
+                                        : nonsequential_optical_model
+                                              ? 1.0
+                                              : model->primary_outer_radius_m;
+  const double star_sampling_factor =
+      source == "star" && photon_input_path.empty() && !sampling_radius_set ? 1.2 : 1.0;
+  const double sampling_radius =
+      sampling_radius_set ? sampling_radius_m : model_sampling_radius * star_sampling_factor;
+  if (!std::isfinite(sampling_radius) || sampling_radius <= 0.0)
     return 1;
   std::vector<obdeect::OpticalPhoton> input;
   if (sampled_source) {
@@ -349,15 +397,15 @@ int main(int argc, char **argv) {
     input.resize(input_block_size);
   } else if (source == "star") {
     input =
-        obdeect::star_photons(photons_count, pupil_radius,
+        obdeect::star_photons(photons_count, sampling_radius,
                               {field_x_deg * radians_per_degree, field_y_deg * radians_per_degree,
                                distance_m, wavelengths_nm.front()});
   } else if (source == "illuminator") {
     input = obdeect::illuminator_photons(
-        photons_count, pupil_radius,
+        photons_count, sampling_radius,
         {{source_x_m, source_y_m, source_z_m}, wavelengths_nm.front(), 1.0});
   } else {
-    input = obdeect::laser_photons(photons_count, pupil_radius,
+    input = obdeect::laser_photons(photons_count, sampling_radius,
                                    {{direction_x, direction_y, direction_z},
                                     {source_x_m, source_y_m, source_z_m},
                                     divergence_deg * radians_per_degree,
@@ -408,7 +456,7 @@ int main(int argc, char **argv) {
     output << "x" << point << "_m,y" << point << "_m,z" << point << "_m" << ',';
   output << "run_id,event_id,array_id,telescope_id,bunch_id,arrival_time_ns,terminal_surface_id,"
             "final_dx,final_dy,final_dz,interaction_surface_ids,response_loss_fraction,terminal_"
-            "loss_fraction,optical_path_m,detector_boundary\n";
+            "loss_fraction,optical_path_m,detector_boundary,sampling_area_m2\n";
   std::size_t detected = 0;
   std::size_t traced_count = 0;
   std::unique_ptr<obdeect::CsvPhotonReader> reader;
@@ -431,7 +479,7 @@ int main(int argc, char **argv) {
             std::optional<obdeect::OpticalPhoton> photon;
             if (source == "star" && star_mode == "finite") {
               photon = obdeect::sample_star(
-                  id, seed, pupil_radius,
+                  id, seed, sampling_radius,
                   obdeect::FiniteStarSource{
                       {-distance_m * std::tan(field_x_deg * radians_per_degree),
                        -distance_m * std::tan(field_y_deg * radians_per_degree), distance_m},
@@ -440,7 +488,7 @@ int main(int argc, char **argv) {
                       emission_time_ns});
             } else if (source == "star") {
               photon =
-                  obdeect::sample_star(id, seed, pupil_radius,
+                  obdeect::sample_star(id, seed, sampling_radius,
                                        obdeect::StarSource{field_x_deg * radians_per_degree,
                                                            field_y_deg * radians_per_degree,
                                                            distance_m, wavelengths_nm.front()});
@@ -448,7 +496,7 @@ int main(int argc, char **argv) {
                 photon->time_ns += emission_time_ns;
             } else if (source == "illuminator") {
               photon = obdeect::sample_illuminator(
-                  id, seed, pupil_radius,
+                  id, seed, sampling_radius,
                   obdeect::PointIlluminator{
                       {source_x_m, source_y_m, source_z_m}, wavelengths_nm.front(), emitted_weight},
                   source_normalization_photons.value_or(photons_count));
@@ -456,7 +504,7 @@ int main(int argc, char **argv) {
                 photon->time_ns += emission_time_ns;
             } else {
               photon = obdeect::sample_laser(
-                  id, seed, beam_radius_set ? beam_radius_m : pupil_radius,
+                  id, seed, beam_radius_set ? beam_radius_m : sampling_radius,
                   obdeect::LaserSource{{direction_x, direction_y, direction_z},
                                        {source_x_m, source_y_m, source_z_m},
                                        divergence_deg * radians_per_degree,
@@ -500,11 +548,15 @@ int main(int argc, char **argv) {
         }
       }
       const auto emit_path = [&](const auto &path) {
+        const double propagation_group_index =
+            imported_optical_model       ? imported_optical_model->propagation_group_index
+            : axisymmetric_optical_model ? axisymmetric_optical_model->propagation_group_index
+                                         : 1.0;
         const double throughput =
             path.status == obdeect::PhotonStatus::detected ? path.surviving_throughput : 0.0;
         if (interaction_writer) {
           try {
-            interaction_writer->write(context, photon, path);
+            interaction_writer->write(context, photon, path, propagation_group_index);
           } catch (const std::exception &error) {
             std::cerr << error.what() << '\n';
             return false;
@@ -523,7 +575,8 @@ int main(int argc, char **argv) {
                << context.telescope_id << ',' << photon.bunch_id << ','
                << photon.time_ns + (path.material_transport
                                         ? path.group_delay_ns
-                                        : path.path_length_m / obdeect::kSpeedOfLightMPerNs)
+                                        : path.path_length_m * propagation_group_index /
+                                              obdeect::kSpeedOfLightMPerNs)
                << ',' << path.terminal_surface_id << ',' << path.final_direction.x << ','
                << path.final_direction.y << ',' << path.final_direction.z << ',';
         for (std::size_t interaction = 0; interaction + 1 < path.point_count; ++interaction) {
@@ -534,7 +587,10 @@ int main(int argc, char **argv) {
         output << ',' << 1.0 - path.surviving_throughput << ','
                << (path.status == obdeect::PhotonStatus::detected ? 0.0 : path.surviving_throughput)
                << ',' << (path.material_transport ? path.optical_path_m : path.path_length_m) << ','
-               << (focal_surface_image ? "continuous_focal_surface" : "compiled_detector") << '\n';
+               << (focal_surface_image ? "continuous_focal_surface" : "compiled_detector") << ',';
+        if (source == "star" && photon_input_path.empty())
+          output << std::numbers::pi * sampling_radius * sampling_radius;
+        output << '\n';
         return true;
       };
       if (nonsequential_optical_model) {

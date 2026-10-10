@@ -50,6 +50,30 @@ void assert_unknown_fields_rejected(const char *path, Reader read,
 }
 
 int main() {
+  {
+    const auto root =
+        obdeect::json::Parser{
+            R"({"camera_degradation_in_detector_frame":true,"detector_surfaces":[{"id":1,"shape":"circle","centre_m":[0,0,10],"normal":[0,0,-1],"tangent":[1,0,0],"diameter_m":1,"response_y_sign":-1}]})"}
+            .parse();
+    assert(root);
+    const auto surfaces = obdeect::detail::detector_fields(*root);
+    assert(surfaces && surfaces->front().response_y_sign == -1);
+    assert(obdeect::detail::detector_map_frame_field(*root, *surfaces, true) == true);
+    assert(!obdeect::detail::detector_map_frame_field(*root, *surfaces, false));
+    assert(!obdeect::detail::detector_map_frame_field(*root, {}, true));
+    auto invalid_surfaces = *surfaces;
+    invalid_surfaces.front().unit_tangent_u = {0, 0, 1};
+    assert(!obdeect::detail::detector_map_frame_field(*root, invalid_surfaces, true));
+    auto invalid_sign = *root;
+    auto &surface =
+        const_cast<obdeect::json::Value *>(invalid_sign.find("detector_surfaces"))->array().front();
+    *const_cast<obdeect::json::Value *>(surface.find("response_y_sign")) = obdeect::json::Value{};
+    assert(!obdeect::detail::detector_fields(invalid_sign));
+    const auto invalid_flag =
+        obdeect::json::Parser{R"({"camera_degradation_in_detector_frame":1})"}.parse();
+    assert(invalid_flag &&
+           !obdeect::detail::detector_map_frame_field(*invalid_flag, *surfaces, true));
+  }
   assert(obdeect::detail::sha256("") ==
          "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
   std::size_t response_case = 0;
@@ -70,14 +94,26 @@ int main() {
   {
     std::ofstream output(segmented_path);
     output << with_valid_hash(
-        R"({"format":"obdeect.compiled-optical-model.v1","optical_model_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","provenance":{"model":"LSTN-design","model_version":"7.0.0"},"trace_model":{"kind":"segmented","primary_facets":[{"id":0,"shape":"circle","centre_m":[0,0,0],"normal":[0,0,1],"tangent":[1,0,0],"diameter_m":1,"focal_length_m":10}],"detector_surfaces":[{"id":1,"shape":"circle","centre_m":[0,0,10],"normal":[0,0,1],"tangent":[1,0,0],"diameter_m":1}],"cylinder_obscurers":[{"id":2,"first_endpoint_m":[0,0,2],"second_endpoint_m":[0,0,3],"diameter_m":0.1}],"primary_reflectivity":[{"wavelength_nm":300,"response":0.8},{"wavelength_nm":500,"response":0.9}]}})");
+        R"({"format":"obdeect.compiled-optical-model.v1","optical_model_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","provenance":{"model":"LSTN-design","model_version":"7.0.0"},"trace_model":{"kind":"segmented","primary_facets":[{"id":0,"shape":"circle","centre_m":[0,0,0],"normal":[0,0,1],"tangent":[1,0,0],"diameter_m":1,"focal_length_m":10}],"detector_surfaces":[{"id":1,"shape":"circle","centre_m":[0,0,10],"normal":[0,0,1],"tangent":[1,0,0],"diameter_m":1}],"cylinder_obscurers":[{"id":2,"first_endpoint_m":[0,0,2],"second_endpoint_m":[0,0,3],"diameter_m":0.1}],"incoming_obscurer_planes":[{"id":3,"shape":"square","centre_m":[0.3,0,5],"normal":[0,0,1],"tangent":[1,0,0],"diameter_m":0.1}],"primary_reflectivity":[{"wavelength_nm":300,"response":0.8},{"wavelength_nm":500,"response":0.9}]}})");
   }
   const auto segmented = obdeect::read_segmented_optical_model(segmented_path);
+  assert(segmented && segmented->incoming_obscurer_planes &&
+         segmented->incoming_obscurer_planes->surfaces().front().id == 3);
   const auto loaded_segmented = obdeect::read_optical_model(segmented_path);
   assert(loaded_segmented && loaded_segmented->segmented && !loaded_segmented->axisymmetric &&
          !loaded_segmented->nonsequential && !loaded_segmented->production_ready);
+  const char *invalid_pixel_response_path = "obdeect-invalid-pixel-response-test.json";
+  {
+    std::ofstream output(invalid_pixel_response_path);
+    output << with_valid_hash(
+        R"({"format":"obdeect.compiled-optical-model.v1","optical_model_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","provenance":{"model":"invalid-pixel-response","model_version":"1"},"trace_model":{"kind":"segmented","primary_facets":[{"id":0,"shape":"circle","centre_m":[0,0,0],"normal":[0,0,1],"tangent":[1,0,0],"diameter_m":1,"focal_length_m":10}],"detector_surfaces":[{"id":1,"shape":"circle","centre_m":[0,0,10],"normal":[0,0,1],"tangent":[1,0,0],"diameter_m":1}],"pixel_responses":{"tables":[{"id":1,"method":"measured","tangent_bin_width":1,"angular_efficiency":[1]}],"bindings":[{"id":1,"table_id":2}]}}})");
+  }
+  assert(!obdeect::read_segmented_optical_model(invalid_pixel_response_path));
+  assert(!obdeect::read_optical_model(invalid_pixel_response_path));
+  std::remove(invalid_pixel_response_path);
   assert_unknown_fields_rejected(segmented_path, obdeect::read_segmented_optical_model,
-                                 {"", "primary_facets", "detector_surfaces", "cylinder_obscurers"});
+                                 {"", "primary_facets", "detector_surfaces", "cylinder_obscurers",
+                                  "incoming_obscurer_planes"});
   if (!segmented || segmented->primary_facets.size() != 1 ||
       segmented->detector_surfaces.size() != 1 || segmented->cylinder_obscurers.size() != 1 ||
       !segmented->primary_reflectivity ||
@@ -144,6 +180,26 @@ int main() {
   auto unit_response = *axisymmetric;
   unit_response.primary_reflectivity.reset();
   unit_response.secondary_reflectivity.reset();
+  auto final_flight = unit_response;
+  final_flight.primary.surface.coefficient_m[1] = 0.1;
+  const auto unobstructed =
+      obdeect::trace_axisymmetric_optical_model({{0.5, 0, 10}, {0, 0, -1}}, 2, final_flight);
+  if (unobstructed.status != obdeect::PhotonStatus::detected)
+    return 1;
+  const auto mid = (unobstructed.points_m[2] + unobstructed.points_m[3]) * 0.5;
+  obdeect::OpaqueSurface final_plate;
+  final_plate.id = 70;
+  final_plate.vertices = {
+      mid + obdeect::Vec3{-0.001, -0.001, 0}, mid + obdeect::Vec3{0.001, -0.001, 0},
+      mid + obdeect::Vec3{0.001, 0.001, 0}, mid + obdeect::Vec3{-0.001, 0.001, 0}};
+  final_flight.opaque_obscurers.push_back(final_plate);
+  const auto final_loss =
+      obdeect::trace_axisymmetric_optical_model({{0.5, 0, 10}, {0, 0, -1}}, 2, final_flight);
+  if (final_loss.status != obdeect::PhotonStatus::blocked_obscurer || final_loss.point_count != 4 ||
+      final_loss.terminal_surface_id != 70 ||
+      obdeect::norm(final_loss.points_m[3] - mid) > 1.e-10 ||
+      final_loss.interaction_kinds[2] != obdeect::OpticalInteractionKind::obscurer)
+    return 1;
   assert(obdeect::trace_axisymmetric_optical_model({{0, 0, 10}, {0, 0, -1}}, 0, unit_response, 0)
              .status == obdeect::PhotonStatus::invalid_input);
   // Opaque primitives belong to an explicit flight, not to the detector flight.

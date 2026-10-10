@@ -1,5 +1,9 @@
 #pragma once
 
+#include "obdeect/obscurers.hpp"
+#include "obdeect/spatial_response.hpp"
+#include "obdeect/telescope_transmission.hpp"
+
 #include "obdeect/intersections.hpp"
 #include "obdeect/math.hpp"
 #include "obdeect/mirror_scatter.hpp"
@@ -36,6 +40,7 @@ struct ImportedFacet {
   // Positive radius of the panel's spherical optical surface. A zero value
   // represents a planar panel and is retained for generic plane optical_models.
   double curvature_radius_m{};
+  Vec3 response_basis_u{}, response_basis_v{};
 };
 
 // A generic finite planar optical-arrival surface. Its placement and aperture
@@ -48,6 +53,32 @@ struct ImportedDetectorSurface {
   double diameter_m{};
   FacetShape shape{FacetShape::circle};
   Vec3 unit_tangent_u{};
+  double assignment_radius_m{};
+  double response_y_sign{1};
+};
+
+struct PixelResponseTable {
+  enum class Method { measured, single_reflection };
+  std::uint32_t id{};
+  Method method{Method::measured};
+  double tangent_bin_width{}, wavelength_bin_width_nm{}, wavelength_bin_origin_nm{};
+  std::vector<double> angular_efficiency{}, spectral_correction{};
+  double transparency{1}, wall_reflectivity{1};
+};
+
+struct PixelResponseBinding {
+  std::uint32_t detector_id{}, table_id{};
+  std::optional<ImportedDetectorSurface> cathode{};
+};
+
+struct PixelResponses {
+  std::vector<PixelResponseTable> tables;
+  std::vector<PixelResponseBinding> bindings;
+
+  [[nodiscard]] bool is_valid() const;
+  [[nodiscard]] std::optional<double> at_unchecked(std::uint32_t detector_id, double wavelength_nm,
+                                                   double incidence_deg,
+                                                   const Ray &at_entrance) const;
 };
 
 // An opaque finite cylinder supplied by a model adapter.  It is deliberately
@@ -81,6 +112,26 @@ struct ImportedSegmentedOpticalModel {
 };
 
 class CompiledDetectorPlanes;
+class CompiledDetectorAssignmentGrid;
+
+class DetectorAssignmentHandle {
+public:
+  using Validator = bool (*)(const CompiledDetectorAssignmentGrid *);
+
+  DetectorAssignmentHandle() = default;
+  DetectorAssignmentHandle &operator=(std::shared_ptr<const CompiledDetectorAssignmentGrid> grid);
+  [[nodiscard]] explicit operator bool() const { return static_cast<bool>(grid_); }
+  [[nodiscard]] bool is_valid() const { return !grid_ || (validator_ && validator_(grid_.get())); }
+  [[nodiscard]] const CompiledDetectorAssignmentGrid *operator->() const { return grid_.get(); }
+  void reset() {
+    grid_.reset();
+    validator_ = nullptr;
+  }
+
+private:
+  std::shared_ptr<const CompiledDetectorAssignmentGrid> grid_{};
+  Validator validator_{};
+};
 
 struct CompiledSegmentedOpticalModel {
   ModelProvenance provenance;
@@ -92,6 +143,16 @@ struct CompiledSegmentedOpticalModel {
   std::optional<CameraResponse> camera_response{};
 
   std::shared_ptr<const CompiledDetectorPlanes> detector_planes{};
+  DetectorAssignmentHandle detector_assignment{};
+  std::shared_ptr<const CompiledDetectorPlanes> incoming_obscurer_planes{};
+  std::optional<double> imaging_plane_z_m{};
+  std::vector<OpaqueSurface> opaque_obscurers{};
+  std::optional<SpatialResponse> primary_degradation{}, camera_degradation{};
+  bool primary_degradation_in_facet_frame{};
+  bool camera_degradation_in_detector_frame{};
+  std::optional<TelescopeTransmission> telescope_transmission{};
+  double propagation_group_index{1.0};
+  std::shared_ptr<const PixelResponses> pixel_responses{};
 
   CompiledSegmentedOpticalModel(
       ModelProvenance compiled_provenance, std::vector<ImportedFacet> compiled_facets,
@@ -137,7 +198,50 @@ struct CompiledSegmentedOpticalModel {
       (normal.has_value() && tangent.has_value() && std::abs(dot(*normal, *tangent)) <= kEpsilon);
   return normal.has_value() && orientation_is_valid && std::isfinite(surface.centre_m.x) &&
          std::isfinite(surface.centre_m.y) && std::isfinite(surface.centre_m.z) &&
-         std::isfinite(surface.diameter_m) && surface.diameter_m > kEpsilon;
+         std::isfinite(surface.diameter_m) && surface.diameter_m > kEpsilon &&
+         std::isfinite(surface.assignment_radius_m) && surface.assignment_radius_m >= 0 &&
+         (surface.response_y_sign == 1 || surface.response_y_sign == -1);
+}
+
+[[nodiscard]] inline bool PixelResponses::is_valid() const {
+  for (std::size_t i = 0; i < tables.size(); ++i) {
+    const auto &table = tables[i];
+    if (table.method != PixelResponseTable::Method::measured &&
+        table.method != PixelResponseTable::Method::single_reflection)
+      return false;
+    if (i && table.id <= tables[i - 1].id)
+      return false;
+    const auto fractional = [](double v) { return std::isfinite(v) && v >= 0 && v <= 1; };
+    if (!fractional(table.transparency) || !fractional(table.wall_reflectivity))
+      return false;
+    if (table.method == PixelResponseTable::Method::measured) {
+      if (table.angular_efficiency.empty() || !std::isfinite(table.tangent_bin_width) ||
+          table.tangent_bin_width <= 0 ||
+          !std::all_of(table.angular_efficiency.begin(), table.angular_efficiency.end(),
+                       fractional))
+        return false;
+      if (!table.spectral_correction.empty() &&
+          (!std::isfinite(table.wavelength_bin_width_nm) || table.wavelength_bin_width_nm <= 0 ||
+           !std::isfinite(table.wavelength_bin_origin_nm) ||
+           !std::all_of(table.spectral_correction.begin(), table.spectral_correction.end(),
+                        [](double v) { return std::isfinite(v) && v >= 0; })))
+        return false;
+    } else if (!table.angular_efficiency.empty() || !table.spectral_correction.empty()) {
+      return false;
+    }
+  }
+  for (std::size_t i = 0; i < bindings.size(); ++i) {
+    const auto &binding = bindings[i];
+    if (i && binding.detector_id <= bindings[i - 1].detector_id)
+      return false;
+    const auto table = std::lower_bound(tables.begin(), tables.end(), binding.table_id,
+                                        [](const auto &t, auto id) { return t.id < id; });
+    if (table == tables.end() || table->id != binding.table_id ||
+        (table->method == PixelResponseTable::Method::single_reflection && !binding.cathode) ||
+        (binding.cathode && !obdeect::is_valid(*binding.cathode)))
+      return false;
+  }
+  return !tables.empty() && !bindings.empty();
 }
 
 [[nodiscard]] inline bool is_valid(const ImportedCylinderObscurer &obscurer) {
@@ -151,6 +255,19 @@ struct CompiledSegmentedOpticalModel {
 }
 
 [[nodiscard]] inline bool is_valid(const CompiledSegmentedOpticalModel &optical_model) {
+  if (optical_model.camera_degradation_in_detector_frame) {
+    if (!optical_model.camera_degradation || optical_model.detector_surfaces.empty())
+      return false;
+    for (const auto &surface : optical_model.detector_surfaces) {
+      const auto u = normalised_checked(surface.unit_tangent_u),
+                 n = normalised_checked(surface.unit_normal);
+      if (!u || !n || std::abs(dot(*u, *n)) > kEpsilon)
+        return false;
+    }
+  }
+  if (!std::isfinite(optical_model.propagation_group_index) ||
+      optical_model.propagation_group_index < 1)
+    return false;
   if (!has_valid_provenance(optical_model.provenance) || optical_model.primary_facets.empty()) {
     return false;
   }
@@ -168,9 +285,29 @@ struct CompiledSegmentedOpticalModel {
     if (!is_valid(obscurer) || !ids.insert(obscurer.id).second)
       return false;
   }
+  for (const auto &surface : optical_model.opaque_obscurers)
+    if (!is_valid(surface) || !ids.insert(surface.id).second)
+      return false;
+  if ((optical_model.primary_degradation && !optical_model.primary_degradation->is_valid()) ||
+      (optical_model.camera_degradation && !optical_model.camera_degradation->is_valid()))
+    return false;
+  if (optical_model.primary_degradation_in_facet_frame)
+    for (const auto &facet : optical_model.primary_facets) {
+      const auto &u = facet.response_basis_u, &v = facet.response_basis_v;
+      if (!normalised_checked(u) || !normalised_checked(v) || std::abs(norm(u) - 1) > kEpsilon ||
+          std::abs(norm(v) - 1) > kEpsilon || std::abs(dot(u, v)) > kEpsilon ||
+          std::abs(dot(u, facet.unit_normal)) > kEpsilon ||
+          std::abs(dot(v, facet.unit_normal)) > kEpsilon)
+        return false;
+    }
+  if (optical_model.telescope_transmission && !optical_model.telescope_transmission->is_valid())
+    return false;
   if ((optical_model.primary_reflectivity && !optical_model.primary_reflectivity->is_valid()) ||
       (optical_model.primary_scatter && !optical_model.primary_scatter->is_valid()) ||
-      (optical_model.camera_response && !optical_model.camera_response->is_valid()))
+      (optical_model.camera_response && !optical_model.camera_response->is_valid()) ||
+      !optical_model.detector_assignment.is_valid() ||
+      (optical_model.pixel_responses && !optical_model.pixel_responses->is_valid()) ||
+      (optical_model.imaging_plane_z_m && !std::isfinite(*optical_model.imaging_plane_z_m)))
     return false;
   return true;
 }
@@ -360,6 +497,7 @@ struct DetectorSurfaceHit {
   double distance_m{};
   Vec3 point_m{};
   Vec3 unit_normal{};
+  std::optional<Vec3> local_position_m{};
 };
 
 struct CylinderObscurerHit {
@@ -399,7 +537,14 @@ intersect_detector_surface_unchecked(const Ray &ray, const ImportedDetectorSurfa
   const Vec3 point_m = ray.position_m + *direction * distance_m;
   if (!contains_detector_point(surface, point_m))
     return std::nullopt;
-  return DetectorSurfaceHit{surface.id, distance_m, point_m, *normal};
+  DetectorSurfaceHit hit{surface.id, distance_m, point_m, *normal};
+  const auto tangent = normalised_checked(surface.unit_tangent_u);
+  if (tangent && std::abs(dot(*tangent, *normal)) <= kEpsilon) {
+    const auto offset = point_m - surface.centre_m;
+    hit.local_position_m = Vec3{dot(offset, *tangent),
+                                surface.response_y_sign * dot(offset, cross(*normal, *tangent)), 0};
+  }
+  return hit;
 }
 
 [[nodiscard]] inline std::optional<DetectorSurfaceHit>
@@ -413,6 +558,17 @@ intersect_detector_surface(const Ray &ray, const ImportedDetectorSurface &surfac
 [[nodiscard]] inline std::optional<DetectorSurfaceHit>
 intersect_detector_surfaces_unchecked(const Ray &ray,
                                       const CompiledSegmentedOpticalModel &optical_model) {
+  if (optical_model.imaging_plane_z_m) {
+    if (std::abs(ray.direction.z) <= kEpsilon || optical_model.detector_surfaces.empty())
+      return std::nullopt;
+    const double distance = (*optical_model.imaging_plane_z_m - ray.position_m.z) / ray.direction.z;
+    if (!std::isfinite(distance) || distance <= kEpsilon)
+      return std::nullopt;
+    return DetectorSurfaceHit{optical_model.detector_surfaces.front().id,
+                              distance,
+                              ray.position_m + ray.direction * distance,
+                              {0.0, 0.0, 1.0}};
+  }
   std::optional<DetectorSurfaceHit> nearest;
   for (const auto &surface : optical_model.detector_surfaces) {
     const auto candidate = intersect_detector_surface_unchecked(ray, surface);

@@ -8,7 +8,7 @@
 
 namespace obdeect {
 
-[[nodiscard]] inline Vec3 sampled_pupil(std::uint64_t id, std::uint64_t seed, double radius_m) {
+[[nodiscard]] inline Vec3 sampled_disk(std::uint64_t id, std::uint64_t seed, double radius_m) {
   const double radius = radius_m * std::sqrt(source_uniform(id, seed, 0));
   const double phi = 2 * std::numbers::pi * source_uniform(id, seed, 1);
   return {radius * std::cos(phi), radius * std::sin(phi), 0};
@@ -34,7 +34,7 @@ sample_star(std::uint64_t id, std::uint64_t seed, double radius_m, const StarSou
     return std::nullopt;
   const Vec3 centre{source.source_plane_z_m * direction->x / direction->z,
                     source.source_plane_z_m * direction->y / direction->z, source.source_plane_z_m};
-  const Vec3 pupil = sampled_pupil(id, seed, radius_m);
+  const Vec3 pupil = sampled_disk(id, seed, radius_m);
   return OpticalPhoton{{centre + pupil, *direction},
                        id,
                        source.wavelength_nm,
@@ -50,7 +50,7 @@ sample_star(std::uint64_t id, std::uint64_t seed, double radius_m, const FiniteS
       source.entrance_z_m < 0 || source.position_m.z <= source.entrance_z_m ||
       !std::isfinite(source.emission_time_ns))
     return std::nullopt;
-  const Vec3 target = sampled_pupil(id, seed, radius_m);
+  const Vec3 target = sampled_disk(id, seed, radius_m);
   const Vec3 separation = target - source.position_m;
   const auto direction = normalised_checked(separation);
   if (!direction)
@@ -74,7 +74,7 @@ sample_illuminator(std::uint64_t id, std::uint64_t seed, double radius_m,
       source.emitted_weight < 0 || !std::isfinite(source.position_m.x) ||
       !std::isfinite(source.position_m.y) || !std::isfinite(source.position_m.z))
     return std::nullopt;
-  const Vec3 separation = sampled_pupil(id, seed, radius_m) - source.position_m;
+  const Vec3 separation = sampled_disk(id, seed, radius_m) - source.position_m;
   const auto direction = normalised_checked(separation);
   if (!direction)
     return std::nullopt;
@@ -100,7 +100,7 @@ sample_illuminator(std::uint64_t id, std::uint64_t seed, double radius_m,
   if (!first)
     return std::nullopt;
   const Vec3 second = cross(*central, *first);
-  const Vec3 pupil = sampled_pupil(id, seed, beam_radius_m);
+  const Vec3 pupil = sampled_disk(id, seed, beam_radius_m);
   const Vec3 entrance = source.origin_m + *first * pupil.x + second * pupil.y;
   // Uniform solid angle within the declared cone, rather than the small-angle
   // theta*sqrt(u) approximation. Spatial and angular dimensions are independent.

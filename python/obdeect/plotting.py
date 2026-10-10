@@ -220,6 +220,8 @@ class PlotObscurer:
     first_endpoint_m: tuple[float, float, float]
     second_endpoint_m: tuple[float, float, float]
     diameter_m: float
+    second_diameter_m: float | None = None
+    wall_thickness_m: float | None = None
 
 
 @dataclass(frozen=True)
@@ -335,6 +337,47 @@ def _polygon_from_surface(
     return PlotPolygon(identifier, role, vertices)
 
 
+def _opaque_plot_components(trace_model):
+    polygons, walls = [], []
+    for surface in trace_model.get("opaque_obscurers", []):
+        if surface["shape"] == "quadrilateral":
+            vertices = tuple(
+                _vector3(point, "opaque quadrilateral") for point in surface["vertices_m"]
+            )
+            if len(vertices) != 4:
+                raise ValueError("opaque quadrilateral needs four vertices")
+            polygons.append(PlotPolygon(surface["id"], "obscurer", vertices))
+        elif surface["shape"] in ("hollow_frustum", "solid_frustum"):
+            r1, r2, thickness = (
+                float(surface[key]) for key in ("first_radius_m", "second_radius_m", "thickness_m")
+            )
+            if (
+                min(r1, r2) <= 0
+                or thickness < 0
+                or not all(math.isfinite(v) for v in (r1, r2, thickness))
+            ):
+                raise ValueError("invalid hollow baffle")
+            first, second = (
+                _vector3(surface[key], "hollow baffle")
+                for key in ("first_endpoint_m", "second_endpoint_m")
+            )
+            if first == second:
+                raise ValueError("hollow baffle has zero length")
+            walls.append(
+                PlotObscurer(
+                    surface["id"],
+                    first,
+                    second,
+                    2 * (r1 + thickness),
+                    2 * (r2 + thickness),
+                    thickness if surface["shape"] == "hollow_frustum" else None,
+                )
+            )
+        else:
+            raise ValueError("unsupported opaque surface")
+    return tuple(polygons), tuple(walls)
+
+
 def _axisymmetric_surface(
     surface: dict, role: Literal["primary", "secondary", "detector"]
 ) -> AxisymmetricSurface:
@@ -390,7 +433,16 @@ def _aspheric_mask_polygon(mask: dict, surface: AxisymmetricSurface) -> PlotPoly
     explicitly unrendered between these planar footprint vertices.
     """
     identifier = int(mask["id"])
-    if mask["shape"] == "hexagon":
+    if mask["shape"] == "polygon":
+        return PlotPolygon(
+            identifier,
+            surface.role,
+            tuple(
+                (x, y, _surface_height_and_slope(surface, math.hypot(x, y))[0])
+                for x, y in mask["vertices_xy_m"]
+            ),
+        )
+    if mask["shape"] in {"hexagon", "square", "circle"}:
         x, y = (float(value) for value in mask["centre_xy_m"])
         diameter, rotation = float(mask["diameter_m"]), math.radians(float(mask["rotation_deg"]))
         if not all(math.isfinite(value) for value in (x, y, diameter, rotation)):
@@ -401,7 +453,9 @@ def _aspheric_mask_polygon(mask: dict, surface: AxisymmetricSurface) -> PlotPoly
         cosine = 1 / math.hypot(1, slope)
         sine = slope * cosine
         vertices = []
-        for u, v in _aperture_local_vertices("hexagon_flat_x", diameter):
+        for u, v in _aperture_local_vertices(
+            {"hexagon": "hexagon_flat_x"}.get(mask["shape"], mask["shape"]), diameter
+        ):
             local_x = u * math.cos(rotation) - v * math.sin(rotation)
             local_y = u * math.sin(rotation) + v * math.cos(rotation)
             radial, azimuth = local_x * cx + local_y * cy, -local_x * cy + local_y * cx
@@ -579,8 +633,13 @@ def load_plot_optical_model(path: Path) -> PlotOpticalModel:
                 "opaque_cylinder": "cylinder_obscurers",
             }.get(role)
             allowed_sources = (
-                {"trace_model.primary_to_secondary_planes", "trace_model.incoming_obscurer_planes"}
-                if role == "obscurer" and kind == "axisymmetric"
+                {"trace_model.opaque_obscurers"}
+                if role == "opaque_surface"
+                else {
+                    "trace_model.primary_to_secondary_planes",
+                    "trace_model.incoming_obscurer_planes",
+                }
+                if role == "obscurer"
                 else {"trace_model.primary_to_secondary_cylinders"}
                 if role == "opaque_cylinder" and kind == "axisymmetric"
                 else {f"trace_model.{expected}"}
@@ -614,6 +673,7 @@ def load_plot_optical_model(path: Path) -> PlotOpticalModel:
 
     try:
         camera_pixels = _camera_pixel_polygons(optical_model)
+        opaque_polygons, opaque_walls = _opaque_plot_components(trace_model)
         if kind == "segmented":
             facets = trace_model["primary_facets"]
             detectors = trace_model.get("detector_surfaces", [])
@@ -642,7 +702,17 @@ def load_plot_optical_model(path: Path) -> PlotOpticalModel:
                 )
                 for index, detector in enumerate(detectors)
             )
-            obscurer_rows = tuple(
+            polygons += tuple(
+                _polygon_from_surface(
+                    plane,
+                    identifier=plane["id"],
+                    role="obscurer",
+                    description="incoming camera housing",
+                )
+                for plane in trace_model.get("incoming_obscurer_planes", [])
+            )
+            polygons += opaque_polygons
+            obscurer_rows = opaque_walls + tuple(
                 _plot_obscurer(obscurer, index) for index, obscurer in enumerate(obscurers)
             )
             identifiers = [polygon.identifier for polygon in polygons]
@@ -694,8 +764,8 @@ def load_plot_optical_model(path: Path) -> PlotOpticalModel:
             )
             for plane in trace_model.get("detector_surfaces", [])
         )
-        mask_polygons += obscurer_planes
-        obscurer_cylinders = tuple(
+        mask_polygons += obscurer_planes + opaque_polygons
+        obscurer_cylinders = opaque_walls + tuple(
             _plot_obscurer(cylinder, index)
             for index, cylinder in enumerate(trace_model.get("primary_to_secondary_cylinders", []))
         )
@@ -789,7 +859,7 @@ def _optical_model_bounds(optical_model: PlotOpticalModel):
         values[1].extend((-surface.outer_radius_m, surface.outer_radius_m))
         values[2].extend(height for _, height in profile)
     for obscurer in optical_model.obscurers:
-        radius = obscurer.diameter_m * 0.5
+        radius = max(obscurer.diameter_m, obscurer.second_diameter_m or 0) * 0.5
         for endpoint in (obscurer.first_endpoint_m, obscurer.second_endpoint_m):
             for coordinate, value in enumerate(endpoint):
                 values[coordinate].extend((value - radius, value + radius))
@@ -824,7 +894,7 @@ def _cylinder_mesh(obscurer: PlotObscurer, sides: int = 12):
     second_basis = _cross(direction, first_basis)
     radius = obscurer.diameter_m * 0.5
 
-    def ring(centre):
+    def ring(centre, radius):
         return tuple(
             tuple(
                 centre[axis]
@@ -838,8 +908,10 @@ def _cylinder_mesh(obscurer: PlotObscurer, sides: int = 12):
             for index in range(sides)
         )
 
-    first_ring, second_ring = ring(first), ring(second)
-    faces = [first_ring, second_ring]
+    first_ring = ring(first, radius)
+    second_radius = (obscurer.second_diameter_m or obscurer.diameter_m) * 0.5
+    second_ring = ring(second, second_radius)
+    faces = [] if obscurer.wall_thickness_m is not None else [first_ring, second_ring]
     faces.extend(
         (
             first_ring[index],
@@ -849,6 +921,19 @@ def _cylinder_mesh(obscurer: PlotObscurer, sides: int = 12):
         )
         for index in range(sides)
     )
+    if obscurer.wall_thickness_m is not None:
+        inner_first = ring(first, radius - obscurer.wall_thickness_m)
+        inner_second = ring(second, second_radius - obscurer.wall_thickness_m)
+        for index in range(sides):
+            next_index = (index + 1) % sides
+            faces.append((
+                inner_first[index],
+                inner_second[index],
+                inner_second[next_index],
+                inner_first[next_index],
+            ))
+            for outer, inner in ((first_ring, inner_first), (second_ring, inner_second)):
+                faces.append((outer[index], outer[next_index], inner[next_index], inner[index]))
     return faces
 
 

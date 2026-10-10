@@ -155,6 +155,16 @@ class TestTracePathReader(unittest.TestCase):
                 ],
             },
         }
+        model["trace_model"]["incoming_obscurer_planes"] = [
+            {
+                "id": 7,
+                "shape": "square",
+                "centre_m": [0, 0, 4],
+                "normal": [0, 0, 1],
+                "tangent": [1, 0, 0],
+                "diameter_m": 0.5,
+            }
+        ]
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "model.json"
             path.write_text(json.dumps(model))
@@ -163,7 +173,7 @@ class TestTracePathReader(unittest.TestCase):
         self.assertEqual(optical_model.model_label, "mini-dish/1")
         self.assertEqual(
             [(item.identifier, item.role) for item in optical_model.polygons],
-            [(4, "primary"), (5, "detector")],
+            [(4, "primary"), (5, "detector"), (7, "obscurer")],
         )
         self.assertEqual(optical_model.obscurers[0].identifier, 6)
         self.assertEqual(optical_model.unavailable_roles, ())

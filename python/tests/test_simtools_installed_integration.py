@@ -2,6 +2,7 @@
 
 import json
 import logging
+import math
 import runpy
 import unittest
 from pathlib import Path
@@ -15,6 +16,7 @@ try:
 except ImportError as error:
     raise unittest.SkipTest("simtools integration requires simtools and astropy") from error
 from obdeect import executable_path
+from obdeect.imaging_list import load_imaging_metadata
 from obdeect.result_contract import read_arrivals
 from simtools import settings
 from simtools.ray_tracing.incident_angles import IncidentAnglesCalculator
@@ -49,29 +51,26 @@ def test_ray_tracing_executes_packaged_model_for_unique_offsets(installed_model,
         simulator = ray._create_simulator(offset, 0, 0, ray.mirrors[0], True, False)
         simulator.run()
         arrivals = read_arrivals(simulator.output_file)
-        assert len(arrivals) == 100
-        assert any(arrival.detected for arrival in arrivals)
-        settings.config.args["obdeect_launch_area_m2"] = 2.0
+        detected = [arrival for arrival in arrivals if arrival.detected]
+        assert 0 < len(detected) < simulator.photons_per_run
+        metadata = load_imaging_metadata(installed_model, 10000, offset, 0, 0)
         image = ray._create_psf_image(simulator.output_file, 1000, 0.8)
         expected_area_m2 = (
-            2
-            * sum(arrival.optical_weight for arrival in arrivals)
-            / sum(arrival.source_weight for arrival in arrivals)
+            math.pi * metadata.sampling_radius_m**2 * len(detected) / simulator.photons_per_run
         )
         assert image.get_effective_area() == pytest.approx(expected_area_m2)
         result = ray._analyze_image(image, offset, 0, offset, 0.8, 1)
         assert result[5].to_value(u.m**2) == pytest.approx(expected_area_m2)
-        assert all(
-            arrival.optical_weight == pytest.approx(0.8) for arrival in arrivals if arrival.detected
-        )
+        assert all(arrival.throughput == pytest.approx(0.8) for arrival in detected)
         files.append(simulator.output_file)
         # Reuse preserves an existing result; force regenerates a damaged file.
+        original = simulator.output_file.read_text()
         simulator.output_file.write_text("existing result")
         simulator.run()
         assert simulator.output_file.read_text() == "existing result"
         simulator.force_simulate = True
         simulator.run()
-        assert len(read_arrivals(simulator.output_file)) == 100
+        assert simulator.output_file.read_text() == original
     assert files[0] != files[1]
 
 

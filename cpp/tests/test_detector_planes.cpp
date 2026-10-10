@@ -1,3 +1,4 @@
+#include "obdeect/detector_assignment.hpp"
 #include "obdeect/detector_planes.hpp"
 #include "obdeect/optical_response.hpp"
 
@@ -27,6 +28,39 @@ void operator delete(void *pointer) noexcept { std::free(pointer); }
 void operator delete(void *pointer, std::size_t) noexcept { std::free(pointer); }
 
 int main() {
+  {
+    using namespace obdeect;
+    std::vector<ImportedDetectorSurface> surfaces{
+        {17, {0, 0, 1}, {0, 0, 1}, 2, FacetShape::square, {1, 0, 0}, 1},
+        {18, {0, 0, 2}, {0, 0, 1}, 2, FacetShape::square, {1, 0, 0}, 1}};
+    DetectorAssignmentGrid description{4, 4, -2, 2, -2, 2, {1, 0, 0}, {0, 1, 0}, 0};
+    const auto grid = CompiledDetectorAssignmentGrid::compile(description, surfaces);
+    require(grid.has_value() && grid->is_valid(),
+            "explicit assignment grid compiles and validates");
+    require(!CompiledDetectorAssignmentGrid{}.is_valid(), "empty assignment grid is invalid");
+    const Ray ray{{0, 0, 3}, {0, 0, -1}};
+    const auto nearest = compile_detector_planes(surfaces)->intersect(ray);
+    require(nearest->surface_id == 18, "physical intersection selects nearest plane");
+    surfaces.clear();
+    allocations = 0;
+    count_allocations = true;
+    const auto assigned = grid->intersect(ray, {0, 0, 0});
+    const auto rejected = grid->intersect(ray, {-1.9, -1.9, 0});
+    count_allocations = false;
+    require(assigned && assigned->surface_id == 17 && assigned->distance_m == 2,
+            "assignment keeps declared candidate order and immutable surface data");
+    require(!rejected, "projected candidate cell can reject a physical intersection");
+    require(allocations == 0, "assignment path does not allocate");
+
+    const std::vector<ImportedDetectorSurface> boundary_surface{
+        {19, {1, 1, 1}, {0, 0, 1}, 2, FacetShape::square, {1, 0, 0}, 1}};
+    const DetectorAssignmentGrid boundary_description{2, 2, 0, 2, 0, 2, {1, 0, 0}, {0, 1, 0}, 0};
+    const auto boundary_grid =
+        CompiledDetectorAssignmentGrid::compile(boundary_description, boundary_surface);
+    require(boundary_grid.has_value(), "grid containing the aperture boundary compiles");
+    require(boundary_grid->intersect({{2, 2, 0}, {0, 0, 1}}, {2, 2, 0}).has_value(),
+            "upper grid corner clamps into the final cell and accepts an aperture edge hit");
+  }
   using namespace obdeect;
   const ImportedDetectorSurface left{11, {-0.6, 0, 3}, {0, 0, 1}, 1, FacetShape::square, {1, 0, 0}};
   const ImportedDetectorSurface right{12, {0.6, 0, 3}, {0, 0, 1}, 1, FacetShape::square, {1, 0, 0}};
