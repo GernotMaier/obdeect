@@ -66,6 +66,19 @@ class TestSimulationModelsImport(unittest.TestCase):
                 model["input_records"]["environment_atmospheric_profile"]["sha256"],
                 IMPORTER.sha256(profile),
             )
+            profile_parameter = (
+                root
+                / "model_parameters/OBS-Example/atmospheric_profile"
+                / "atmospheric_profile-1.0.0.json"
+            )
+            profile_record = json.loads(profile_parameter.read_text())
+            for invalid_value in (None, "missing.ecsv", "../outside.ecsv", "bad\0.ecsv"):
+                profile_record["value"] = invalid_value
+                profile_parameter.write_text(json.dumps(profile_record))
+                with self.assertRaisesRegex(IMPORTER.ImportError, "site atmospheric profile"):
+                    IMPORTER.resolve_model(root, "TEST", "1.2.3")
+            profile_record["value"] = "profile.ecsv"
+            profile_parameter.write_text(json.dumps(profile_record))
             site_parameter = (
                 root
                 / "model_parameters/OBS-Example/corsika_observation_level"

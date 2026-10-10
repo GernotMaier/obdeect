@@ -116,6 +116,7 @@ def component(value: str) -> bool:
         and value not in ("", ".", "..")
         and "/" not in value
         and "\\" not in value
+        and "\0" not in value
     )
 
 
@@ -303,14 +304,19 @@ def resolve_model(root: Path, model: str, version: str) -> dict[str, Any]:
                 raise ImportError("site environment parameter identity mismatch")
             records[f"environment_parameter:{name}"] = record(path, root)
         profile = selected["atmospheric_profile"]
+        profile_name = profile.get("value")
+        if profile.get("file") is not True or not component(profile_name):
+            raise ImportError("site atmospheric profile must declare a filename")
         profile_path = within_root(
-            root / "model_parameters" / instrument / "atmospheric_profile" / profile["value"],
+            root / "model_parameters" / instrument / "atmospheric_profile" / profile_name,
             root,
         )
+        if not profile_path.is_file():
+            raise ImportError(f"site atmospheric profile is missing: {profile_path}")
         records["environment_atmospheric_profile"] = record(profile_path, root)
         level = selected["corsika_observation_level"]
-        if level.get("unit") != "m" or profile.get("file") is not True:
-            raise ImportError("unsupported site environment units or profile")
+        if level.get("unit") != "m":
+            raise ImportError("unsupported site environment units")
         try:
             index = ambient_group_index(profile_path.read_text(), float(level["value"]))
         except (ValueError, KeyError, IndexError) as error:
