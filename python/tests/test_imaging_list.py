@@ -112,6 +112,16 @@ def test_sampling_radius_contains_non_circular_facet_corners(tmp_path, shape, fa
     assert metadata.sampling_radius_m == pytest.approx(1.2 * (5 + factor))
 
 
+def test_alignment_zenith_is_independent_of_source_offset(tmp_path: Path) -> None:
+    path = model_file(tmp_path)
+    model = json.loads(path.read_text())
+    model["primary"] = {"alignment": {"zenith_angle_deg": 20}}
+    path.write_text(json.dumps(model))
+    assert load_imaging_metadata(path, 10000, 0.5, 0, 20).sampling_radius_m == pytest.approx(7.2)
+    with pytest.raises(ValueError, match="different telescope zenith"):
+        load_imaging_metadata(path, 10000, 0.5, 0, 20.5)
+
+
 def test_imaging_list_preserves_geometric_rows_and_header(tmp_path: Path) -> None:
     metadata = load_imaging_metadata(model_file(tmp_path), 10000, 0, 2.5)
     output = tmp_path / "image.lis"

@@ -35,7 +35,9 @@ int main() {
         {18, {0, 0, 2}, {0, 0, 1}, 2, FacetShape::square, {1, 0, 0}, 1}};
     DetectorAssignmentGrid description{4, 4, -2, 2, -2, 2, {1, 0, 0}, {0, 1, 0}, 0};
     const auto grid = CompiledDetectorAssignmentGrid::compile(description, surfaces);
-    require(grid.has_value(), "explicit assignment grid compiles");
+    require(grid.has_value() && grid->is_valid(),
+            "explicit assignment grid compiles and validates");
+    require(!CompiledDetectorAssignmentGrid{}.is_valid(), "empty assignment grid is invalid");
     const Ray ray{{0, 0, 3}, {0, 0, -1}};
     const auto nearest = compile_detector_planes(surfaces)->intersect(ray);
     require(nearest->surface_id == 18, "physical intersection selects nearest plane");

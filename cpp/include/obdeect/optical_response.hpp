@@ -36,17 +36,17 @@ struct SpectralResponse {
   bool relative_to_envelope{};
 
   [[nodiscard]] bool is_valid() const {
-    if (relative_to_envelope &&
-        (incidence_angle_deg.empty() || spectral_envelope.size() != wavelength_nm.size()))
+    const bool envelope_required =
+        relative_to_envelope || (wavelength_sampling && !incidence_angle_deg.empty());
+    if (relative_to_envelope && incidence_angle_deg.empty())
       return false;
-    if (wavelength_sampling &&
-        (!wavelength_sampling->is_valid() ||
-         (!incidence_angle_deg.empty() &&
-          (spectral_envelope.size() != wavelength_nm.size() ||
-           !envelope_interpolation.is_valid(wavelength_nm.empty() ? 0 : wavelength_nm.size() - 1) ||
-           std::any_of(spectral_envelope.begin(), spectral_envelope.end(), [](double value) {
-             return !std::isfinite(value) || value < 0 || value > 1;
-           })))))
+    if (wavelength_sampling && !wavelength_sampling->is_valid())
+      return false;
+    if (envelope_required &&
+        (spectral_envelope.size() != wavelength_nm.size() ||
+         !envelope_interpolation.is_valid(wavelength_nm.empty() ? 0 : wavelength_nm.size() - 1) ||
+         std::any_of(spectral_envelope.begin(), spectral_envelope.end(),
+                     [](double value) { return !std::isfinite(value) || value < 0 || value > 1; })))
       return false;
     const std::size_t angles = incidence_angle_deg.empty() ? 1 : incidence_angle_deg.size();
     if (!interpolation.is_valid(wavelength_nm.empty() ? 0 : wavelength_nm.size() - 1,
@@ -165,12 +165,12 @@ struct CameraIncidenceResponse {
   [[nodiscard]] bool is_valid() const {
     return interpolation.is_valid(incidence_angle_deg.empty() ? 0
                                                               : incidence_angle_deg.size() - 1) &&
+           view().is_valid() &&
            (!interpolation.x_log ||
             (!incidence_angle_deg.empty() && incidence_angle_deg.front() > 0)) &&
            (!interpolation.value_log ||
             std::all_of(response.begin(), response.end(), [](double v) { return v > 0; })) &&
-           view().is_valid() && incidence_angle_deg.front() >= 0 &&
-           incidence_angle_deg.back() <= 90 &&
+           incidence_angle_deg.front() >= 0 && incidence_angle_deg.back() <= 90 &&
            std::all_of(response.begin(), response.end(), [](double value) { return value <= 1; });
   }
 };

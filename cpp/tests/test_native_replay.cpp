@@ -200,6 +200,18 @@ int main(int argc, char **argv) {
   require(std::abs(std::stod(fields(line)[column.at("sampling_area_m2")]) - 4 * std::acos(-1.0)) <
               1.e-12,
           "keyed star output records the sampled pupil area");
+  const auto default_star_area_csv = directory / "default-star-area.csv";
+  const std::string default_star_area_command =
+      quoted(argv[1]) + " --optical-model " + quoted(model.string()) +
+      " --source star --photons 1 --output " + quoted(default_star_area_csv.string());
+  require(std::system(default_star_area_command.c_str()) == 0,
+          "default star sampling-area fixture runs");
+  std::ifstream default_star_area_input(default_star_area_csv);
+  std::getline(default_star_area_input, line);
+  std::getline(default_star_area_input, line);
+  require(std::abs(std::stod(fields(line)[column.at("sampling_area_m2")]) -
+                   std::acos(-1.0) * 1.2 * 1.2) < 1.e-12,
+          "default star sampling area follows the 1.2-times mirror convention");
   const auto interactions = directory / "interactions.csv";
   require(run(2, directory / "with-diagnostics.csv", false,
               " --interactions-output " + quoted(interactions.string()) +

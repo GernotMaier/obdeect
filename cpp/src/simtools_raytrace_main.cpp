@@ -362,7 +362,7 @@ int main(int argc, char **argv) {
         std::make_shared<const obdeect::CompiledDetectorPlanes>(std::move(*planes));
   }
   const double radians_per_degree = std::numbers::pi / 180.0;
-  const double sampling_radius = sampling_radius_set ? sampling_radius_m : imported_optical_model
+  const double model_sampling_radius = imported_optical_model
                                   ? [&] {
                                       double radius = 0.0;
                                       for (const auto &facet : imported_optical_model->primary_facets) {
@@ -378,8 +378,15 @@ int main(int argc, char **argv) {
                                       }
                                       return radius;
                                     }()
-                                  : axisymmetric_optical_model ? axisymmetric_optical_model->primary.outer_radius_m
-                                                       : nonsequential_optical_model ? 1.0 : model->primary_outer_radius_m;
+                                  : axisymmetric_optical_model
+                                        ? axisymmetric_optical_model->primary.outer_radius_m
+                                        : nonsequential_optical_model
+                                              ? 1.0
+                                              : model->primary_outer_radius_m;
+  const double star_sampling_factor =
+      source == "star" && photon_input_path.empty() && !sampling_radius_set ? 1.2 : 1.0;
+  const double sampling_radius =
+      sampling_radius_set ? sampling_radius_m : model_sampling_radius * star_sampling_factor;
   if (!std::isfinite(sampling_radius) || sampling_radius <= 0.0)
     return 1;
   std::vector<obdeect::OpticalPhoton> input;

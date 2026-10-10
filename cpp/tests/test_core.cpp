@@ -57,6 +57,7 @@ int main() {
     require(std::abs(*interpolate_curve_unchecked(axis, values, 5.5, options) - 0.325) < 1.e-12,
             "table evaluates compiled polynomial");
     CameraIncidenceResponse invalid;
+    require(!invalid.is_valid(), "empty angular response rejects safely");
     invalid.interpolation.x_log = true;
     require(!invalid.is_valid(), "empty logarithmic angular response rejects safely");
   }
