@@ -172,9 +172,7 @@ length times the configured propagation group index divided by *c*. For
 material transport, arrival time uses the accumulated group delay. The output
 retains response loss separately from terminal geometric loss, together with
 path vertices, surface IDs, and the terminal status. `missed_primary`,
-`missed_secondary`, `no_detector`, and `blocked_obscurer` identify geometric
-termination; non-sequential paths can also escape the model or material, be
-absorbed, or reach the interaction limit. A detected hit with zero throughput
+`missed_primary`, `missed_secondary`, `missed_screen`, `no_detector`, and `blocked_obscurer` identify geometric termination; non-sequential paths can also escape the model or material, be absorbed, or reach the interaction limit.
 remains a detection with zero response, not a geometric loss.
 
 **Verification.** `cpp/tests/test_refractive_transport.cpp` checks interface
