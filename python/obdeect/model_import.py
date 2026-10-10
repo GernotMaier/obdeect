@@ -276,49 +276,46 @@ def resolve_model(root: Path, model: str, version: str) -> dict[str, Any]:
             raise ImportError("site must be a simple path component")
         instrument = f"OBS-{site}"
         manifest_path = root / "productions" / version / f"{instrument}.json"
-        if manifest_path.is_file():
-            from obdeect.propagation import ambient_group_index
+        if not manifest_path.is_file():
+            raise ImportError(f"site environment manifest is missing: {manifest_path}")
+        from obdeect.propagation import ambient_group_index
 
-            manifest = load_json(within_root(manifest_path, root))
-            if manifest.get("model_version") != version:
-                raise ImportError("site environment model version mismatch")
-            table = manifest.get("parameters", {}).get(instrument, {})
-            records["environment_manifest"] = record(manifest_path, root)
-            selected = {}
-            for name in ("atmospheric_profile", "corsika_observation_level"):
-                parameter_version = table.get(name)
-                if not component(parameter_version):
-                    raise ImportError(f"missing site environment parameter: {name}")
-                path = within_root(
-                    root
-                    / "model_parameters"
-                    / instrument
-                    / name
-                    / f"{name}-{parameter_version}.json",
-                    root,
-                )
-                selected[name] = load_json(path)
-                if (
-                    selected[name].get("instrument") != instrument
-                    or selected[name].get("parameter") != name
-                    or selected[name].get("parameter_version") != parameter_version
-                ):
-                    raise ImportError("site environment parameter identity mismatch")
-                records[f"environment_parameter:{name}"] = record(path, root)
-            profile = selected["atmospheric_profile"]
-            profile_path = within_root(
-                root / "model_parameters" / instrument / "atmospheric_profile" / profile["value"],
+        manifest = load_json(within_root(manifest_path, root))
+        if manifest.get("model_version") != version:
+            raise ImportError("site environment model version mismatch")
+        table = manifest.get("parameters", {}).get(instrument, {})
+        records["environment_manifest"] = record(manifest_path, root)
+        selected = {}
+        for name in ("atmospheric_profile", "corsika_observation_level"):
+            parameter_version = table.get(name)
+            if not component(parameter_version):
+                raise ImportError(f"missing site environment parameter: {name}")
+            path = within_root(
+                root / "model_parameters" / instrument / name / f"{name}-{parameter_version}.json",
                 root,
             )
-            records["environment_atmospheric_profile"] = record(profile_path, root)
-            level = selected["corsika_observation_level"]
-            if level.get("unit") != "m" or profile.get("file") is not True:
-                raise ImportError("unsupported site environment units or profile")
-            try:
-                index = ambient_group_index(profile_path.read_text(), float(level["value"]))
-            except (ValueError, KeyError, IndexError) as error:
-                raise ImportError(f"invalid site environment: {error}") from error
-            environment = dict(propagation_group_index=index, observation_level_m=level["value"])
+            selected[name] = load_json(path)
+            if (
+                selected[name].get("instrument") != instrument
+                or selected[name].get("parameter") != name
+                or selected[name].get("parameter_version") != parameter_version
+            ):
+                raise ImportError("site environment parameter identity mismatch")
+            records[f"environment_parameter:{name}"] = record(path, root)
+        profile = selected["atmospheric_profile"]
+        profile_path = within_root(
+            root / "model_parameters" / instrument / "atmospheric_profile" / profile["value"],
+            root,
+        )
+        records["environment_atmospheric_profile"] = record(profile_path, root)
+        level = selected["corsika_observation_level"]
+        if level.get("unit") != "m" or profile.get("file") is not True:
+            raise ImportError("unsupported site environment units or profile")
+        try:
+            index = ambient_group_index(profile_path.read_text(), float(level["value"]))
+        except (ValueError, KeyError, IndexError) as error:
+            raise ImportError(f"invalid site environment: {error}") from error
+        environment = dict(propagation_group_index=index, observation_level_m=level["value"])
     return {
         "format": "obdeect.simulation-models-optical-model-ir.v1",
         "model": model,

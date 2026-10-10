@@ -165,12 +165,12 @@ struct CameraIncidenceResponse {
   [[nodiscard]] bool is_valid() const {
     return interpolation.is_valid(incidence_angle_deg.empty() ? 0
                                                               : incidence_angle_deg.size() - 1) &&
+           view().is_valid() &&
            (!interpolation.x_log ||
             (!incidence_angle_deg.empty() && incidence_angle_deg.front() > 0)) &&
            (!interpolation.value_log ||
             std::all_of(response.begin(), response.end(), [](double v) { return v > 0; })) &&
-           view().is_valid() && incidence_angle_deg.front() >= 0 &&
-           incidence_angle_deg.back() <= 90 &&
+           incidence_angle_deg.front() >= 0 && incidence_angle_deg.back() <= 90 &&
            std::all_of(response.begin(), response.end(), [](double value) { return value <= 1; });
   }
 };
