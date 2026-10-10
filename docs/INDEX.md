@@ -7,6 +7,7 @@ what still prevents production use.
 | Document | What you use it for |
 | --- | --- |
 | [USE_CASES.md](USE_CASES.md) | Run a trace, measure its image, or draw the actual compiled telescope geometry. |
+| [PHOTON_PATH.md](PHOTON_PATH.md) | Follow the implemented physics, tests, and visual diagnostics from source to detector. |
 | [STATUS.md](STATUS.md) | Check implementation limits and the remaining production requirements. |
 | [COMPARISON_WITH_SIM_TELARRAY.md](COMPARISON_WITH_SIM_TELARRAY.md) | Understand what constitutes an equivalent scientific comparison. |
 | [PRODUCTION_VALIDATION.md](PRODUCTION_VALIDATION.md) | Prepare comparison tables, declare acceptance criteria, and run the numerical gate. |
