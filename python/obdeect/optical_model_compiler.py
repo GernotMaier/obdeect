@@ -491,6 +491,79 @@ def compile_secondary_baffle(
     }
 
 
+def compile_telescope_transmission(parameter, camera_diameter_m, focal_length_m, *, dual=False):
+    """Resolve sim_config defaults; class-2 reference tracing uses outer power one."""
+    values = parameter.get("value")
+    if not isinstance(values, list) or not 1 <= len(values) <= 6:
+        raise OpticalModelCompileError("telescope transmission requires 1 to 6 components")
+    values = [_number(value, "telescope transmission") for value in values] + [0] * (
+        6 - len(values)
+    )
+    t0, method, amplitude, scale, power, outer = values
+    if not 0 <= t0 <= 1 or method not in (0, 1) or amplitude < 0:
+        raise OpticalModelCompileError("invalid telescope transmission method or coefficients")
+    amplitude = amplitude if method == 1 else 0
+    scale = math.radians(scale) if scale else 0.5 * camera_diameter_m / focal_length_m
+    if amplitude and scale <= 0:
+        raise OpticalModelCompileError("angular telescope transmission requires a positive scale")
+    power = power or 2
+    outer = 1 if dual else (outer or 1)
+    if power <= 0 or outer <= 0:
+        raise OpticalModelCompileError("telescope transmission powers must be positive")
+    return dict(
+        on_axis=t0,
+        amplitude=amplitude,
+        angular_scale_rad=scale or 1,
+        power=power,
+        outer_power=outer,
+    )
+
+
+def compile_telescope_frame(parameters):
+    """Resolve lengths once; ground element position is at ground, not elevation axis."""
+
+    def lengths(name, count):
+        parameter = parameters[name]
+        values, units = parameter["value"], parameter["unit"]
+        if isinstance(units, str):
+            units = [units] * count
+        if not isinstance(values, list) or len(values) != count or len(units) != count:
+            raise OpticalModelCompileError(f"{name} requires {count} lengths")
+        if any(unit not in _UNIT_TO_M for unit in units):
+            raise OpticalModelCompileError(f"{name} has invalid length units")
+        return [
+            _number(value, name) * _UNIT_TO_M[unit]
+            for value, unit in zip(values, units, strict=True)
+        ]
+
+    height = (
+        _length_m(parameters["telescope_axis_height"], "telescope_axis_height", allow_zero=True)
+        if "telescope_axis_height" in parameters
+        else 0
+    )
+    origin = (
+        lengths("array_element_position_ground", 3)
+        if "array_element_position_ground" in parameters
+        else None
+    )
+    if origin is not None:
+        origin[2] += height
+    errors = []
+    for name in ("telescope_random_angle", "telescope_random_error"):
+        parameter = parameters.get(name)
+        value = _number(parameter["value"], name) if parameter else 0
+        if value < 0 or (parameter and parameter["unit"] != "deg"):
+            raise OpticalModelCompileError(f"{name} requires nonnegative degree RMS")
+        errors.append(value)
+    return dict(
+        axis_origin_m=origin,
+        axis_height_m=height,
+        axes_offsets_m=lengths("axes_offsets", 2) if "axes_offsets" in parameters else [0, 0],
+        known_error_deg=errors[0],
+        unknown_error_deg=errors[1],
+    )
+
+
 def _validated_mirror_response(values: object, name: str) -> list[dict[str, float]]:
     """Validate spectral knots or a rectangular spectral/incidence grid."""
     if not isinstance(values, list) or len(values) < 2:
@@ -562,7 +635,13 @@ def parse_wavelength_response(
         plain = False
     if first.startswith("#@RPOL@") or plain:
         try:
-            table = parse_rpol_table(contents, filename_options=filename_options)
+            table = parse_rpol_table(
+                contents,
+                api_options="yscale=deg2rad"
+                if value_column == "transmission"
+                else "clip=0,yscale=deg2rad",
+                filename_options=filename_options,
+            )
         except TableImportError as error:
             raise OpticalModelCompileError(f"{name}: {error}") from error
         rows = []
@@ -571,7 +650,7 @@ def parse_wavelength_response(
                 rows.extend(
                     {
                         "wavelength_nm": wavelength,
-                        "incidence_angle_deg": angle,
+                        "incidence_angle_deg": math.degrees(angle),
                         "response": table["response"][i * len(table["y"]) + j],
                     }
                     for j, angle in enumerate(table["y"])
@@ -742,6 +821,20 @@ def _apply_mirror_degradation(source: dict[str, Any], parameter: dict[str, Any],
         }
         for entry in source["reflectivity"]
     ]
+    interpolation = source["reflectivity"][0].get("interpolation")
+    if interpolation is not None:
+        logarithmic = interpolation["value_log"]
+        coefficients = []
+        for row in interpolation["coefficients"]:
+            if logarithmic and factor > 0:
+                coefficients.append([row[0] + math.log(factor), *row[1:]])
+            else:
+                coefficients.append([value * factor for value in row])
+        source["reflectivity"][0]["interpolation"] = {
+            **interpolation,
+            "value_log": logarithmic and factor > 0,
+            "coefficients": coefficients,
+        }
     source["degradation_applied"] = {
         "factor": factor,
         "source_parameter": name,
@@ -816,10 +909,10 @@ def resolve_focus_offset(parameter: dict[str, Any], zenith_deg: float | None) ->
     return (
         base
         + _number(values[2], "focus_offset")
-        * _UNIT_TO_M[units[0] if units[2] == "null" else units[2]]
+        * _UNIT_TO_M[units[0] if units[2] in ("", "null") else units[2]]
         * (math.cos(theta) - math.cos(reference))
         + _number(values[3], "focus_offset")
-        * _UNIT_TO_M[units[0] if units[3] == "null" else units[3]]
+        * _UNIT_TO_M[units[0] if units[3] in ("", "null") else units[3]]
         * (math.sin(theta) - math.sin(reference))
     )
 
@@ -958,7 +1051,10 @@ def apply_panel_alignment(
         if (
             not isinstance(values, list)
             or len(values) != 4
-            or record.get("unit") not in (["deg", "deg", "null", "null"], ["deg"] * 4)
+            or not isinstance(record.get("unit"), list)
+            or len(record["unit"]) != 4
+            or record["unit"][:2] != ["deg", "deg"]
+            or any(unit not in ("deg", "null", "") for unit in record["unit"][2:])
         ):
             raise OpticalModelCompileError(f"{name} requires four degree components")
         rms, reference, cosine, sine = [_number(v, name) for v in values]
@@ -1182,6 +1278,7 @@ def compile_optical_model(
         "assets",
         "parameters",
         "source_parameter_coverage",
+        "environment",
     ):
         if ir.get(key) != source_ir[key]:
             raise OpticalModelCompileError(f"IR {key} differs from the verified source production")
@@ -1408,7 +1505,11 @@ def compile_optical_model(
         if (
             not isinstance(values, list)
             or len(values) != 3
-            or units != ["deg", "null", "deg"]
+            or not isinstance(units, list)
+            or len(units) != 3
+            or units[0] != "deg"
+            or units[1] not in ("", "null")
+            or units[2] != "deg"
             or isinstance(scatter_seed, bool)
             or not isinstance(scatter_seed, int)
             or not 0 <= scatter_seed < 2**64
@@ -1685,8 +1786,36 @@ def compile_optical_model(
                 )
             camera["pixel_optical_response_tables"] = tables
             camera.pop("lightguide_response", None)  # Already applied by the actual pixel type.
+    boundary_names = {
+        "axes_offsets",
+        "telescope_axis_height",
+        "telescope_random_angle",
+        "telescope_random_error",
+        "array_element_position_ground",
+    }
+    boundary_frame = compile_telescope_frame(parameters)
+    boundary_frame["pointing_key"] = model
+    consumed.update(boundary_names & set(parameters))
+    if "focal_length" in parameters:
+        consumed.add("focal_length")
+    reference_inactive = set()
+    if dual_surfaces is not None:
+        consumed.update({"mirror_class", "mirror_offset"} & set(parameters))
+        reference_inactive = set(parameters) & {
+            "mirror_align_random_horizontal",
+            "mirror_align_random_vertical",
+            "mirror_align_random_distance",
+            "random_focal_length",
+            "mirror_focal_length",
+            "parabolic_dish",
+        }
+        if "mirror_list" in parameters:
+            reference_inactive.add("mirror_list")
+    upstream_sampling = {"telescope_sphere_radius"} & set(parameters)
     diagnostics = set(parameters) & REFERENCE_DIAGNOSTIC_PARAMETERS
-    deferred = sorted(set(parameters) - consumed - diagnostics)
+    deferred = sorted(
+        set(parameters) - consumed - diagnostics - reference_inactive - upstream_sampling
+    )
     for name in deferred:
         if parameters[name].get("required_for_trace") is True:
             raise OpticalModelCompileError(
@@ -1751,6 +1880,21 @@ def compile_optical_model(
         ],
         "facet_geometry_evidence": evidence,
     }
+    for name in reference_inactive:
+        report["field_coverage"][name] = {
+            "disposition": "reference_inactive",
+            "reason": "class-2 reference setup does not use single-mirror panel prescriptions",
+        }
+    for name in upstream_sampling:
+        report["field_coverage"][name] = {
+            "disposition": "upstream_sampling",
+            "reason": "CORSIKA interception sphere; resolved input photons are already selected",
+        }
+    for name in boundary_names & set(parameters):
+        report["field_coverage"][name] = {
+            "disposition": "input_boundary",
+            "reason": "compiled mount and pointing context; star imaging cancels axis translations",
+        }
     if camera is not None:
         xs = [pixel["centre_xy_m"][0] for pixel in camera["pixels"]]
         ys = [pixel["centre_xy_m"][1] for pixel in camera["pixels"]]
@@ -1781,6 +1925,32 @@ def compile_optical_model(
         },
         "primary": primary,
         "report": report,
+        "telescope_frame": boundary_frame,
+        "observing_geometry": {
+            "parameters": {
+                name: parameters[name]
+                for name in (
+                    "focal_length",
+                    "dish_shape_length",
+                    "mirror_offset",
+                    "parabolic_dish",
+                    "mirror_opt",
+                    "mirror_align_random_horizontal",
+                    "mirror_align_random_vertical",
+                    "focus_offset",
+                    "pixels_parallel",
+                )
+                if name in parameters
+            },
+            "alignment_seed": alignment_seed,
+            "zenith_angle_deg": alignment_zenith_deg,
+            "nominal_focal_surface": {
+                **compiled_focal_surface,
+                "coefficient_m": list(compiled_focal_surface["coefficient_m"]),
+            }
+            if compiled_focal_surface is not None
+            else None,
+        },
     }
     if isinstance(parameters.get("focal_length"), dict):
         compiled["focal_length_m"] = _length_m(parameters["focal_length"], "focal_length")
@@ -1807,7 +1977,7 @@ def compile_optical_model(
                 or len(units) != 4
                 or units[0] not in _UNIT_TO_M
                 or units[1] != "deg"
-                or any(unit not in _UNIT_TO_M and unit != "null" for unit in units[2:])
+                or any(unit not in _UNIT_TO_M and unit not in ("", "null") for unit in units[2:])
             ):
                 raise OpticalModelCompileError(
                     "camera placement requires a resolved static focus offset"
@@ -1842,7 +2012,9 @@ def compile_optical_model(
                 "guide_wall_profile": "unavailable",
             }
             report["consumed"] = sorted(consumed)
-            report["deferred"] = sorted(set(parameters) - consumed - diagnostics)
+            report["deferred"] = sorted(
+                set(parameters) - consumed - diagnostics - reference_inactive - upstream_sampling
+            )
             for name in ("focus_offset", "pixels_parallel"):
                 if name in report["field_coverage"] and name in consumed:
                     report["field_coverage"][name] = {
@@ -1859,6 +2031,29 @@ def compile_optical_model(
     try:
         compiled["trace_model"] = build_trace_model(compiled)
         trace = compiled["trace_model"]
+        if ir.get("environment") is not None:
+            trace["propagation_group_index"] = ir["environment"]["propagation_group_index"]
+        if "telescope_transmission" in parameters:
+            diameter = (
+                _length_m(parameters["camera_body_diameter"], "camera_body_diameter")
+                if "camera_body_diameter" in parameters
+                else 0
+            )
+            trace["telescope_transmission"] = compile_telescope_transmission(
+                parameters["telescope_transmission"],
+                diameter,
+                compiled["focal_length_m"],
+                dual=dual_surfaces is not None,
+            )
+            consumed.add("telescope_transmission")
+            report["consumed"] = sorted(consumed)
+            report["deferred"] = sorted(
+                set(parameters) - consumed - diagnostics - reference_inactive - upstream_sampling
+            )
+            report["field_coverage"]["telescope_transmission"] = {
+                "disposition": "consumed",
+                "reason": "native transport; focal imaging uses transmission from shared analysis",
+            }
         identifiers = [
             entry["id"]
             for field, value in trace.items()
@@ -1895,12 +2090,11 @@ def compile_optical_model(
                 if role == "primary" and trace["kind"] == "segmented":
                     trace["primary_degradation_in_facet_frame"] = True
                 if role == "camera":
-                    angle = math.radians(camera.get("rotation_deg", 0))
-                    sign = -1 if trace["kind"] == "segmented" else 1
+                    trace["camera_degradation_in_detector_frame"] = True
                     trace["camera_degradation"] = {
                         **source["degradation_map"],
-                        "x_basis": [sign * math.cos(angle), -sign * math.sin(angle), 0.0],
-                        "y_basis": [math.sin(angle), math.cos(angle), 0.0],
+                        "x_basis": [1.0, 0.0, 0.0],
+                        "y_basis": [0.0, 1.0, 0.0],
                     }
                 if role == "secondary":
                     trace[f"{role}_degradation"] = {
@@ -2169,7 +2363,9 @@ def trace_surface_rows(
     return rows, trace_obscurers, trace_reflectivity
 
 
-def _trace_response(response: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _trace_response(
+    response: list[dict[str, Any]], *, sampling_offset_nm: float | None = None
+) -> list[dict[str, Any]]:
     """Retain measured values and explicit simtel interpolation semantics."""
     rows = [
         {
@@ -2180,6 +2376,15 @@ def _trace_response(response: list[dict[str, Any]]) -> list[dict[str, Any]]:
         for entry in response
     ]
     if rows:
+        if sampling_offset_nm is not None:
+            rows[0]["wavelength_sampling"] = dict(
+                width_nm=1.0,
+                offset_nm=sampling_offset_nm,
+                first_bin=200 if sampling_offset_nm == 0 else 0,
+                last_bin=999,
+            )
+            if sampling_offset_nm == 0:
+                rows[0]["wavelength_sampling"]["projection_angle_deg"] = 0.0
         rows[0]["interpolation"] = response[0].get(
             "interpolation",
             {
@@ -2204,7 +2409,9 @@ def _camera_response_fields(optical_model: dict[str, Any]) -> dict[str, Any]:
         "semantics": "measured_complete_response",
     }
     if "filter_response" in camera:
-        response["camera_filter"] = _trace_response(camera["filter_response"])
+        response["camera_filter"] = _trace_response(
+            camera["filter_response"], sampling_offset_nm=0.5
+        )
     if "lightguide_response" in camera:
         response["lightguide_efficiency"] = _trace_response(camera["lightguide_response"])
     return {"camera_response": response}
@@ -2217,6 +2424,7 @@ def build_trace_model(optical_model: dict[str, Any]) -> dict[str, Any]:
     there is no second, flattened transport file to keep in sync.
     """
     primary = optical_model.get("primary", {})
+    camera = optical_model.get("camera", {})
     secondary = optical_model.get("secondary", {})
     focal = optical_model.get("focal_surface", {})
     if (
@@ -2261,7 +2469,13 @@ def build_trace_model(optical_model: dict[str, Any]) -> dict[str, Any]:
                 **surface,
                 **{
                     key: row[key]
-                    for key in ("source_pixel_id", "source_type_id", "enabled")
+                    for key in (
+                        "source_pixel_id",
+                        "source_type_id",
+                        "enabled",
+                        "assignment_radius_m",
+                        "response_y_sign",
+                    )
                     if key in row
                 },
             })
@@ -2293,6 +2507,11 @@ def build_trace_model(optical_model: dict[str, Any]) -> dict[str, Any]:
         **_camera_response_fields(optical_model),
         "primary_facets": facets,
         "detector_surfaces": detectors,
+        **(
+            {"detector_assignment": camera["assignment_grid"]}
+            if "assignment_grid" in camera
+            else {}
+        ),
         "cylinder_obscurers": [
             {
                 "id": item["surface_id"],
@@ -2302,7 +2521,7 @@ def build_trace_model(optical_model: dict[str, Any]) -> dict[str, Any]:
             }
             for item in obscurers
         ],
-        "primary_reflectivity": _trace_response(reflectivity),
+        "primary_reflectivity": _trace_response(reflectivity, sampling_offset_nm=0),
     }
 
 
@@ -2574,6 +2793,11 @@ def _axisymmetric_trace_model(optical_model: dict[str, Any]) -> dict[str, Any]:
             )
         ],
         "block_incoming_secondary": "incoming_shadow" not in secondary,
+        **(
+            {"detector_assignment": camera["assignment_grid"]}
+            if "assignment_grid" in camera
+            else {}
+        ),
         "kind": "axisymmetric",
         **(
             {"primary_scatter": optical_model["primary"]["scatter"]}
@@ -2586,10 +2810,12 @@ def _axisymmetric_trace_model(optical_model: dict[str, Any]) -> dict[str, Any]:
         "secondary": surface(secondary, "secondary"),
         "detector": surface(focal, "detector"),
         "primary_reflectivity": _trace_response(
-            _validated_mirror_response(optical_model["primary"].get("reflectivity"), "primary")
+            _validated_mirror_response(optical_model["primary"].get("reflectivity"), "primary"),
+            sampling_offset_nm=0,
         ),
         "secondary_reflectivity": _trace_response(
-            _validated_mirror_response(secondary.get("reflectivity"), "secondary")
+            _validated_mirror_response(secondary.get("reflectivity"), "secondary"),
+            sampling_offset_nm=0,
         ),
     }
 

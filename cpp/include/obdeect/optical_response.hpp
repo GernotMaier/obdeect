@@ -5,10 +5,24 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <optional>
 #include <vector>
 
 namespace obdeect {
+
+struct WavelengthSampling {
+  double width_nm{}, offset_nm{};
+  std::uint32_t first_bin{}, last_bin{};
+  std::optional<double> projection_angle_deg{};
+
+  [[nodiscard]] bool is_valid() const {
+    return std::isfinite(width_nm) && width_nm > 0 && std::isfinite(offset_nm) && offset_nm >= 0 &&
+           offset_nm < width_nm && first_bin <= last_bin &&
+           (!projection_angle_deg || (std::isfinite(*projection_angle_deg) &&
+                                      *projection_angle_deg >= 0 && *projection_angle_deg <= 90));
+  }
+};
 
 struct SpectralResponse {
   std::vector<double> wavelength_nm;
@@ -16,8 +30,24 @@ struct SpectralResponse {
   std::vector<double> response;
   std::vector<double> incidence_angle_deg{};
   TableInterpolation interpolation{};
+  std::optional<WavelengthSampling> wavelength_sampling{};
+  std::vector<double> spectral_envelope{};
+  TableInterpolation envelope_interpolation{};
+  bool relative_to_envelope{};
 
   [[nodiscard]] bool is_valid() const {
+    if (relative_to_envelope &&
+        (incidence_angle_deg.empty() || spectral_envelope.size() != wavelength_nm.size()))
+      return false;
+    if (wavelength_sampling &&
+        (!wavelength_sampling->is_valid() ||
+         (!incidence_angle_deg.empty() &&
+          (spectral_envelope.size() != wavelength_nm.size() ||
+           !envelope_interpolation.is_valid(wavelength_nm.empty() ? 0 : wavelength_nm.size() - 1) ||
+           std::any_of(spectral_envelope.begin(), spectral_envelope.end(), [](double value) {
+             return !std::isfinite(value) || value < 0 || value > 1;
+           })))))
+      return false;
     const std::size_t angles = incidence_angle_deg.empty() ? 1 : incidence_angle_deg.size();
     if (!interpolation.is_valid(wavelength_nm.empty() ? 0 : wavelength_nm.size() - 1,
                                 !incidence_angle_deg.empty()))
@@ -45,7 +75,8 @@ struct SpectralResponse {
   }
 
   // The caller has validated the immutable table once, before transport.
-  [[nodiscard]] std::optional<double> at_unchecked(double wavelength, double angle_deg = 0) const {
+  [[nodiscard]] std::optional<double> at_continuous_unchecked(double wavelength,
+                                                              double angle_deg = 0) const {
     if (!std::isfinite(wavelength) || wavelength <= 0 || !std::isfinite(angle_deg) ||
         angle_deg < 0 || angle_deg > 90)
       return std::nullopt;
@@ -83,6 +114,39 @@ struct SpectralResponse {
                                      interpolation.y_log);
     const double value = spectral(a - 1) * (1 - af) + spectral(a) * af;
     return interpolation.value_log ? std::exp(value) : value;
+  }
+
+  [[nodiscard]] std::optional<double> at_unchecked(double wavelength, double angle_deg = 0) const {
+    if (relative_to_envelope) {
+      const auto physical = at_continuous_unchecked(wavelength, angle_deg);
+      const auto envelope = interpolate_curve_unchecked(wavelength_nm, spectral_envelope,
+                                                        wavelength, envelope_interpolation);
+      if (!physical || !envelope)
+        return std::nullopt;
+      return *envelope > 0 ? *physical / *envelope : 0;
+    }
+    if (!wavelength_sampling)
+      return at_continuous_unchecked(wavelength, angle_deg);
+    if (!std::isfinite(wavelength) || wavelength <= 0 || !std::isfinite(angle_deg) ||
+        angle_deg < 0 || angle_deg > 90)
+      return std::nullopt;
+    const auto &sampling = *wavelength_sampling;
+    const double bin = std::floor(wavelength / sampling.width_nm);
+    if (bin < sampling.first_bin || bin > sampling.last_bin)
+      return 0;
+    const double sampled = bin * sampling.width_nm + sampling.offset_nm;
+    if (incidence_angle_deg.empty())
+      return at_continuous_unchecked(sampled, angle_deg);
+    const auto physical = at_continuous_unchecked(wavelength, angle_deg);
+    const auto nominal = interpolate_curve_unchecked(wavelength_nm, spectral_envelope, wavelength,
+                                                     envelope_interpolation);
+    const auto upstream = sampling.projection_angle_deg
+                              ? at_continuous_unchecked(sampled, *sampling.projection_angle_deg)
+                              : interpolate_curve_unchecked(wavelength_nm, spectral_envelope,
+                                                            sampled, envelope_interpolation);
+    if (!physical || !nominal || !upstream)
+      return std::nullopt;
+    return *nominal > 0 ? *physical * *upstream / *nominal : 0;
   }
 
   [[nodiscard]] std::optional<double> at(double wavelength, double angle_deg = 0) const {

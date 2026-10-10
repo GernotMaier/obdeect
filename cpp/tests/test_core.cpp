@@ -21,6 +21,18 @@ void require(bool condition, const char *message) {
 
 int main() {
   {
+    obdeect::TelescopeTransmission response{0.96, 0.2, 0.1, 2, 1};
+    require(response.is_valid(), "telescope transmission validates");
+    require(*response.at_unchecked({0, 0, -1}) == 0.96, "on-axis structural transmission");
+    require(std::abs(*response.at_unchecked({0.1, 0, -std::sqrt(0.99)}) - 0.8) < 1.e-12,
+            "angular structural transmission uses sine of incidence");
+    response.outer_power = 3;
+    require(std::abs(*response.at_unchecked({0.1, 0, -std::sqrt(0.99)}) - 0.96 / 1.728) < 1.e-12,
+            "outer transmission exponent");
+    response.amplitude = -1;
+    require(!response.is_valid(), "invalid transmission coefficient rejects");
+  }
+  {
     using namespace obdeect;
     const std::array<double, 2> axis{1, 10}, values{0.1, 1};
     TableInterpolation options{TableBoundary::reject};

@@ -4,6 +4,48 @@
 
 int main() {
   using namespace obdeect;
+  {
+    ImportedSegmentedOpticalModel input{
+        {"local-response-fixture", "1", std::string(64, 'a')},
+        {{7, {0.5, 0.5, 0}, {0, 0, 1}, 2, 10, FacetShape::circle, {1, 0, 0}}},
+        {{8, {0.5, 0.5, 3}, {0, 0, 1}, 2, FacetShape::circle, {1, 0, 0}, 0, -1}},
+        {},
+        SpectralResponse{{300, 500}, {0.8, 0.8}}};
+    auto model = compile_segmented_optical_model(input);
+    assert(model);
+    model->camera_degradation =
+        SpatialResponse{{-0.1, 0.1}, {-0.1, 0.1}, {0.25, 0.75, 0.25, 0.75}, true};
+    const Ray ray{{0.5, 0.55, 5}, {0, 0, -1}};
+    assert(trace_segmented_path(ray, 1, 400, *model).surviving_throughput == 0);
+    model->camera_degradation_in_detector_frame = true;
+    assert(is_valid(*model));
+    assert(std::abs(trace_segmented_path(ray, 1, 400, *model).surviving_throughput - 0.3) < 1e-15);
+    model->detector_surfaces[0].response_y_sign = 1;
+    assert(std::abs(trace_segmented_path(ray, 1, 400, *model).surviving_throughput - 0.5) < 1e-15);
+  }
+  {
+    SpectralResponse sampled{{300, 500}, {0.2, 0.8}};
+    sampled.wavelength_sampling = WavelengthSampling{1, 0, 200, 999};
+    assert(sampled.is_valid());
+    assert(std::abs(*sampled.at(400.9) - 0.5) < 1e-15);
+    sampled.wavelength_sampling->offset_nm = 0.5;
+    assert(std::abs(*sampled.at(400.9) - 0.5015) < 1e-15);
+    assert(*sampled.at(199.9) == 0 && *sampled.at(1000) == 0);
+    sampled.wavelength_sampling->offset_nm = 1;
+    assert(!sampled.is_valid());
+    SpectralResponse angular{{300, 500}, {0.2, 0.4, 0.4, 0.8}, {0, 60}};
+    angular.wavelength_sampling = WavelengthSampling{1, 0, 200, 999};
+    angular.spectral_envelope = {0.4, 0.8};
+    assert(angular.is_valid());
+    assert(std::abs(*angular.at(400.9, 30) - 0.45) < 1e-15);
+    angular.wavelength_sampling->offset_nm = 0.5;
+    assert(std::abs(*angular.at(400.9, 30) - 0.45075) < 1e-15);
+    angular.wavelength_sampling->offset_nm = 0;
+    angular.wavelength_sampling->projection_angle_deg = 0;
+    assert(std::abs(*angular.at(400.9, 30) - 0.225) < 1e-15);
+    angular.relative_to_envelope = true;
+    assert(std::abs(*angular.at(400.9, 30) - 0.75) < 1e-15);
+  }
   const Vec3 incoming{0, 0, -1}, normal{0, 0, 1}, tangent{1, 0, 0};
   MirrorScatter scatter{0.001, 0, 0.004, MirrorScatterMethod::outgoing_angles, 123};
   assert(scatter.is_valid());

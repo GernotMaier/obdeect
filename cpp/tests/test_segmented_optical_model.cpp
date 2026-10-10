@@ -156,6 +156,16 @@ int main() {
       {provenance, {near, far}, {farther_detector, nearer_detector}});
   require(detected_optical_model.has_value(), "optical_model with explicit detectors compiles");
   const auto detected = trace(*detected_optical_model, input);
+  auto air_model = *detected_optical_model;
+  air_model.propagation_group_index = 1.00023;
+  const auto air_result = trace(air_model, input);
+  require(std::abs(air_result.photons.time_ns[0] - (7.0 + 4.0 * air_model.propagation_group_index /
+                                                              kSpeedOfLightMPerNs)) < 1.e-12 &&
+              air_result.photons.position_m[0].z == detected.photons.position_m[0].z &&
+              air_result.photons.weight[0] == detected.photons.weight[0],
+          "ambient group index changes flight time without changing geometry or throughput");
+  air_model.propagation_group_index = 0.9;
+  require(!is_valid(air_model), "invalid ambient group index rejects");
   constexpr double speed_of_light_m_per_ns = 0.299792458;
   require(detected.photons.status[0] == PhotonStatus::detected &&
               detected.photons.surface_id[0] == nearer_detector.id &&

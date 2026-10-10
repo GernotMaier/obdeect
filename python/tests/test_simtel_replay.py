@@ -67,6 +67,10 @@ struct ReferenceMeasurement {
  int status,mirror,loss_line;
  double position[3],direction[3],time_ns,relative_efficiency;
  double primary[3],secondary[3],primary_cosine,secondary_cosine;
+ double propagation_group_index,primary_envelope,secondary_envelope;
+ double upstream_optical_efficiency;
+ int pixel_status,pixel_id;
+ double pixel_time_ns,camera_absolute_efficiency,pixel_x_cm,pixel_y_cm;
 };
 int obdeect_reference_replay(void *,unsigned);
 void obdeect_reference_measure(void *,unsigned index,const double *p,const double *d,
@@ -75,6 +79,10 @@ void obdeect_reference_measure(void *,unsigned index,const double *p,const doubl
  for(int i=0;i<3;++i){r->position[i]=p[i];r->direction[i]=d[i];
  r->primary[i]=NAN;r->secondary[i]=NAN;}
  r->time_ns=7; r->relative_efficiency=weight;
+ r->propagation_group_index=1.00023;r->primary_envelope=0.9;r->secondary_envelope=0.8;
+ r->upstream_optical_efficiency=0.72;
+ r->pixel_status=3;r->pixel_id=1;r->pixel_time_ns=7;r->camera_absolute_efficiency=0.36;
+ r->pixel_x_cm=0.;r->pixel_y_cm=0.;
  if(index!=0||wavelength!=400||distance!=1e30)r->status=-1;
 }
 }
@@ -157,6 +165,8 @@ int main(){return obdeect_reference_replay(nullptr,1);}
         self.assertEqual(float(output[0]["arrival_time_ns"]), 15)
         self.assertEqual(output[1]["status"], "lost_unclassified")
         self.assertEqual(output[1]["loss_source_line"], "123")
+        self.assertEqual(float(output[0]["propagation_group_index"]), 1.00023)
+        self.assertEqual(float(output[0]["upstream_optical_efficiency"]), 0.72)
         for name in (
             "camera_x_m",
             "camera_dx",

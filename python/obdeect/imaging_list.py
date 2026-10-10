@@ -14,7 +14,7 @@ from obdeect.result_contract import ArrivalContractError, OpticalArrival, read_a
 class ImagingListMetadata:
     """Simulation inputs required by the common imaging-list analysis."""
 
-    launch_radius_m: float
+    sampling_radius_m: float
     entrance_z_m: float
     focal_length_m: float
     camera_rotation_deg: float
@@ -105,7 +105,7 @@ def load_imaging_metadata(
     if not all(math.isfinite(value) for value in values):
         raise ValueError("imaging-list metadata must be finite")
     if radius <= 0 or model["focal_length_m"] <= 0 or source_distance_m <= max(0.0, top) + radius:
-        raise ValueError("invalid imaging-list launch radius, focal length, or source distance")
+        raise ValueError("invalid imaging-list sampling radius, focal length, or source distance")
     return ImagingListMetadata(
         1.2 * radius,
         max(0.0, top) + radius,
@@ -140,7 +140,7 @@ _COLUMNS = (
     "Star number",
     "X coordinate at 2f distance (unavailable)",
     "Y coordinate at 2f distance (unavailable)",
-    "Absolute optical throughput before pixel acceptance",
+    "Relative optical efficiency factor (before pixel)",
     "Efficiency including pixel (unavailable)",
     "x direction slope at pixel (unavailable)",
     "y direction slope at pixel (unavailable)",
@@ -220,14 +220,14 @@ def write_imaging_list(
         raise ArrivalContractError("native arrival count disagrees with emitted_photons")
     if any(arrival.source_kind != "star" or arrival.source_weight != 1 for arrival in arrivals):
         raise ArrivalContractError("imaging lists require unit-weight star photons")
-    area = math.pi * metadata.launch_radius_m**2
-    if not math.isfinite(area) or metadata.launch_radius_m <= 0:
-        raise ArrivalContractError("imaging launch area must be finite and positive")
+    area = math.pi * metadata.sampling_radius_m**2
+    if not math.isfinite(area) or metadata.sampling_radius_m <= 0:
+        raise ArrivalContractError("imaging sampling area must be finite and positive")
     for arrival in arrivals:
-        if arrival.launch_area_m2 is not None and not math.isclose(
-            arrival.launch_area_m2, area, rel_tol=1e-12
+        if arrival.sampling_area_m2 is not None and not math.isclose(
+            arrival.sampling_area_m2, area, rel_tol=1e-12
         ):
-            raise ArrivalContractError("native launch area disagrees with imaging-list metadata")
+            raise ArrivalContractError("native sampling area disagrees with imaging-list metadata")
     count = 0
     with output_path.open("w", encoding="utf-8") as output:
         output.write(
@@ -246,7 +246,7 @@ def write_imaging_list(
             f"# off_axis_x [deg] = {metadata.off_axis_x_deg:.17g}\n"
             f"# off_axis_y [deg] = {metadata.off_axis_y_deg:.17g}\n"
             f"# zenith_angle [deg] = {metadata.zenith_angle_deg:.17g}\n"
-            f"# launch_radius [m] = {metadata.launch_radius_m:.17g}\n"
+            f"# sampling_radius [m] = {metadata.sampling_radius_m:.17g}\n"
             f"# launch_plane_z [m] = {metadata.entrance_z_m:.17g}\n"
             "# boundary = continuous_focal_surface; pixel acceptance not applied\n"
             "# unavailable physical observables are represented by nan\n"

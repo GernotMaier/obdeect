@@ -32,6 +32,9 @@ def tiny_model() -> dict:
     model = {
         "format": "obdeect.compiled-optical-model.v1",
         "provenance": {"model": "installation-check", "model_version": "1.0.0"},
+        "focal_length_m": 10.0,
+        "detector_vertex_z_m": 10.0,
+        "camera": {"rotation_deg": 0.0},
         "report": {
             "native_trace_ready": True,
             "production_trace_ready": False,

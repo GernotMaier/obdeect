@@ -1,5 +1,6 @@
 #pragma once
 
+#include "obdeect/detector_assignment.hpp"
 #include "obdeect/detector_planes.hpp"
 #include "obdeect/interactions.hpp"
 #include "obdeect/photon_buffer.hpp"
@@ -46,6 +47,8 @@ trace_segmented_path(const Ray &input, std::uint64_t photon_id, double wavelengt
       !std::isfinite(input.position_m.z) || !std::isfinite(wavelength_nm) || wavelength_nm <= 0) {
     path.status = obdeect::PhotonStatus::invalid_input;
   } else {
+    if (optical_model.telescope_transmission)
+      path.surviving_throughput = *optical_model.telescope_transmission->at_unchecked(*direction);
     const obdeect::Ray ray{input.position_m, *direction};
     auto incoming_obscurer = obdeect::intersect_cylinder_obscurers_unchecked(ray, optical_model);
     const auto opaque_incoming = intersect_opaque_surfaces(ray, optical_model.opaque_obscurers);
@@ -119,7 +122,7 @@ trace_segmented_path(const Ray &input, std::uint64_t photon_id, double wavelengt
           path.status = PhotonStatus::invalid_input;
           return path;
         }
-        path.surviving_throughput = *response;
+        path.surviving_throughput *= *response;
         if (optical_model.primary_degradation) {
           Vec3 point = primary_hit->point_m;
           if (optical_model.primary_degradation_in_facet_frame)
@@ -139,10 +142,24 @@ trace_segmented_path(const Ray &input, std::uint64_t photon_id, double wavelengt
         }
         path.interaction_throughput[0] = path.surviving_throughput;
         const obdeect::Ray detector_ray{primary_hit->point_m, *reflected};
-        const auto detector_hit =
-            optical_model.detector_planes
-                ? optical_model.detector_planes->intersect(detector_ray)
-                : obdeect::intersect_detector_surfaces_unchecked(detector_ray, optical_model);
+        std::optional<DetectorSurfaceHit> detector_hit;
+        if (optical_model.detector_assignment) {
+          const auto z = optical_model.detector_assignment->description().reference_plane_z_m;
+          if (!z || std::abs(detector_ray.direction.z) <= kEpsilon)
+            detector_hit.reset();
+          else {
+            const double distance = (*z - detector_ray.position_m.z) / detector_ray.direction.z;
+            detector_hit =
+                distance > kEpsilon
+                    ? optical_model.detector_assignment->intersect(
+                          detector_ray, detector_ray.position_m + detector_ray.direction * distance)
+                    : std::nullopt;
+          }
+        } else
+          detector_hit =
+              optical_model.detector_planes
+                  ? optical_model.detector_planes->intersect(detector_ray)
+                  : obdeect::intersect_detector_surfaces_unchecked(detector_ray, optical_model);
         const obdeect::Ray reflected_ray{primary_hit->point_m, *reflected};
         auto outgoing_obscurer =
             obdeect::intersect_cylinder_obscurers_unchecked(reflected_ray, optical_model);
@@ -175,8 +192,12 @@ trace_segmented_path(const Ray &input, std::uint64_t photon_id, double wavelengt
           path.final_direction = *reflected;
         } else {
           if (optical_model.camera_degradation) {
+            const auto point = optical_model.camera_degradation_in_detector_frame
+                                   ? detector_hit->local_position_m
+                                   : std::optional{detector_hit->point_m};
             const auto degradation =
-                optical_model.camera_degradation->at_point_unchecked(detector_hit->point_m);
+                !point ? std::nullopt
+                       : optical_model.camera_degradation->at_point_unchecked(*point);
             if (!degradation) {
               path.status = PhotonStatus::invalid_input;
               return path;

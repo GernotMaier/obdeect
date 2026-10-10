@@ -22,6 +22,10 @@ struct ReferenceMeasurement {
    int status, mirror, loss_line;
    double position[3], direction[3], time_ns, relative_efficiency;
    double primary[3], secondary[3], primary_cosine, secondary_cosine;
+   double propagation_group_index, primary_envelope, secondary_envelope;
+   double upstream_optical_efficiency;
+   int pixel_status, pixel_id;
+   double pixel_time_ns, camera_absolute_efficiency, pixel_x_cm, pixel_y_cm;
 };
 extern int obdeect_reference_loss_line;
 extern double r1_pos_x,r1_pos_y,r1_pos_z,r2_pos_x,r2_pos_y,r2_pos_z,dc_prm,dc_sec;
@@ -48,11 +52,49 @@ void obdeect_reference_measure(void *storage, unsigned index,
    memcpy(measurement->direction,result.direction,sizeof(result.direction));
    measurement->time_ns=result.travel_time;
    measurement->relative_efficiency=result.relative_efficiency;
+   measurement->propagation_group_index=29.9792458/airlightspeed;
+   measurement->primary_envelope=optics->with_mirror_ref_2d ?
+      rpolate_1d(optics->mirror_ref_2d,wavelength,-1) : 1.;
+   measurement->secondary_envelope=optics->with_mirror2_ref_2d ?
+      rpolate_1d(optics->mirror2_ref_2d,wavelength,-1) : 1.;
+   measurement->upstream_optical_efficiency=(wavelength>=0. && wavelength<MAX_LAMBDA) ?
+      obdeect_reference_electronics[index].optics_efficiency[(int)wavelength] : 0.;
    measurement->mirror=result.mirror;
    measurement->primary[0]=r1_pos_x; measurement->primary[1]=r1_pos_y;
    measurement->primary[2]=r1_pos_z; measurement->secondary[0]=r2_pos_x;
    measurement->secondary[1]=r2_pos_y; measurement->secondary[2]=r2_pos_z;
    measurement->primary_cosine=dc_prm; measurement->secondary_cosine=dc_sec;
+   measurement->pixel_status=-1; measurement->pixel_id=-1;
+   measurement->pixel_time_ns=NAN; measurement->camera_absolute_efficiency=0.;
+   measurement->pixel_x_cm=measurement->pixel_y_cm=NAN;
+   if (measurement->status==0 && wavelength>0. && wavelength<MAX_LAMBDA) {
+      struct pm_camera *camera=obdeect_reference_camera+index;
+      double p[3], d[3], x=result.position[0], y=result.position[1];
+      double sx=result.direction[0]/result.direction[2], sy=result.direction[1]/result.direction[2];
+      double time=result.travel_time, efficiency=result.relative_efficiency;
+      int iwl=(int)wavelength, pixel;
+      memcpy(p,result.position,sizeof(p)); memcpy(d,result.direction,sizeof(d));
+      pixel=camera_hit(camera,optics,p,d,&x,&y,&sx,&sy,&time);
+      measurement->pixel_id=pixel;
+      if(pixel>=0 && pixel<camera->pixels) {
+         if(optics->camera_degraded_map!=NULL) {
+            double degradation=rpolate_2d(optics->camera_degraded_map,x,y,1);
+            if(degradation<1.) efficiency*=degradation;
+         }
+         if(camera->with_filter_2d) {
+            double maximum=rpolate_1d(camera->filter_trans_2d,wavelength,-1);
+            double filter=rpolate_2d(camera->filter_trans_2d,wavelength,atan(hypot(sx,sy)),1);
+            efficiency*=maximum!=0. ? filter/maximum : 0.;
+         }
+         measurement->pixel_status=cathode_hit(camera,pixel,x,y,sx,sy,iwl,&efficiency);
+         measurement->pixel_time_ns=time;
+         measurement->pixel_x_cm=x; measurement->pixel_y_cm=y;
+         if(measurement->pixel_status>0)
+            measurement->camera_absolute_efficiency=efficiency*
+               measurement->upstream_optical_efficiency*camera->filter_trans[iwl]*
+               optics->camera_transmission*optics->camera_degraded_efficiency;
+      }
+   }
 }
 """
 
@@ -64,12 +106,19 @@ def instrument(root: Path, destination: Path) -> tuple[Path, Path]:
     text = main.read_text()
     if text.count(_ANCHOR) != 1 or '#include "sim_optical_backend.h"' not in text:
         raise ValueError("unsupported sim_telarray setup/optical backend boundary")
-    declaration = "extern int obdeect_reference_replay(void *, unsigned);\n"
+    declaration = (
+        "extern int obdeect_reference_replay(void *, unsigned);\n"
+        "static struct camera_electronics *obdeect_reference_electronics;\n"
+        "static struct pm_camera *obdeect_reference_camera;\n"
+    )
     text = text.replace(
         '#include "sim_optical_backend.h"', '#include "sim_optical_backend.h"\n' + declaration
     )
     text = text.replace(
-        _ANCHOR, "   exit(obdeect_reference_replay(array.optics,array.max_tel));\n" + _ANCHOR
+        _ANCHOR,
+        "   obdeect_reference_electronics=array.electronics;\n"
+        "   obdeect_reference_camera=array.camera;\n"
+        "   exit(obdeect_reference_replay(array.optics,array.max_tel));\n" + _ANCHOR,
     )
     main_output = destination / "simtel_replay_main.c"
     main_output.write_text(text + _BRIDGE)

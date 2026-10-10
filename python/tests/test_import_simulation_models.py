@@ -9,6 +9,92 @@ from obdeect import model_import as IMPORTER
 
 
 class TestSimulationModelsImport(unittest.TestCase):
+    def test_explicit_site_environment_is_resolved_with_provenance(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.make_tree(root)
+            focal = root / "model_parameters/TEST/focal_length/focal_length-1.0.0.json"
+            record = json.loads(focal.read_text())
+            record["site"] = "Example"
+            focal.write_text(json.dumps(record))
+            manifest = root / "productions/1.2.3/OBS-Example.json"
+            names = ("atmospheric_profile", "corsika_observation_level")
+            manifest.write_text(
+                json.dumps({
+                    "model_version": "1.2.3",
+                    "parameters": {"OBS-Example": dict.fromkeys(names, "1.0.0")},
+                })
+            )
+            for name, value, unit, file in (
+                ("atmospheric_profile", "profile.ecsv", None, True),
+                ("corsika_observation_level", 1000, "m", False),
+            ):
+                path = root / "model_parameters/OBS-Example" / name / f"{name}-1.0.0.json"
+                path.parent.mkdir(parents=True)
+                path.write_text(
+                    json.dumps(
+                        dict(
+                            instrument="OBS-Example",
+                            parameter=name,
+                            parameter_version="1.0.0",
+                            value=value,
+                            unit=unit,
+                            file=file,
+                        )
+                    )
+                )
+            profile = root / "model_parameters/OBS-Example/atmospheric_profile/profile.ecsv"
+            profile.write_text("altitude refractive_index\n0 0.0002\n1 0.0002\n2 0.0002\n")
+            model = IMPORTER.resolve_model(root, "TEST", "1.2.3")
+            self.assertEqual(model["environment"]["propagation_group_index"], 1.0002)
+            self.assertEqual(model["environment"]["observation_level_m"], 1000)
+            self.assertEqual(
+                model["input_records"]["environment_atmospheric_profile"]["sha256"],
+                IMPORTER.sha256(profile),
+            )
+            profile.write_text("altitude refractive_index\n0 nan\n1 0.0002\n2 0.0002\n")
+            with self.assertRaisesRegex(IMPORTER.ImportError, "invalid site environment"):
+                IMPORTER.resolve_model(root, "TEST", "1.2.3")
+
+    def test_instance_inherits_design_and_overrides_with_complete_provenance(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.make_tree(root)
+            instance = root / "productions/1.2.3/INSTANCE.json"
+            instance.write_text(
+                json.dumps({
+                    "model_version": "1.2.3",
+                    "production_table_name": "INSTANCE",
+                    "design_model": {"INSTANCE": "TEST"},
+                    "parameters": {"INSTANCE": {"focal_length": "1.0.0"}},
+                })
+            )
+            path = root / "model_parameters/INSTANCE/focal_length/focal_length-1.0.0.json"
+            path.parent.mkdir(parents=True)
+            path.write_text(
+                json.dumps({
+                    "instrument": "INSTANCE",
+                    "parameter": "focal_length",
+                    "parameter_version": "1.0.0",
+                    "type": "float64",
+                    "unit": "cm",
+                    "value": 456,
+                    "file": False,
+                })
+            )
+            model = IMPORTER.resolve_model(root, "INSTANCE", "1.2.3")
+            self.assertEqual(model["parameters"]["focal_length"]["value"], 456)
+            self.assertEqual(model["parameters"]["mirror_list"]["instrument"], "TEST")
+            self.assertIn("design_manifest:TEST", model["input_records"])
+            self.assertIn("source_parameter:TEST:focal_length", model["input_records"])
+            self.assertIn("source_parameter:INSTANCE:focal_length", model["input_records"])
+            design = root / "productions/1.2.3/TEST.json"
+            data = json.loads(design.read_text())
+            data["design_model"] = {"TEST": "INSTANCE"}
+            design.write_text(json.dumps(data))
+            with self.assertRaisesRegex(IMPORTER.ImportError, "cyclic"):
+                IMPORTER.resolve_model(root, "INSTANCE", "1.2.3")
+
     def test_table_filename_options_preserve_asset_provenance(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

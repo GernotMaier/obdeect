@@ -82,7 +82,7 @@ def arrivals_file(tmp_path: Path) -> Path:
 @pytest.mark.parametrize("kind", ["segmented", "axisymmetric"])
 def test_model_metadata_matches_simtel_launch_disk(tmp_path: Path, kind: str) -> None:
     metadata = load_imaging_metadata(model_file(tmp_path, kind), 10000, 0, 2.5)
-    assert metadata.launch_radius_m == pytest.approx(7.2)
+    assert metadata.sampling_radius_m == pytest.approx(7.2)
     assert metadata.prime_focus == (kind == "segmented")
     assert metadata.camera_rotation_deg == 30
 
@@ -119,7 +119,7 @@ def test_imaging_list_rejects_incorrect_normalization(tmp_path: Path) -> None:
     [
         ("source_weight", "2", "unit-weight"),
         ("source_kind", "laser", "unit-weight"),
-        ("launch_area_m2", "1", "launch area"),
+        ("sampling_area_m2", "1", "sampling area"),
     ],
 )
 def test_imaging_list_rejects_incompatible_source(

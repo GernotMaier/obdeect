@@ -69,7 +69,7 @@ inline bool is_valid_wavelength(double wavelength_nm) {
   return std::isfinite(wavelength_nm) && wavelength_nm > 0.0;
 }
 
-inline std::vector<Vec3> fibonacci_pupil_points(std::size_t count, double radius_m, double z_m) {
+inline std::vector<Vec3> fibonacci_sampling_points(std::size_t count, double radius_m, double z_m) {
   std::vector<Vec3> points;
   if (count == 0 || !std::isfinite(radius_m) || radius_m <= kEpsilon || !std::isfinite(z_m))
     return points;
@@ -85,7 +85,7 @@ inline std::vector<Vec3> fibonacci_pupil_points(std::size_t count, double radius
   return points;
 }
 
-inline std::vector<OpticalPhoton> star_photons(std::size_t count, double pupil_radius_m,
+inline std::vector<OpticalPhoton> star_photons(std::size_t count, double sampling_radius_m,
                                                const StarSource &source) {
   std::vector<OpticalPhoton> photons;
   if (!is_valid_wavelength(source.wavelength_nm))
@@ -103,7 +103,7 @@ inline std::vector<OpticalPhoton> star_photons(std::size_t count, double pupil_r
   const Vec3 launch_centre{source.source_plane_z_m * direction->x / direction->z,
                            source.source_plane_z_m * direction->y / direction->z,
                            source.source_plane_z_m};
-  auto positions = fibonacci_pupil_points(count, pupil_radius_m, source.source_plane_z_m);
+  auto positions = fibonacci_sampling_points(count, sampling_radius_m, source.source_plane_z_m);
   for (auto &position : positions) {
     position.x += launch_centre.x;
     position.y += launch_centre.y;
@@ -123,15 +123,15 @@ inline std::vector<OpticalPhoton> star_photons(std::size_t count, double pupil_r
   return photons;
 }
 
-inline std::vector<OpticalPhoton> illuminator_photons(std::size_t count, double pupil_radius_m,
+inline std::vector<OpticalPhoton> illuminator_photons(std::size_t count, double sampling_radius_m,
                                                       const PointIlluminator &source) {
   std::vector<OpticalPhoton> photons;
   if (!is_valid_wavelength(source.wavelength_nm) || !std::isfinite(source.emitted_weight) ||
       source.emitted_weight < 0.0) {
     return photons;
   }
-  const auto targets = fibonacci_pupil_points(count, pupil_radius_m, 0.0);
-  const double sampled_area_m2 = std::numbers::pi * pupil_radius_m * pupil_radius_m;
+  const auto targets = fibonacci_sampling_points(count, sampling_radius_m, 0.0);
+  const double sampled_area_m2 = std::numbers::pi * sampling_radius_m * sampling_radius_m;
   photons.reserve(targets.size());
   for (std::size_t index = 0; index < targets.size(); ++index) {
     const Vec3 separation = targets[index] - source.position_m;
@@ -155,7 +155,7 @@ inline std::vector<OpticalPhoton> illuminator_photons(std::size_t count, double 
   return photons;
 }
 
-inline std::vector<OpticalPhoton> laser_photons(std::size_t count, double pupil_radius_m,
+inline std::vector<OpticalPhoton> laser_photons(std::size_t count, double sampling_radius_m,
                                                 const LaserSource &source) {
   std::vector<OpticalPhoton> photons;
   const auto central_direction = normalised_checked(source.direction);
@@ -164,7 +164,7 @@ inline std::vector<OpticalPhoton> laser_photons(std::size_t count, double pupil_
       source.divergence_half_angle_rad >= std::numbers::pi / 2.0) {
     return photons;
   }
-  if (!std::isfinite(pupil_radius_m) || pupil_radius_m <= kEpsilon ||
+  if (!std::isfinite(sampling_radius_m) || sampling_radius_m <= kEpsilon ||
       !std::isfinite(source.origin_m.x) || !std::isfinite(source.origin_m.y) ||
       !std::isfinite(source.origin_m.z)) {
     return photons;
@@ -187,7 +187,7 @@ inline std::vector<OpticalPhoton> laser_photons(std::size_t count, double pupil_
     // Position and direction use deliberately different low-discrepancy
     // dimensions, avoiding a radial/angle correlation in finite beams.
     const double position_u = (static_cast<double>(index) + 0.5) / static_cast<double>(count);
-    const double position_radius = pupil_radius_m * std::sqrt(position_u);
+    const double position_radius = sampling_radius_m * std::sqrt(position_u);
     const double position_phi =
         std::fmod(static_cast<double>(index) * golden_ratio_conjugate, 1.0) * 2.0 *
         std::numbers::pi;

@@ -7,6 +7,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from obdeect.model_import import resolve_model
+from obdeect.observing_geometry import resolve_observing_geometry
 from obdeect.optical_model_compiler import (
     OpticalModelCompileError,
     _dual_reflector_surfaces,
@@ -28,6 +29,64 @@ from obdeect.optical_model_compiler import (
 
 
 class TestOpticalModelCompiler(unittest.TestCase):
+    def test_observing_geometry_matches_fresh_compile_without_accumulating_errors(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.make_ir(root)
+            production = root / "productions/1.0.0/GENERIC.json"
+            manifest = json.loads(production.read_text())
+            additions = {
+                "focal_length": (1600, "cm", False),
+                "dish_shape_length": (1600, "cm", False),
+                "mirror_offset": (0, "cm", False),
+                "mirror_class": (0, None, False),
+                "parabolic_dish": (True, None, False),
+                "mirror_align_random_horizontal": ([0.01, 20, 0.02, 0.03], ["deg"] * 4, False),
+                "mirror_align_random_vertical": ([0.02, 20, 0.01, 0.04], ["deg"] * 4, False),
+                "focus_offset": ([1, 20, 2, 3], ["cm", "deg", "", "null"], False),
+                "camera_config_file": ("camera.dat", None, True),
+                "camera_pixels": (1, None, False),
+                "camera_degraded_map": ("camera-map.dat", None, True),
+            }
+            (root / "model_parameters/Files/camera.dat").write_text(
+                "PixType 1 0 0 1 0 1 0 0.9 0.7\nPixel 0 1 0 0\n"
+            )
+            (root / "model_parameters/Files/camera-map.dat").write_text(
+                "#@RPOL@ 3\n-1 -1 0.2\n-1 1 0.4\n1 -1 0.6\n1 1 0.8\n"
+            )
+            for name, (value, unit, is_file) in additions.items():
+                path = root / f"model_parameters/GENERIC/{name}/{name}-1.0.0.json"
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(
+                    json.dumps({
+                        "instrument": "GENERIC",
+                        "parameter": name,
+                        "parameter_version": "1.0.0",
+                        "type": "string" if is_file else "float64",
+                        "file": is_file,
+                        "value": value,
+                        "unit": unit,
+                    })
+                )
+                manifest["parameters"]["GENERIC"][name] = "1.0.0"
+            production.write_text(json.dumps(manifest))
+            ir = resolve_model(root, "GENERIC", "1.0.0")
+            base = compile_optical_model(ir, root, alignment_seed=19, alignment_zenith_deg=20)
+            self.assertTrue(base["trace_model"]["camera_degradation_in_detector_frame"])
+            self.assertEqual(base["trace_model"]["camera_degradation"]["x_basis"], [1, 0, 0])
+            self.assertEqual(base["trace_model"]["detector_surfaces"][0]["response_y_sign"], -1)
+            original = json.dumps(base, sort_keys=True)
+            for angle in (17, 23, 0, -3):
+                with self.subTest(angle=angle):
+                    resolved = resolve_observing_geometry(base, angle)
+                    fresh = compile_optical_model(
+                        ir, root, alignment_seed=19, alignment_zenith_deg=angle
+                    )
+                    self.assertEqual(resolved["trace_model"], fresh["trace_model"])
+                    self.assertEqual(json.dumps(base, sort_keys=True), original)
+                    round_trip = resolve_observing_geometry(resolved, 20)
+                    self.assertEqual(round_trip["trace_model"], base["trace_model"])
+
     def test_derived_reference_parameters_are_accounted_without_changing_transport(self):
         with TemporaryDirectory() as directory:
             root = Path(directory)
@@ -392,6 +451,13 @@ class TestOpticalModelCompiler(unittest.TestCase):
             self.assertAlmostEqual(scatter["sigma2_rad"], math.radians(0.05))
             self.assertEqual(scatter["fraction2"], 0.2)
             self.assertNotIn(name, compiled["report"]["deferred"])
+            parameter["unit"] = ["deg", "", "deg"]
+            record.write_text(json.dumps(parameter))
+            empty_unit = compile_optical_model(
+                resolve_model(root, "GENERIC", "1.0.0"), root, scatter_seed=21
+            )
+            self.assertEqual(empty_unit["primary"]["scatter"], compiled["primary"]["scatter"])
+            ir = resolve_model(root, "GENERIC", "1.0.0")
             for seed in (True, -1, 2**64):
                 with self.subTest(seed=seed), self.assertRaises(OpticalModelCompileError):
                     compile_optical_model(ir, root, scatter_seed=seed)
@@ -619,14 +685,14 @@ class TestOpticalModelCompiler(unittest.TestCase):
         trace_model = build_trace_model(optical_model)
         self.assertEqual(
             [
-                {k: v for k, v in row.items() if k != "interpolation"}
+                {k: v for k, v in row.items() if k not in ("interpolation", "wavelength_sampling")}
                 for row in trace_model["primary_reflectivity"]
             ],
             optical_model["primary"]["reflectivity"],
         )
         self.assertEqual(
             [
-                {k: v for k, v in row.items() if k != "interpolation"}
+                {k: v for k, v in row.items() if k not in ("interpolation", "wavelength_sampling")}
                 for row in trace_model["secondary_reflectivity"]
             ],
             optical_model["secondary"]["reflectivity"],
@@ -682,26 +748,36 @@ class TestOpticalModelCompiler(unittest.TestCase):
         trace = build_trace_model(model)
         self.assertEqual(
             [
-                {k: v for k, v in row.items() if k != "interpolation"}
+                {k: v for k, v in row.items() if k not in ("interpolation", "wavelength_sampling")}
                 for row in trace["primary_reflectivity"]
             ],
             response,
         )
         self.assertEqual(
             [
-                {k: v for k, v in row.items() if k != "interpolation"}
+                {k: v for k, v in row.items() if k not in ("interpolation", "wavelength_sampling")}
                 for row in trace["secondary_reflectivity"]
             ],
             response,
         )
         self.assertEqual(trace["secondary_reflectivity"][0]["interpolation"]["boundary"], "clamp")
+        self.assertEqual(
+            trace["primary_reflectivity"][0]["wavelength_sampling"],
+            {
+                "width_nm": 1.0,
+                "offset_nm": 0,
+                "first_bin": 200,
+                "last_bin": 999,
+                "projection_angle_deg": 0.0,
+            },
+        )
         measured = [{**row, "reflectivity_rms": 0.02} for row in response]
         model["primary"]["reflectivity"] = measured
         model["secondary"]["reflectivity"] = measured
         trace = build_trace_model(model)
         self.assertEqual(
             [
-                {k: v for k, v in row.items() if k != "interpolation"}
+                {k: v for k, v in row.items() if k not in ("interpolation", "wavelength_sampling")}
                 for row in trace["primary_reflectivity"]
             ],
             response,
@@ -709,7 +785,7 @@ class TestOpticalModelCompiler(unittest.TestCase):
         self.assertEqual(trace["primary_reflectivity"][0]["interpolation"]["boundary"], "clamp")
         self.assertEqual(
             [
-                {k: v for k, v in row.items() if k != "interpolation"}
+                {k: v for k, v in row.items() if k not in ("interpolation", "wavelength_sampling")}
                 for row in trace["secondary_reflectivity"]
             ],
             response,
@@ -719,8 +795,12 @@ class TestOpticalModelCompiler(unittest.TestCase):
         model["camera"] = {"filter_response": response}
         camera_response = build_trace_model(model)["camera_response"]
         self.assertEqual(
+            camera_response["camera_filter"][0]["wavelength_sampling"],
+            {"width_nm": 1.0, "offset_nm": 0.5, "first_bin": 0, "last_bin": 999},
+        )
+        self.assertEqual(
             [
-                {k: v for k, v in row.items() if k != "interpolation"}
+                {k: v for k, v in row.items() if k not in ("interpolation", "wavelength_sampling")}
                 for row in camera_response["camera_filter"]
             ],
             response,

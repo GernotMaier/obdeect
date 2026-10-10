@@ -4,6 +4,7 @@
 
 #include "obdeect/axisymmetric_optics.hpp"
 #include "obdeect/axisymmetric_segments.hpp"
+#include "obdeect/detector_assignment.hpp"
 #include "obdeect/detector_planes.hpp"
 #include "obdeect/json.hpp"
 #include "obdeect/optical_model.hpp"
@@ -40,7 +41,11 @@ struct AxisymmetricOpticalModel {
   std::uint32_t secondary_surface_id{PhotonResultBlock::kNoSurfaceId};
   std::uint32_t detector_surface_id{PhotonResultBlock::kNoSurfaceId};
   bool block_incoming_secondary{};
+  std::optional<TelescopeTransmission> telescope_transmission{};
+  double propagation_group_index{1.0};
   std::optional<CompiledDetectorPlanes> detector_planes{};
+  std::optional<CompiledDetectorAssignmentGrid> detector_assignment{};
+  bool camera_degradation_in_detector_frame{};
   std::optional<MirrorScatter> primary_scatter{}, secondary_scatter{};
   std::optional<CameraResponse> camera_response{};
   std::optional<CompiledDetectorPlanes> primary_to_secondary_planes{};
@@ -423,9 +428,28 @@ interpolation_field(const json::Value &value) {
       !response->array().empty() && response->array().front().find("incidence_angle_deg");
   std::map<double, std::map<double, double>> grid;
   for (const auto &entry : response->array()) {
-    if (!fields_supported(entry,
-                          {"wavelength_nm", "response", "incidence_angle_deg", "interpolation"}))
+    if (!fields_supported(entry, {"wavelength_nm", "response", "incidence_angle_deg",
+                                  "interpolation", "wavelength_sampling"}))
       return std::nullopt;
+    if (const auto *sampling = entry.find("wavelength_sampling")) {
+      if (&entry != &response->array().front() ||
+          !fields_supported(*sampling, {"width_nm", "offset_nm", "first_bin", "last_bin",
+                                        "projection_angle_deg"}))
+        return std::nullopt;
+      const auto width = number_field(*sampling, "width_nm"),
+                 offset = number_field(*sampling, "offset_nm");
+      const auto first = uint_field(*sampling, "first_bin"),
+                 last = uint_field(*sampling, "last_bin");
+      if (!width || !offset || !first || !last)
+        return std::nullopt;
+      result.wavelength_sampling = WavelengthSampling{*width, *offset, *first, *last};
+      if (sampling->find("projection_angle_deg")) {
+        const auto angle = number_field(*sampling, "projection_angle_deg");
+        if (!angle)
+          return std::nullopt;
+        result.wavelength_sampling->projection_angle_deg = *angle;
+      }
+    }
     if (const auto *options = entry.find("interpolation")) {
       if (&entry != &response->array().front())
         return std::nullopt;
@@ -461,7 +485,13 @@ interpolation_field(const json::Value &value) {
         return std::nullopt;
       result.response.push_back(value);
     }
+    result.spectral_envelope.push_back(
+        std::max_element(values.begin(), values.end(), [](const auto &a, const auto &b) {
+          return a.second < b.second;
+        })->second);
   }
+  result.envelope_interpolation = result.interpolation;
+  result.envelope_interpolation.y_log = false;
   return result.is_valid() ? std::optional{std::move(result)} : std::nullopt;
 }
 
@@ -586,6 +616,21 @@ opaque_fields(const json::Value &trace) {
   return result.is_valid() ? std::optional{result} : std::nullopt;
 }
 
+[[nodiscard]] inline std::optional<TelescopeTransmission>
+telescope_transmission_field(const json::Value &parent) {
+  const auto *value = parent.find("telescope_transmission");
+  if (!value || !fields_supported(
+                    *value, {"on_axis", "amplitude", "angular_scale_rad", "power", "outer_power"}))
+    return {};
+  const auto t0 = number_field(*value, "on_axis"), a = number_field(*value, "amplitude"),
+             scale = number_field(*value, "angular_scale_rad"), p = number_field(*value, "power"),
+             q = number_field(*value, "outer_power");
+  if (!t0 || !a || !scale || !p || !q)
+    return {};
+  TelescopeTransmission result{*t0, *a, *scale, *p, *q};
+  return result.is_valid() ? std::optional{result} : std::nullopt;
+}
+
 [[nodiscard]] inline std::optional<CameraResponse> camera_response_field(const json::Value &parent,
                                                                          std::string_view name) {
   const auto *value = parent.find(name);
@@ -639,7 +684,8 @@ detector_fields(const json::Value &trace, std::string_view name = "detector_surf
   std::vector<ImportedDetectorSurface> result;
   for (const auto &entry : entries->array()) {
     if (!fields_supported(entry, {"id", "centre_m", "normal", "tangent", "diameter_m", "shape",
-                                  "enabled", "source_pixel_id", "source_type_id"}))
+                                  "enabled", "source_pixel_id", "source_type_id",
+                                  "assignment_radius_m", "response_y_sign"}))
       return std::nullopt;
     for (const auto name : {"source_pixel_id", "source_type_id"})
       if (entry.find(name) && !uint_field(entry, name))
@@ -657,8 +703,62 @@ detector_fields(const json::Value &trace, std::string_view name = "detector_surf
         !diameter || !shape)
       return std::nullopt;
     result.push_back({*id, *centre, *normal, *diameter, *shape, *tangent});
+    if (entry.find("assignment_radius_m")) {
+      const auto radius = number_field(entry, "assignment_radius_m");
+      if (!radius || *radius <= 0)
+        return std::nullopt;
+      result.back().assignment_radius_m = *radius;
+    }
+    if (entry.find("response_y_sign")) {
+      const auto sign = number_field(entry, "response_y_sign");
+      if (!sign || (*sign != 1 && *sign != -1))
+        return std::nullopt;
+      result.back().response_y_sign = *sign;
+    }
   }
   return result;
+}
+
+[[nodiscard]] inline std::optional<bool>
+detector_map_frame_field(const json::Value &trace,
+                         std::span<const ImportedDetectorSurface> surfaces, bool has_map) {
+  const auto *flag = trace.find("camera_degradation_in_detector_frame");
+  if (!flag)
+    return false;
+  if (flag->kind() != json::Value::Kind::boolean)
+    return std::nullopt;
+  if (flag->boolean() && (!has_map || surfaces.empty()))
+    return std::nullopt;
+  if (flag->boolean())
+    for (const auto &surface : surfaces) {
+      const auto u = normalised_checked(surface.unit_tangent_u),
+                 n = normalised_checked(surface.unit_normal);
+      if (!u || !n || std::abs(dot(*u, *n)) > kEpsilon)
+        return std::nullopt;
+    }
+  return flag->boolean();
+}
+
+[[nodiscard]] inline std::optional<CompiledDetectorAssignmentGrid>
+detector_assignment_field(const json::Value &trace,
+                          std::span<const ImportedDetectorSurface> surfaces) {
+  const auto *value = trace.find("detector_assignment");
+  if (!value || !fields_supported(*value, {"nx", "ny", "x_low_m", "x_high_m", "y_low_m", "y_high_m",
+                                           "x_basis", "y_basis", "reference_plane_z_m"}))
+    return std::nullopt;
+  const auto nx = uint_field(*value, "nx"), ny = uint_field(*value, "ny");
+  const auto xl = number_field(*value, "x_low_m"), xh = number_field(*value, "x_high_m"),
+             yl = number_field(*value, "y_low_m"), yh = number_field(*value, "y_high_m");
+  const auto u = vec3_field(*value, "x_basis"), v = vec3_field(*value, "y_basis");
+  if (!nx || !ny || !xl || !xh || !yl || !yh || !u || !v)
+    return std::nullopt;
+  DetectorAssignmentGrid grid{*nx, *ny, *xl, *xh, *yl, *yh, *u, *v};
+  if (value->find("reference_plane_z_m")) {
+    grid.reference_plane_z_m = number_field(*value, "reference_plane_z_m");
+    if (!grid.reference_plane_z_m)
+      return std::nullopt;
+  }
+  return CompiledDetectorAssignmentGrid::compile(grid, surfaces);
 }
 
 [[nodiscard]] inline std::optional<AxisymmetricMirror>
@@ -896,7 +996,9 @@ segmented_optical_model_from_json(const json::Value &root) {
           *trace, {"kind", "primary_facets", "detector_surfaces", "cylinder_obscurers",
                    "primary_reflectivity", "primary_scatter", "camera_response",
                    "incoming_obscurer_planes", "opaque_obscurers", "primary_degradation",
-                   "camera_degradation", "primary_degradation_in_facet_frame", "pixel_responses"}))
+                   "camera_degradation", "primary_degradation_in_facet_frame", "pixel_responses",
+                   "telescope_transmission", "propagation_group_index", "detector_assignment",
+                   "camera_degradation_in_detector_frame"}))
     return std::nullopt;
   const auto *facet_values = detail::field(*trace, "primary_facets");
   const auto *detector_values = detail::field(*trace, "detector_surfaces");
@@ -1029,6 +1131,27 @@ segmented_optical_model_from_json(const json::Value &root) {
   }
   compiled->primary_scatter = detail::scatter_field(*trace, "primary_scatter");
   compiled->camera_response = detail::camera_response_field(*trace, "camera_response");
+  const auto camera_frame = detail::detector_map_frame_field(
+      *trace, *detectors, compiled->camera_degradation.has_value());
+  if (!camera_frame)
+    return std::nullopt;
+  compiled->camera_degradation_in_detector_frame = *camera_frame;
+  if (trace->find("detector_assignment")) {
+    auto grid = detail::detector_assignment_field(*trace, *detectors);
+    if (!grid || !grid->description().reference_plane_z_m)
+      return std::nullopt;
+    compiled->detector_assignment =
+        std::make_shared<const CompiledDetectorAssignmentGrid>(std::move(*grid));
+  }
+  compiled->telescope_transmission = detail::telescope_transmission_field(*trace);
+  if (trace->find("propagation_group_index")) {
+    const auto index = detail::number_field(*trace, "propagation_group_index");
+    if (!index || *index < 1)
+      return std::nullopt;
+    compiled->propagation_group_index = *index;
+  }
+  if (trace->find("telescope_transmission") && !compiled->telescope_transmission)
+    return std::nullopt;
   if ((trace->find("primary_scatter") && !compiled->primary_scatter) ||
       (compiled->primary_scatter &&
        compiled->primary_scatter->method != MirrorScatterMethod::outgoing_angles) ||
@@ -1067,7 +1190,11 @@ axisymmetric_optical_model_from_json(const json::Value &root) {
                                          "primary_degradation",
                                          "secondary_degradation",
                                          "camera_degradation",
-                                         "pixel_responses"}))
+                                         "pixel_responses",
+                                         "telescope_transmission",
+                                         "propagation_group_index",
+                                         "detector_assignment",
+                                         "camera_degradation_in_detector_frame"}))
     return std::nullopt;
   const auto *primary = detail::field(*trace, "primary");
   const auto *secondary = detail::field(*trace, "secondary");
@@ -1134,6 +1261,11 @@ axisymmetric_optical_model_from_json(const json::Value &root) {
         return std::nullopt;
     model.detector_planes = compile_detector_planes(*detectors);
     if (!model.detector_planes)
+      return std::nullopt;
+  }
+  if (trace->find("detector_assignment")) {
+    model.detector_assignment = detail::detector_assignment_field(*trace, *detectors);
+    if (!model.detector_assignment || model.detector_assignment->description().reference_plane_z_m)
       return std::nullopt;
   }
   model.primary_scatter = detail::scatter_field(*trace, "primary_scatter");
@@ -1208,6 +1340,20 @@ axisymmetric_optical_model_from_json(const json::Value &root) {
   }
   model.secondary_scatter = detail::scatter_field(*trace, "secondary_scatter");
   model.camera_response = detail::camera_response_field(*trace, "camera_response");
+  const auto camera_frame =
+      detail::detector_map_frame_field(*trace, *detectors, model.camera_degradation.has_value());
+  if (!camera_frame)
+    return std::nullopt;
+  model.camera_degradation_in_detector_frame = *camera_frame;
+  model.telescope_transmission = detail::telescope_transmission_field(*trace);
+  if (trace->find("propagation_group_index")) {
+    const auto index = detail::number_field(*trace, "propagation_group_index");
+    if (!index || *index < 1)
+      return std::nullopt;
+    model.propagation_group_index = *index;
+  }
+  if (trace->find("telescope_transmission") && !model.telescope_transmission)
+    return std::nullopt;
   if ((trace->find("primary_scatter") && !model.primary_scatter) ||
       (trace->find("secondary_scatter") && !model.secondary_scatter) ||
       (trace->find("camera_response") && !model.camera_response))
@@ -1421,6 +1567,8 @@ trace_axisymmetric_optical_model(const Ray &input, std::uint64_t photon_id,
     record.status = PhotonStatus::invalid_input;
     return record;
   }
+  if (optical_model.telescope_transmission)
+    record.surviving_throughput = *optical_model.telescope_transmission->at_unchecked(*direction);
   Ray ray{input.position_m, *direction};
   bool primary_failure = false;
   const auto primary =
@@ -1520,7 +1668,7 @@ trace_axisymmetric_optical_model(const Ray &input, std::uint64_t photon_id,
     record.status = PhotonStatus::invalid_input;
     return record;
   }
-  record.surviving_throughput = *primary_response;
+  record.surviving_throughput *= *primary_response;
   if (optical_model.primary_degradation) {
     const auto response = optical_model.primary_degradation->at_point_unchecked(primary->point_m);
     if (!response) {
@@ -1638,10 +1786,19 @@ trace_axisymmetric_optical_model(const Ray &input, std::uint64_t photon_id,
   record.interaction_throughput[1] = record.surviving_throughput;
   bool detector_failure = false;
   std::optional<AxisymmetricHit> detector;
+  std::optional<Vec3> detector_local_position;
   std::uint32_t detector_surface_id = optical_model.detector_surface_id;
   if (optical_model.detector_planes) {
-    const auto hit = optical_model.detector_planes->intersect(ray);
+    std::optional<DetectorSurfaceHit> hit;
+    if (optical_model.detector_assignment) {
+      const auto focal = intersect_segmented_asphere(
+          ray, optical_model.detector, {}, optical_model.detector_surface_id, &detector_failure);
+      hit =
+          focal ? optical_model.detector_assignment->intersect(ray, focal->point_m) : std::nullopt;
+    } else
+      hit = optical_model.detector_planes->intersect(ray);
     if (hit) {
+      detector_local_position = hit->local_position_m;
       detector = AxisymmetricHit{hit->distance_m, hit->point_m, hit->unit_normal};
       detector_surface_id = hit->surface_id;
     }
@@ -1689,7 +1846,11 @@ trace_axisymmetric_optical_model(const Ray &input, std::uint64_t photon_id,
       std::numbers::pi;
   record.final_direction = ray.direction;
   if (optical_model.camera_degradation) {
-    const auto response = optical_model.camera_degradation->at_point_unchecked(detector->point_m);
+    const auto point = optical_model.camera_degradation_in_detector_frame
+                           ? detector_local_position
+                           : std::optional{detector->point_m};
+    const auto response =
+        !point ? std::nullopt : optical_model.camera_degradation->at_point_unchecked(*point);
     if (!response) {
       record.status = PhotonStatus::invalid_input;
       return record;

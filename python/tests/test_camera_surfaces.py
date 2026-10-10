@@ -9,8 +9,24 @@ from obdeect.optical_model_compiler import build_trace_model
 
 
 class TestCameraSurfaces(unittest.TestCase):
+    def test_projected_assignment_grid_uses_source_bounds_and_focal_plane(self):
+        camera = self.camera([1])
+        camera["rotation_deg"] = 90
+        camera["pixels"][0]["z_offset_m"] = 0.2
+        planes = compile_camera_surfaces(
+            camera, dict(coefficient_m=[10], radial_scale_m=1), 1, reflected=True
+        )
+        grid = planes["assignment_grid"]
+        self.assertEqual((grid["nx"], grid["ny"]), (4, 4))
+        self.assertEqual((grid["x_low_m"], grid["x_high_m"]), (0, 1.02))
+        self.assertEqual((grid["y_low_m"], grid["y_high_m"]), (-0.02, 0.02))
+        self.assertEqual(grid["reference_plane_z_m"], 10)
+        self.assertAlmostEqual(grid["x_basis"][1], 1)
+        self.assertAlmostEqual(grid["y_basis"][0], -1)
+        self.assertEqual(planes["entrance_surfaces"][0]["assignment_radius_m"], 0.02)
+
     def test_global_camera_rotation_follows_inverse_reference_frame(self):
-        for reflected, expected_y in ((False, -1), (True, 1)):
+        for reflected, expected_y in ((False, 1), (True, 1)):
             camera = self.camera([1])
             camera["rotation_deg"] = 90
             plane = compile_camera_surfaces(
@@ -50,15 +66,16 @@ class TestCameraSurfaces(unittest.TestCase):
         ]
         return dict(pixel_types=types, pixels=pixels)
 
-    def test_prime_focus_pi_rotation_preserves_physical_depth(self):
+    def test_prime_focus_frame_preserves_transverse_position_and_physical_depth(self):
         camera = self.camera([1])
         camera["pixels"][0]["z_offset_m"] = 0.2
         planes = compile_camera_surfaces(
             camera, dict(coefficient_m=[10], radial_scale_m=1), 1, reflected=True
         )
         entrance, cathode = planes["entrance_surfaces"][0], planes["cathode_surfaces"][0]
-        self.assertEqual(entrance["centre_m"], [-1, 0, 9.8])
+        self.assertEqual(entrance["centre_m"], [1, 0, 9.8])
         self.assertEqual(entrance["normal"], [0, 0, -1])
+        self.assertEqual(entrance["response_y_sign"], -1)
         self.assertAlmostEqual(cathode["centre_m"][2], 9.9)
         self.assertEqual(entrance["shape"], "square")
         self.assertEqual(cathode["shape"], "circle")

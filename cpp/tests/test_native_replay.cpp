@@ -123,7 +123,7 @@ int main(int argc, char **argv) {
                 get("telescope_id") == "14",
             "replay identity preserved");
     require(get("photon_id") == std::to_string(41 + row_index), "photon ID survives replay");
-    require(get("launch_area_m2").empty(), "replay cannot invent a launch-area normalization");
+    require(get("sampling_area_m2").empty(), "replay cannot invent a sampling-area normalization");
     require(get("source_weight") == std::to_string(2 + row_index), "source weight survives replay");
     if (row_index == 0) {
       require(get("status") == "detected" &&
@@ -174,17 +174,17 @@ int main(int argc, char **argv) {
   require(segmented_image_row[column.at("status")] == "detected" &&
               segmented_image_row[column.at("z2_m")] == "3" &&
               segmented_image_row[column.at("detector_boundary")] == "continuous_focal_surface" &&
-              std::abs(std::stod(segmented_image_row[column.at("throughput")]) - 0.8) < 1.e-12,
+              std::abs(std::stod(segmented_image_row[column.at("throughput")]) - 1.0) < 1.e-12,
           "segmented imaging preserves mirror weights and the declared focal-plane position");
   const auto star_area_csv = directory / "star-area.csv";
   const std::string star_area_command =
       quoted(argv[1]) + " --optical-model " + quoted(model.string()) +
-      " --source star --photons 1 --launch-radius-m 2 --output " + quoted(star_area_csv.string());
-  require(std::system(star_area_command.c_str()) == 0, "star launch-area fixture runs");
+      " --source star --photons 1 --sampling-radius-m 2 --output " + quoted(star_area_csv.string());
+  require(std::system(star_area_command.c_str()) == 0, "star sampling-area fixture runs");
   std::ifstream star_area_input(star_area_csv);
   std::getline(star_area_input, line);
   std::getline(star_area_input, line);
-  require(std::abs(std::stod(fields(line)[column.at("launch_area_m2")]) - 4 * std::acos(-1.0)) <
+  require(std::abs(std::stod(fields(line)[column.at("sampling_area_m2")]) - 4 * std::acos(-1.0)) <
               1.e-12,
           "native star output records the exact sampled pupil area");
   const auto interactions = directory / "interactions.csv";
@@ -382,7 +382,7 @@ int main(int argc, char **argv) {
   };
   require(image_value("status") == "detected" &&
               image_value("detector_boundary") == "continuous_focal_surface" &&
-              std::abs(std::stod(image_value("throughput")) - 0.72) < 1.e-12,
+              std::abs(std::stod(image_value("throughput")) - 1.0) < 1.e-12,
           "imaging diagnostic ignores finite pixel acceptance and preserves mirror response");
   require(run(1, directory / "gated-image.csv", true, " --focal-surface-image") != 0,
           "production gate rejects an overridden imaging boundary");

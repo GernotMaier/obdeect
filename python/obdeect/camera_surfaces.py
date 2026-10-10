@@ -14,7 +14,7 @@ def compile_camera_surfaces(
 
     Modes 0/1 place pixels individually; modes 2/3 place their module fronts in
     one plane. Modes 1/3 keep all normals parallel to the optical axis. A prime
-    focus camera's pi rotation about y reflects x and the normal's z component.
+    focus camera reverses z and preserves both transverse coordinates.
     The focal polynomial already includes its telescope-frame vertex placement.
     """
     if isinstance(orientation_mode, bool) or orientation_mode not in (0, 1, 2, 3):
@@ -88,10 +88,11 @@ def compile_camera_surfaces(
             math.cos(rotation) * a + math.sin(rotation) * b for a, b in zip(u, v, strict=True)
         ]
         if reflected:
-            x = -x
-            normal = [-normal[0], normal[1], -normal[2]]
-            tangent = [-tangent[0], tangent[1], -tangent[2]]
-        camera_angle = -math.radians(camera.get("rotation_deg", 0.0))
+            # The prime-focus tracer reverses camera z and explicitly restores
+            # camera x before pixel assignment. Preserve both transverse axes.
+            normal = [normal[0], normal[1], -normal[2]]
+            tangent = [tangent[0], tangent[1], -tangent[2]]
+        camera_angle = math.radians(camera.get("rotation_deg", 0.0))
         cosine, sine = math.cos(camera_angle), math.sin(camera_angle)
         x, y = cosine * x - sine * y, sine * x + cosine * y
         normal = [
@@ -110,6 +111,10 @@ def compile_camera_surfaces(
             "source_pixel_id": pixel["id"],
             "source_type_id": pixel["type_id"],
             "enabled": pixel["enabled"],
+            "response_y_sign": -1 if reflected else 1,
+            "assignment_radius_m": pixel_type["funnel_diameter_m"]
+            * 0.5
+            * (2 / math.sqrt(3) if pixel_type["funnel_shape_code"] in (1, 3) else 1),
             "normal": normal,
             "tangent": tangent,
         }
@@ -130,4 +135,39 @@ def compile_camera_surfaces(
         })
     if not entrances:
         raise CameraConfigError("physical camera has no enabled pixel entrances")
-    return {"entrance_surfaces": entrances, "cathode_surfaces": cathodes}
+    radius_by_type = {
+        identifier: entry["funnel_diameter_m"]
+        * 0.5
+        * (2 / math.sqrt(3) if entry["funnel_shape_code"] in (1, 3) else 1)
+        for identifier, entry in types.items()
+    }
+    x_low = min(
+        0, *(pixel["centre_xy_m"][0] - radius_by_type[pixel["type_id"]] for pixel in pixels)
+    )
+    x_high = max(
+        0, *(pixel["centre_xy_m"][0] + radius_by_type[pixel["type_id"]] for pixel in pixels)
+    )
+    y_low = min(
+        0, *(pixel["centre_xy_m"][1] - radius_by_type[pixel["type_id"]] for pixel in pixels)
+    )
+    y_high = max(
+        0, *(pixel["centre_xy_m"][1] + radius_by_type[pixel["type_id"]] for pixel in pixels)
+    )
+    angle = math.radians(camera.get("rotation_deg", 0))
+    assignment = dict(
+        nx=int(math.sqrt(4 * len(pixels)) + 2),
+        ny=int(math.sqrt(4 * len(pixels)) + 2),
+        x_low_m=x_low,
+        x_high_m=x_high,
+        y_low_m=y_low,
+        y_high_m=y_high,
+        x_basis=[math.cos(angle), math.sin(angle), 0.0],
+        y_basis=[-math.sin(angle), math.cos(angle), 0.0],
+    )
+    if reflected:
+        assignment["reference_plane_z_m"] = coefficients[0]
+    return {
+        "entrance_surfaces": entrances,
+        "cathode_surfaces": cathodes,
+        "assignment_grid": assignment,
+    }

@@ -14,6 +14,10 @@ struct ReferenceMeasurement {
   int status, mirror, loss_line;
   double position[3], direction[3], time_ns, relative_efficiency;
   double primary[3], secondary[3], primary_cosine, secondary_cosine;
+  double propagation_group_index, primary_envelope, secondary_envelope;
+  double upstream_optical_efficiency;
+  int pixel_status, pixel_id;
+  double pixel_time_ns, camera_absolute_efficiency, pixel_x_cm, pixel_y_cm;
 };
 void obdeect_reference_measure(void *, unsigned, const double *, const double *, double, double,
                                double, ReferenceMeasurement *);
@@ -44,7 +48,10 @@ int obdeect_reference_replay(void *optics, unsigned count) {
             "camera_x_m,camera_y_m,camera_z_m,camera_dx,camera_dy,camera_dz,"
             "travel_time_ns,arrival_time_ns,relative_efficiency,wavelength_nm,source_weight,"
             "mirror_index,loss_source_line,primary_x_m,primary_y_m,primary_z_m,"
-            "secondary_x_m,secondary_y_m,secondary_z_m,primary_cosine,secondary_cosine\n";
+            "secondary_x_m,secondary_y_m,secondary_z_m,primary_cosine,secondary_cosine,"
+            "propagation_group_index,primary_envelope,secondary_envelope,"
+            "upstream_optical_efficiency,pixel_status,pixel_id,pixel_time_ns,"
+            "camera_absolute_efficiency,pixel_x_cm,pixel_y_cm\n";
     rows << std::setprecision(17);
     std::array<obdeect::OpticalPhoton, 1024> photons;
     using Identity = std::tuple<std::uint64_t, std::uint64_t, std::uint64_t, std::uint64_t,
@@ -111,7 +118,11 @@ int obdeect_reference_replay(void *optics, unsigned count) {
         rows << ',';
         if (std::isfinite(result.secondary[0]))
           rows << result.secondary_cosine;
-        rows << '\n';
+        rows << ',' << result.propagation_group_index << ',' << result.primary_envelope << ','
+             << result.secondary_envelope << ',' << result.upstream_optical_efficiency << ','
+             << result.pixel_status << ',' << result.pixel_id << ',' << result.pixel_time_ns << ','
+             << result.camera_absolute_efficiency << ',' << result.pixel_x_cm << ','
+             << result.pixel_y_cm << '\n';
       }
       if (batch.eof)
         break;

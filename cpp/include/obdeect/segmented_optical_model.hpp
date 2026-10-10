@@ -2,6 +2,7 @@
 
 #include "obdeect/obscurers.hpp"
 #include "obdeect/spatial_response.hpp"
+#include "obdeect/telescope_transmission.hpp"
 
 #include "obdeect/intersections.hpp"
 #include "obdeect/math.hpp"
@@ -52,6 +53,8 @@ struct ImportedDetectorSurface {
   double diameter_m{};
   FacetShape shape{FacetShape::circle};
   Vec3 unit_tangent_u{};
+  double assignment_radius_m{};
+  double response_y_sign{1};
 };
 
 // An opaque finite cylinder supplied by a model adapter.  It is deliberately
@@ -85,6 +88,7 @@ struct ImportedSegmentedOpticalModel {
 };
 
 class CompiledDetectorPlanes;
+class CompiledDetectorAssignmentGrid;
 struct PixelResponses;
 
 struct CompiledSegmentedOpticalModel {
@@ -97,11 +101,15 @@ struct CompiledSegmentedOpticalModel {
   std::optional<CameraResponse> camera_response{};
 
   std::shared_ptr<const CompiledDetectorPlanes> detector_planes{};
+  std::shared_ptr<const CompiledDetectorAssignmentGrid> detector_assignment{};
   std::shared_ptr<const CompiledDetectorPlanes> incoming_obscurer_planes{};
   std::optional<double> imaging_plane_z_m{};
   std::vector<OpaqueSurface> opaque_obscurers{};
   std::optional<SpatialResponse> primary_degradation{}, camera_degradation{};
   bool primary_degradation_in_facet_frame{};
+  bool camera_degradation_in_detector_frame{};
+  std::optional<TelescopeTransmission> telescope_transmission{};
+  double propagation_group_index{1.0};
   std::shared_ptr<const PixelResponses> pixel_responses{};
 
   CompiledSegmentedOpticalModel(
@@ -148,7 +156,9 @@ struct CompiledSegmentedOpticalModel {
       (normal.has_value() && tangent.has_value() && std::abs(dot(*normal, *tangent)) <= kEpsilon);
   return normal.has_value() && orientation_is_valid && std::isfinite(surface.centre_m.x) &&
          std::isfinite(surface.centre_m.y) && std::isfinite(surface.centre_m.z) &&
-         std::isfinite(surface.diameter_m) && surface.diameter_m > kEpsilon;
+         std::isfinite(surface.diameter_m) && surface.diameter_m > kEpsilon &&
+         std::isfinite(surface.assignment_radius_m) && surface.assignment_radius_m >= 0 &&
+         (surface.response_y_sign == 1 || surface.response_y_sign == -1);
 }
 
 [[nodiscard]] inline bool is_valid(const ImportedCylinderObscurer &obscurer) {
@@ -162,6 +172,19 @@ struct CompiledSegmentedOpticalModel {
 }
 
 [[nodiscard]] inline bool is_valid(const CompiledSegmentedOpticalModel &optical_model) {
+  if (optical_model.camera_degradation_in_detector_frame) {
+    if (!optical_model.camera_degradation || optical_model.detector_surfaces.empty())
+      return false;
+    for (const auto &surface : optical_model.detector_surfaces) {
+      const auto u = normalised_checked(surface.unit_tangent_u),
+                 n = normalised_checked(surface.unit_normal);
+      if (!u || !n || std::abs(dot(*u, *n)) > kEpsilon)
+        return false;
+    }
+  }
+  if (!std::isfinite(optical_model.propagation_group_index) ||
+      optical_model.propagation_group_index < 1)
+    return false;
   if (!has_valid_provenance(optical_model.provenance) || optical_model.primary_facets.empty()) {
     return false;
   }
@@ -194,6 +217,8 @@ struct CompiledSegmentedOpticalModel {
           std::abs(dot(v, facet.unit_normal)) > kEpsilon)
         return false;
     }
+  if (optical_model.telescope_transmission && !optical_model.telescope_transmission->is_valid())
+    return false;
   if ((optical_model.primary_reflectivity && !optical_model.primary_reflectivity->is_valid()) ||
       (optical_model.primary_scatter && !optical_model.primary_scatter->is_valid()) ||
       (optical_model.camera_response && !optical_model.camera_response->is_valid()) ||
@@ -387,6 +412,7 @@ struct DetectorSurfaceHit {
   double distance_m{};
   Vec3 point_m{};
   Vec3 unit_normal{};
+  std::optional<Vec3> local_position_m{};
 };
 
 struct CylinderObscurerHit {
@@ -426,7 +452,14 @@ intersect_detector_surface_unchecked(const Ray &ray, const ImportedDetectorSurfa
   const Vec3 point_m = ray.position_m + *direction * distance_m;
   if (!contains_detector_point(surface, point_m))
     return std::nullopt;
-  return DetectorSurfaceHit{surface.id, distance_m, point_m, *normal};
+  DetectorSurfaceHit hit{surface.id, distance_m, point_m, *normal};
+  const auto tangent = normalised_checked(surface.unit_tangent_u);
+  if (tangent && std::abs(dot(*tangent, *normal)) <= kEpsilon) {
+    const auto offset = point_m - surface.centre_m;
+    hit.local_position_m = Vec3{dot(offset, *tangent),
+                                surface.response_y_sign * dot(offset, cross(*normal, *tangent)), 0};
+  }
+  return hit;
 }
 
 [[nodiscard]] inline std::optional<DetectorSurfaceHit>

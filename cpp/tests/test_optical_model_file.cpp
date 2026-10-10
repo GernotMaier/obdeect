@@ -50,6 +50,30 @@ void assert_unknown_fields_rejected(const char *path, Reader read,
 }
 
 int main() {
+  {
+    const auto root =
+        obdeect::json::Parser{
+            R"({"camera_degradation_in_detector_frame":true,"detector_surfaces":[{"id":1,"shape":"circle","centre_m":[0,0,10],"normal":[0,0,-1],"tangent":[1,0,0],"diameter_m":1,"response_y_sign":-1}]})"}
+            .parse();
+    assert(root);
+    const auto surfaces = obdeect::detail::detector_fields(*root);
+    assert(surfaces && surfaces->front().response_y_sign == -1);
+    assert(obdeect::detail::detector_map_frame_field(*root, *surfaces, true) == true);
+    assert(!obdeect::detail::detector_map_frame_field(*root, *surfaces, false));
+    assert(!obdeect::detail::detector_map_frame_field(*root, {}, true));
+    auto invalid_surfaces = *surfaces;
+    invalid_surfaces.front().unit_tangent_u = {0, 0, 1};
+    assert(!obdeect::detail::detector_map_frame_field(*root, invalid_surfaces, true));
+    auto invalid_sign = *root;
+    auto &surface =
+        const_cast<obdeect::json::Value *>(invalid_sign.find("detector_surfaces"))->array().front();
+    *const_cast<obdeect::json::Value *>(surface.find("response_y_sign")) = obdeect::json::Value{};
+    assert(!obdeect::detail::detector_fields(invalid_sign));
+    const auto invalid_flag =
+        obdeect::json::Parser{R"({"camera_degradation_in_detector_frame":1})"}.parse();
+    assert(invalid_flag &&
+           !obdeect::detail::detector_map_frame_field(*invalid_flag, *surfaces, true));
+  }
   assert(obdeect::detail::sha256("") ==
          "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
   std::size_t response_case = 0;

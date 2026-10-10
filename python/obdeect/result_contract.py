@@ -49,7 +49,7 @@ class OpticalArrival:
     response_loss_fraction: float | None = None
     terminal_loss_fraction: float | None = None
     optical_path_m: float | None = None
-    launch_area_m2: float | None = None
+    sampling_area_m2: float | None = None
 
     @property
     def detected(self) -> bool:
@@ -208,11 +208,13 @@ def iter_arrivals(path: Path) -> Iterator[OpticalArrival]:
             )
             if optical_path is not None and optical_path < 0:
                 raise ArrivalContractError(f"{path}:{line}: negative optical_path_m")
-            launch_area = (
-                _number(row, "launch_area_m2", path, line) if row.get("launch_area_m2") else None
+            sampling_area = (
+                _number(row, "sampling_area_m2", path, line)
+                if row.get("sampling_area_m2")
+                else None
             )
-            if launch_area is not None and launch_area <= 0:
-                raise ArrivalContractError(f"{path}:{line}: launch_area_m2 must be positive")
+            if sampling_area is not None and sampling_area <= 0:
+                raise ArrivalContractError(f"{path}:{line}: sampling_area_m2 must be positive")
             terminal_surface = None
             if "terminal_surface_id" in fields:
                 try:
@@ -267,7 +269,7 @@ def iter_arrivals(path: Path) -> Iterator[OpticalArrival]:
                 surface_ids,
                 *losses,
                 optical_path,
-                launch_area,
+                sampling_area,
             )
 
 
