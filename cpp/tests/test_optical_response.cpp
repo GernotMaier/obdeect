@@ -19,6 +19,9 @@ int main() {
     assert(trace_segmented_path(ray, 1, 400, *model).surviving_throughput == 0);
     model->camera_degradation_in_detector_frame = true;
     assert(is_valid(*model));
+    model->pixel_responses = std::make_shared<const PixelResponses>();
+    assert(!is_valid(*model));
+    model->pixel_responses.reset();
     assert(std::abs(trace_segmented_path(ray, 1, 400, *model).surviving_throughput - 0.3) < 1e-15);
     model->detector_surfaces[0].response_y_sign = 1;
     assert(std::abs(trace_segmented_path(ray, 1, 400, *model).surviving_throughput - 0.5) < 1e-15);

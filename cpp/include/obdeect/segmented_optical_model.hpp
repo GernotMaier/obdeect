@@ -57,6 +57,30 @@ struct ImportedDetectorSurface {
   double response_y_sign{1};
 };
 
+struct PixelResponseTable {
+  enum class Method { measured, single_reflection };
+  std::uint32_t id{};
+  Method method{Method::measured};
+  double tangent_bin_width{}, wavelength_bin_width_nm{}, wavelength_bin_origin_nm{};
+  std::vector<double> angular_efficiency{}, spectral_correction{};
+  double transparency{1}, wall_reflectivity{1};
+};
+
+struct PixelResponseBinding {
+  std::uint32_t detector_id{}, table_id{};
+  std::optional<ImportedDetectorSurface> cathode{};
+};
+
+struct PixelResponses {
+  std::vector<PixelResponseTable> tables;
+  std::vector<PixelResponseBinding> bindings;
+
+  [[nodiscard]] bool is_valid() const;
+  [[nodiscard]] std::optional<double> at_unchecked(std::uint32_t detector_id, double wavelength_nm,
+                                                   double incidence_deg,
+                                                   const Ray &at_entrance) const;
+};
+
 // An opaque finite cylinder supplied by a model adapter.  It is deliberately
 // separate from optical surfaces because it has no reflective or transmissive
 // branch: the first intersection terminates the photon as a component loss.
@@ -89,7 +113,6 @@ struct ImportedSegmentedOpticalModel {
 
 class CompiledDetectorPlanes;
 class CompiledDetectorAssignmentGrid;
-struct PixelResponses;
 
 struct CompiledSegmentedOpticalModel {
   ModelProvenance provenance;
@@ -161,6 +184,47 @@ struct CompiledSegmentedOpticalModel {
          (surface.response_y_sign == 1 || surface.response_y_sign == -1);
 }
 
+[[nodiscard]] inline bool PixelResponses::is_valid() const {
+  for (std::size_t i = 0; i < tables.size(); ++i) {
+    const auto &table = tables[i];
+    if (table.method != PixelResponseTable::Method::measured &&
+        table.method != PixelResponseTable::Method::single_reflection)
+      return false;
+    if (i && table.id <= tables[i - 1].id)
+      return false;
+    const auto fractional = [](double v) { return std::isfinite(v) && v >= 0 && v <= 1; };
+    if (!fractional(table.transparency) || !fractional(table.wall_reflectivity))
+      return false;
+    if (table.method == PixelResponseTable::Method::measured) {
+      if (table.angular_efficiency.empty() || !std::isfinite(table.tangent_bin_width) ||
+          table.tangent_bin_width <= 0 ||
+          !std::all_of(table.angular_efficiency.begin(), table.angular_efficiency.end(),
+                       fractional))
+        return false;
+      if (!table.spectral_correction.empty() &&
+          (!std::isfinite(table.wavelength_bin_width_nm) || table.wavelength_bin_width_nm <= 0 ||
+           !std::isfinite(table.wavelength_bin_origin_nm) ||
+           !std::all_of(table.spectral_correction.begin(), table.spectral_correction.end(),
+                        [](double v) { return std::isfinite(v) && v >= 0; })))
+        return false;
+    } else if (!table.angular_efficiency.empty() || !table.spectral_correction.empty()) {
+      return false;
+    }
+  }
+  for (std::size_t i = 0; i < bindings.size(); ++i) {
+    const auto &binding = bindings[i];
+    if (i && binding.detector_id <= bindings[i - 1].detector_id)
+      return false;
+    const auto table = std::lower_bound(tables.begin(), tables.end(), binding.table_id,
+                                        [](const auto &t, auto id) { return t.id < id; });
+    if (table == tables.end() || table->id != binding.table_id ||
+        (table->method == PixelResponseTable::Method::single_reflection && !binding.cathode) ||
+        (binding.cathode && !obdeect::is_valid(*binding.cathode)))
+      return false;
+  }
+  return !tables.empty() && !bindings.empty();
+}
+
 [[nodiscard]] inline bool is_valid(const ImportedCylinderObscurer &obscurer) {
   return std::isfinite(obscurer.first_endpoint_m.x) && std::isfinite(obscurer.first_endpoint_m.y) &&
          std::isfinite(obscurer.first_endpoint_m.z) &&
@@ -222,6 +286,7 @@ struct CompiledSegmentedOpticalModel {
   if ((optical_model.primary_reflectivity && !optical_model.primary_reflectivity->is_valid()) ||
       (optical_model.primary_scatter && !optical_model.primary_scatter->is_valid()) ||
       (optical_model.camera_response && !optical_model.camera_response->is_valid()) ||
+      (optical_model.pixel_responses && !optical_model.pixel_responses->is_valid()) ||
       (optical_model.imaging_plane_z_m && !std::isfinite(*optical_model.imaging_plane_z_m)))
     return false;
   return true;

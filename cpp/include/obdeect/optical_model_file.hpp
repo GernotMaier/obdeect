@@ -1127,6 +1127,8 @@ segmented_optical_model_from_json(const json::Value &root) {
       if (std::none_of(detectors->begin(), detectors->end(),
                        [&](const auto &d) { return d.id == binding.detector_id; }))
         return std::nullopt;
+    if (!responses->is_valid())
+      return std::nullopt;
     compiled->pixel_responses = std::make_shared<const PixelResponses>(std::move(*responses));
   }
   compiled->primary_scatter = detail::scatter_field(*trace, "primary_scatter");
@@ -1156,6 +1158,8 @@ segmented_optical_model_from_json(const json::Value &root) {
       (compiled->primary_scatter &&
        compiled->primary_scatter->method != MirrorScatterMethod::outgoing_angles) ||
       (trace->find("camera_response") && !compiled->camera_response))
+    return std::nullopt;
+  if (!is_valid(*compiled))
     return std::nullopt;
   return compiled;
 }
@@ -1318,6 +1322,8 @@ axisymmetric_optical_model_from_json(const json::Value &root) {
       if (std::none_of(detectors->begin(), detectors->end(),
                        [&](const auto &d) { return d.id == binding.detector_id; }))
         return std::nullopt;
+    if (!responses->is_valid())
+      return std::nullopt;
     model.pixel_responses = std::make_shared<const PixelResponses>(std::move(*responses));
   }
   auto opaque = detail::opaque_fields(*trace);

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import math
+import os
 import random
 from dataclasses import dataclass
 from pathlib import Path
@@ -97,6 +98,12 @@ def prepare_ground_photons(
     source: Path, output: Path, context, azimuth_deg, zenith_deg, *, seed=0, pointing_errors=True
 ):
     """Preserve input identities/weights/time; transform at the boundary, never in analysis."""
+    source = Path(source)
+    output = Path(output)
+    if source.resolve() == output.resolve() or (
+        source.exists() and output.exists() and os.path.samefile(source, output)
+    ):
+        raise ValueError("ground photon input and output must be different files")
     with source.open(newline="") as stream, output.open("w", newline="") as destination:
         reader = csv.DictReader(stream)
         fields = reader.fieldnames or []
@@ -120,6 +127,7 @@ def prepare_ground_photons(
                     azimuth_deg,
                     zenith_deg,
                     seed=seed,
+                    telescope_id=identity,
                     pointing_errors=pointing_errors,
                 )
             frame = frames[key]

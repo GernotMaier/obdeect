@@ -68,6 +68,30 @@ class TestTelescopeFrame(unittest.TestCase):
             self.assertEqual((row["photon_id"], row["time_ns"], row["weight"]), ("19", "42", "0.7"))
             self.assertEqual([float(row[f"{axis}_m"]) for axis in "xyz"], [1, 0, 1])
 
+    def test_csv_rejects_same_source_and_output_without_truncating(self):
+        with TemporaryDirectory() as directory:
+            source = Path(directory) / "ground.csv"
+            original = "photon_id,x_m,y_m,z_m,dx,dy,dz\n19,10,20,31,0,0,-1\n"
+            source.write_text(original)
+            with self.assertRaisesRegex(ValueError, "must be different files"):
+                prepare_ground_photons(source, source, self.context(), 0, 0)
+            self.assertEqual(source.read_text(), original)
+
+    def test_csv_pointing_seed_uses_telescope_identity(self):
+        with TemporaryDirectory() as directory:
+            source, output = Path(directory) / "ground.csv", Path(directory) / "local.csv"
+            source.write_text(
+                "telescope_id,x_m,y_m,z_m,dx,dy,dz\n"
+                "4,10,20,31,0,0,-1\n4,10,20,31,0,0,-1\n5,10,20,31,0,0,-1\n"
+            )
+            context = self.context()
+            context.update(known_error_deg=1.0, unknown_error_deg=1.0)
+            prepare_ground_photons(source, output, context, 0, 0, seed=17)
+            with output.open() as stream:
+                rows = list(csv.DictReader(stream))
+            self.assertEqual(rows[0], rows[1])
+            self.assertNotEqual(rows[0]["dx"], rows[2]["dx"])
+
     def test_transmission_reference_defaults_and_class_two_outer_power(self):
         parameter = dict(value=[0.96, 1, 0.2, 0, 0, 3])
         single = compile_telescope_transmission(parameter, 2, 10)
