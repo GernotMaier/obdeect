@@ -53,6 +53,16 @@ retain their chosen values explicitly. `--source-seed` remains a deprecated
 compatibility alias for `--ray-tracing-seed`; new commands should use the
 ray-tracing name because the value also controls per-photon optical scatter.
 
+| Effect | Seed | When it is used | What changing it changes |
+| --- | --- | --- | --- |
+| Random panel positions, focal lengths, and panel alignment | `detector_configuration_seed` (`--detector-configuration-seed`) | Once, during optical-model compilation | The compiled mirror geometry; the result is stored in the optical model. |
+| Randomized source sampling | `ray_tracing_seed` (`--ray-tracing-seed`) | While generating source photons for a run | The sampled source-photon inputs. Preloaded photon inputs are not resampled. |
+| Per-photon mirror-surface scatter | `ray_tracing_seed` (`--ray-tracing-seed`) | During tracing, at each mirror encounter when scatter is configured | The stochastic surface deflections; it does not change the compiled geometry. |
+
+The configuration seed fixes telescope geometry; the run seed controls random
+draws made for that trace. To reproduce a run, retain the optical model, run
+seed, and photon identities (or the exported photon inputs).
+
 Run the reference from its normal configuration/data working directory. Supply
 the simulator preprocessor's absolute command because the replay executable
 lives outside the simulator installation:
