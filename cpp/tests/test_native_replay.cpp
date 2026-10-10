@@ -51,7 +51,7 @@ int main(int argc, char **argv) {
   const auto model = directory / "model.json", photons = directory / "photons.csv";
   auto root =
       obdeect::json::Parser{
-          R"({"format":"obdeect.compiled-optical-model.v1","optical_model_sha256":"","provenance":{"model":"generic-replay-fixture","model_version":"1"},"report":{"production_trace_ready":false,"trace_blockers":["nominal fixture"]},"trace_model":{"kind":"segmented","primary_facets":[{"id":7,"shape":"circle","centre_m":[0,0,0],"normal":[0,0,1],"tangent":[1,0,0],"diameter_m":2,"focal_length_m":10}],"detector_surfaces":[{"id":8,"shape":"circle","centre_m":[0,0,3],"normal":[0,0,1],"tangent":[1,0,0],"diameter_m":2}],"cylinder_obscurers":[{"id":9,"first_endpoint_m":[-0.1,0,0.9],"second_endpoint_m":[-0.1,0,1.1],"diameter_m":0.05}],"primary_reflectivity":[{"wavelength_nm":300,"response":0.8},{"wavelength_nm":500,"response":0.8}]}})"}
+          R"({"format":"obdeect.compiled-optical-model.v1","optical_model_sha256":"","random_seeds":{"detector_configuration_seed":4294967297},"provenance":{"model":"generic-replay-fixture","model_version":"1"},"report":{"production_trace_ready":false,"trace_blockers":["nominal fixture"]},"trace_model":{"kind":"segmented","primary_facets":[{"id":7,"shape":"circle","centre_m":[0,0,0],"normal":[0,0,1],"tangent":[1,0,0],"diameter_m":2,"focal_length_m":10}],"detector_surfaces":[{"id":8,"shape":"circle","centre_m":[0,0,3],"normal":[0,0,1],"tangent":[1,0,0],"diameter_m":2}],"cylinder_obscurers":[{"id":9,"first_endpoint_m":[-0.1,0,0.9],"second_endpoint_m":[-0.1,0,1.1],"diameter_m":0.05}],"primary_reflectivity":[{"wavelength_nm":300,"response":0.8},{"wavelength_nm":500,"response":0.8}]}})"}
           .parse();
   require(root.has_value(), "fixture parses");
   auto *hash = const_cast<obdeect::json::Value *>(root->find("optical_model_sha256"));
@@ -244,7 +244,7 @@ int main(int argc, char **argv) {
                             std::uint64_t first_id, const std::string &options) {
     const std::string command = quoted(argv[1]) + " --optical-model " + quoted(model.string()) +
                                 " --output " + quoted(result.string()) +
-                                " --source-seed 12345 --photons " + std::to_string(count) +
+                                " --ray-tracing-seed 12345 --photons " + std::to_string(count) +
                                 " --input-block-size " + std::to_string(block) +
                                 " --first-photon-id " + std::to_string(first_id) + options;
     return std::system(command.c_str());
@@ -264,6 +264,20 @@ int main(int argc, char **argv) {
                      options + " --photon-output " + quoted(resolved_source.string())) == 0 &&
                 generate(generated_blocked, 17, 2, 0, options) == 0,
             "explicit source mode generates reusable blocks");
+    {
+      std::ifstream seeded(generated_full);
+      std::string header, row;
+      require(std::getline(seeded, header) && std::getline(seeded, row),
+              "seed metadata is written with native arrivals");
+      const auto columns = fields(header), values = fields(row);
+      const auto value = [&](const std::string &name) {
+        const auto column = std::find(columns.begin(), columns.end(), name);
+        require(column != columns.end(), "seed metadata column exists");
+        return values.at(static_cast<std::size_t>(column - columns.begin()));
+      };
+      require(value("detector_configuration_seed") == "4294967297" && value("ray_tracing_seed") == "12345",
+              "native arrivals identify both independent random seeds");
+    }
     require(contents(generated_full) == contents(generated_blocked),
             "source geometry/time/spectrum/weights independent of generation blocks");
     const std::string source = options.find("--source laser") != std::string::npos ? "laser"
@@ -272,7 +286,9 @@ int main(int argc, char **argv) {
                                    : "star";
     const auto replay_command = quoted(argv[1]) + " --optical-model " + quoted(model.string()) +
                                 " --photon-input " + quoted(resolved_source.string()) +
-                                " --source " + source + " --input-block-size 3 --output " +
+                                " --source " + source +
+                                " --ray-tracing-seed 12345 "
+                                "--input-block-size 3 --output " +
                                 quoted(replayed_source.string());
     require(std::system(replay_command.c_str()) == 0, "resolved photon replay succeeds");
     std::ifstream generated_rows(generated_full), replayed_rows(replayed_source);

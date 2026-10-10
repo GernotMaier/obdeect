@@ -38,7 +38,12 @@ def resolve_observing_geometry(model: dict, zenith_deg: float) -> dict:
     prime = result["trace_model"]["kind"] == "segmented"
     if prime:
         derive_nominal_single_reflector(primary["facets"], parameters)
-        apply_panel_alignment(primary["facets"], parameters, context["alignment_seed"], zenith_deg)
+        apply_panel_alignment(
+            primary["facets"],
+            parameters,
+            context.get("detector_configuration_seed", context.get("alignment_seed", 0)),
+            zenith_deg,
+        )
         primary["alignment"]["zenith_angle_deg"] = zenith_deg
     focus = parameters.get("focus_offset")
     if focus is not None and camera is not None and camera.get("entrance_surfaces"):

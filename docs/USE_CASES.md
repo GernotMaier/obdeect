@@ -197,16 +197,18 @@ obdeect-plot-reference --input lst-star.csv --view focal-plane \
 
 ### Dual-mirror focal-surface PSF comparison
 
-Include the measured mirror scatter with an explicit seed when compiling the
-optical model. Regenerate older artifacts to include the camera housing and
-configured secondary shadow.
+The detector-configuration seed is used once to compile randomized mirror
+geometry. The ray-tracing seed controls source sampling and per-photon mirror
+scatter for each run. These seeds are independent; changing the run seed keeps
+the compiled telescope geometry fixed. Regenerate older artifacts to include
+the camera housing and configured secondary shadow.
 
 ```sh
 obdeect-compile-optical-model --source-root "$OBDEECT_SIMULATION_MODELS_PATH" \
   --model SSTS-design --version "$OBDEECT_SIMULATION_MODELS_VERSION" \
-  --scatter-seed 21 --output ssts.optical-model.json
+  --detector-configuration-seed 17 --output ssts.optical-model.json
 obdeect-simtools-raytrace --optical-model ssts.optical-model.json --source star \
-  --distance-m 10000000 --field-x-deg 3 --photons 100000 \
+  --distance-m 10000000 --field-x-deg 3 --photons 100000 --ray-tracing-seed 21 \
   --focal-surface-image --output ssts-image.csv
 ```
 

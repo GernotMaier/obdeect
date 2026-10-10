@@ -1,5 +1,6 @@
 """Tests for the generic simulation-models optical model compiler."""
 
+import copy
 import json
 import math
 import unittest
@@ -71,21 +72,48 @@ class TestOpticalModelCompiler(unittest.TestCase):
                 manifest["parameters"]["GENERIC"][name] = "1.0.0"
             production.write_text(json.dumps(manifest))
             ir = resolve_model(root, "GENERIC", "1.0.0")
-            base = compile_optical_model(ir, root, alignment_seed=19, alignment_zenith_deg=20)
+            base = compile_optical_model(
+                ir, root, detector_configuration_seed=19, alignment_zenith_deg=20
+            )
+            self.assertEqual(base["random_seeds"]["detector_configuration_seed"], 19)
+            self.assertEqual(base["primary"]["alignment"]["detector_configuration_seed"], 19)
+            other_configuration = compile_optical_model(
+                ir, root, detector_configuration_seed=20, alignment_zenith_deg=20
+            )
+            self.assertNotEqual(base["primary"]["facets"], other_configuration["primary"]["facets"])
             self.assertTrue(base["trace_model"]["camera_degradation_in_detector_frame"])
             self.assertEqual(base["trace_model"]["camera_degradation"]["x_basis"], [1, 0, 0])
             self.assertEqual(base["trace_model"]["detector_surfaces"][0]["response_y_sign"], -1)
             original = json.dumps(base, sort_keys=True)
+            legacy = copy.deepcopy(base)
+            legacy_context = legacy["observing_geometry"]
+            legacy_context["alignment_seed"] = legacy_context.pop("detector_configuration_seed")
+            self.assertEqual(
+                resolve_observing_geometry(legacy, 17)["trace_model"],
+                resolve_observing_geometry(base, 17)["trace_model"],
+            )
             for angle in (17, 23, 0, -3):
                 with self.subTest(angle=angle):
                     resolved = resolve_observing_geometry(base, angle)
                     fresh = compile_optical_model(
-                        ir, root, alignment_seed=19, alignment_zenith_deg=angle
+                        ir, root, detector_configuration_seed=19, alignment_zenith_deg=angle
                     )
                     self.assertEqual(resolved["trace_model"], fresh["trace_model"])
                     self.assertEqual(json.dumps(base, sort_keys=True), original)
                     round_trip = resolve_observing_geometry(resolved, 20)
                     self.assertEqual(round_trip["trace_model"], base["trace_model"])
+
+    def test_detector_configuration_seed_must_be_uint64(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.make_ir(root)
+            ir = resolve_model(root, "GENERIC", "1.0.0")
+            for seed in (True, -1, 2**64):
+                with (
+                    self.subTest(seed=seed),
+                    self.assertRaisesRegex(OpticalModelCompileError, "detector configuration seed"),
+                ):
+                    compile_optical_model(ir, root, detector_configuration_seed=seed)
 
     def test_derived_reference_parameters_are_accounted_without_changing_transport(self):
         with TemporaryDirectory() as directory:
@@ -442,10 +470,9 @@ class TestOpticalModelCompiler(unittest.TestCase):
             ir = resolve_model(root, "GENERIC", "1.0.0")
             nominal = compile_optical_model(ir, root)
             self.assertIn(name, nominal["report"]["consumed"])
-            self.assertEqual(nominal["primary"]["scatter"]["seed"], 0)
-            compiled = compile_optical_model(ir, root, scatter_seed=21)
+            compiled = compile_optical_model(ir, root)
             scatter = compiled["primary"]["scatter"]
-            self.assertEqual(scatter["seed"], 21)
+            self.assertNotIn("seed", scatter)
             self.assertEqual(scatter["method"], "outgoing_angles")
             self.assertAlmostEqual(scatter["sigma1_rad"], math.radians(0.0255))
             self.assertAlmostEqual(scatter["sigma2_rad"], math.radians(0.05))
@@ -453,20 +480,15 @@ class TestOpticalModelCompiler(unittest.TestCase):
             self.assertNotIn(name, compiled["report"]["deferred"])
             parameter["unit"] = ["deg", "", "deg"]
             record.write_text(json.dumps(parameter))
-            empty_unit = compile_optical_model(
-                resolve_model(root, "GENERIC", "1.0.0"), root, scatter_seed=21
-            )
+            empty_unit = compile_optical_model(resolve_model(root, "GENERIC", "1.0.0"), root)
             self.assertEqual(empty_unit["primary"]["scatter"], compiled["primary"]["scatter"])
             ir = resolve_model(root, "GENERIC", "1.0.0")
-            for seed in (True, -1, 2**64):
-                with self.subTest(seed=seed), self.assertRaises(OpticalModelCompileError):
-                    compile_optical_model(ir, root, scatter_seed=seed)
             for values in ([90, 0, 0], [0, 1, 0], [-1, 0, 0], [0, 0, True]):
                 parameter["value"] = values
                 record.write_text(json.dumps(parameter))
                 ir = resolve_model(root, "GENERIC", "1.0.0")
                 with self.subTest(values=values), self.assertRaises(OpticalModelCompileError):
-                    compile_optical_model(ir, root, scatter_seed=21)
+                    compile_optical_model(ir, root)
 
     def test_axisymmetric_trace_preserves_scatter_housing_and_shadow(self):
         surface = {
@@ -480,7 +502,6 @@ class TestOpticalModelCompiler(unittest.TestCase):
             "fraction2": 0,
             "sigma2_rad": 0,
             "method": "surface_slopes",
-            "seed": 21,
         }
         optical_model = {
             "primary": {
@@ -570,9 +591,7 @@ class TestOpticalModelCompiler(unittest.TestCase):
                 )
                 data["parameters"]["GENERIC"][name] = "1.0.0"
             production.write_text(json.dumps(data))
-            optical_model = compile_optical_model(
-                resolve_model(root, "GENERIC", "1.0.0"), root, scatter_seed=21
-            )
+            optical_model = compile_optical_model(resolve_model(root, "GENERIC", "1.0.0"), root)
             trace = optical_model["trace_model"]
             self.assertEqual(trace["primary_scatter"]["method"], "surface_slopes")
             self.assertEqual(trace["secondary_scatter"], trace["primary_scatter"])

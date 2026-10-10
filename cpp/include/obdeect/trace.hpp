@@ -50,7 +50,8 @@ struct TraceResult {
 // records the nearest physical post-reflection intersection; otherwise it
 // retains the explicit no-detector terminal status.
 [[nodiscard]] inline TraceResult trace(const CompiledSegmentedOpticalModel &optical_model,
-                                       const PhotonBlockView &input) {
+                                       const PhotonBlockView &input,
+                                       std::uint64_t ray_tracing_seed = 0) {
   TraceResult result{PhotonResultBlock{input.position_m.size()}, {}};
   if (!is_valid(optical_model) || !validate_photon_block(input)) {
     for (std::size_t index = 0; index < input.position_m.size(); ++index) {
@@ -60,9 +61,9 @@ struct TraceResult {
     return result;
   }
   for (std::size_t index = 0; index < input.position_m.size(); ++index) {
-    const auto path =
-        trace_segmented_path({input.position_m[index], input.direction[index]},
-                             input.photon_id[index], input.wavelength_nm[index], optical_model);
+    const auto path = trace_segmented_path({input.position_m[index], input.direction[index]},
+                                           input.photon_id[index], input.wavelength_nm[index],
+                                           optical_model, ray_tracing_seed);
     result.photons.position_m[index] = path.points_m[path.point_count - 1];
     result.photons.direction[index] = path.final_direction;
     result.photons.optical_path_m[index] = path.path_length_m;

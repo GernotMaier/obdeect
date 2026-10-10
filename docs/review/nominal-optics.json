@@ -70,7 +70,7 @@
         "LSTN-design.json",
         "--photons",
         "1000",
-        "--source-seed",
+        "--ray-tracing-seed",
         "21",
         "--output",
         "LSTN-design.csv"
@@ -148,7 +148,7 @@
         "MSTx-FlashCam.json",
         "--photons",
         "1000",
-        "--source-seed",
+        "--ray-tracing-seed",
         "21",
         "--output",
         "MSTx-FlashCam.csv"
@@ -224,7 +224,7 @@
         "MSTx-NectarCam.json",
         "--photons",
         "1000",
-        "--source-seed",
+        "--ray-tracing-seed",
         "21",
         "--output",
         "MSTx-NectarCam.csv"
@@ -319,7 +319,7 @@
         "SSTS-design.json",
         "--photons",
         "1000",
-        "--source-seed",
+        "--ray-tracing-seed",
         "21",
         "--output",
         "SSTS-design.csv"
@@ -413,7 +413,7 @@
         "SCTS-design.json",
         "--photons",
         "1000",
-        "--source-seed",
+        "--ray-tracing-seed",
         "21",
         "--output",
         "SCTS-design.csv"

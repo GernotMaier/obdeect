@@ -26,6 +26,7 @@ def model_file(tmp_path: Path, kind: str = "segmented") -> Path:
     path.write_text(
         json.dumps({
             "trace_model": trace,
+            "random_seeds": {"detector_configuration_seed": 12},
             "focal_length_m": 10,
             "camera": {"rotation_deg": 30},
             "optical_model_sha256": "a" * 64,
@@ -205,11 +206,24 @@ def test_missing_mirror_effects_rejected_and_seeds_recorded(tmp_path: Path) -> N
     with pytest.raises(ValueError, match="recompile"):
         load_imaging_metadata(path, 10000, 0, 0)
     model["report"]["trace_blockers"] = []
-    model["primary"] = {"alignment": {"seed": 12, "zenith_angle_deg": None}}
-    model["trace_model"]["primary_scatter"] = {"seed": 13}
     path.write_text(json.dumps(model))
     metadata = load_imaging_metadata(path, 10000, 0, 0)
     output = tmp_path / "image.lis"
-    write_imaging_list(arrivals_file(tmp_path), output, metadata, 3)
-    assert "# panel_alignment_seed = 12" in output.read_text()
-    assert "# mirror_scatter_seed = 13" in output.read_text()
+    write_imaging_list(arrivals_file(tmp_path), output, metadata, 3, ray_tracing_seed=13)
+    assert "# detector_configuration_seed = 12" in output.read_text()
+    assert "# ray_tracing_seed = 13" in output.read_text()
+
+
+def test_legacy_scatter_blocker_and_alignment_seed_are_preserved(tmp_path: Path) -> None:
+    path = model_file(tmp_path)
+    model = json.loads(path.read_text())
+    model["report"] = {"trace_blockers": ["mirror scatter requires an explicit --scatter-seed"]}
+    model["random_seeds"] = {}
+    model["primary"] = {"alignment": {"seed": 41}}
+    path.write_text(json.dumps(model))
+    with pytest.raises(ValueError, match="recompile"):
+        load_imaging_metadata(path, 10000, 0, 0)
+    model["report"]["trace_blockers"] = []
+    path.write_text(json.dumps(model))
+    metadata = load_imaging_metadata(path, 10000, 0, 0)
+    assert metadata.detector_configuration_seed == 41

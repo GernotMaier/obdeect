@@ -918,7 +918,7 @@ def resolve_focus_offset(parameter: dict[str, Any], zenith_deg: float | None) ->
 
 
 def resolve_panel_prescription(
-    facets: list[dict[str, Any]], parameters: dict[str, Any], seed: int
+    facets: list[dict[str, Any]], parameters: dict[str, Any], configuration_seed: int
 ) -> None:
     """Manual 11.7/12.3.3, with the exact tel_setup_primary selection rules.
 
@@ -926,8 +926,14 @@ def resolve_panel_prescription(
     fixes the nominal magnitude but requests a manufacturing-error draw.
     Positive catalogue heights prohibit distance-error draws.
     """
-    if isinstance(seed, bool) or not isinstance(seed, int) or not 0 <= seed < 2**64:
-        raise OpticalModelCompileError("panel prescription requires a uint64 seed")
+    if (
+        isinstance(configuration_seed, bool)
+        or not isinstance(configuration_seed, int)
+        or not 0 <= configuration_seed < 2**64
+    ):
+        raise OpticalModelCompileError(
+            "panel prescription requires a uint64 detector configuration seed"
+        )
     flip = parameters.get("flip_mirrors", {}).get("value", False)
     if flip not in (False, True, 0, 1):
         raise OpticalModelCompileError("flip_mirrors must be boolean")
@@ -994,7 +1000,7 @@ def resolve_panel_prescription(
             height = dish - math.sqrt(dish * dish - radius * radius)
         nominal_distance = math.hypot(focal - height, radius)
         distance = nominal_distance * (1 + opt[2] + opt[1] * radius * radius / focal**2)
-        rng = random.Random(f"obdeect-panel-distance-v1:{seed}:{facet['id']}")
+        rng = random.Random(f"obdeect-panel-distance-v1:{configuration_seed}:{facet['id']}")
         if z <= 0 and distance_sigma:
             distance += rng.gauss(0, distance_sigma)
         if distance <= radius or not math.isfinite(distance):
@@ -1009,7 +1015,7 @@ def resolve_panel_prescription(
         )
         if catalogue == 0 and maximum > minimum:
             nominal += grading * (radius - 0.5 * (minimum + maximum)) / (maximum - minimum)
-        rng = random.Random(f"obdeect-panel-focal-v1:{seed}:{facet['id']}")
+        rng = random.Random(f"obdeect-panel-focal-v1:{configuration_seed}:{facet['id']}")
         if limit > 100 * sigma:
             error_draw = limit * (rng.random() - 0.5)
         elif sigma:
@@ -1032,15 +1038,22 @@ def resolve_panel_prescription(
 
 
 def apply_panel_alignment(
-    facets: list[dict[str, Any]], parameters: dict[str, Any], seed: int, zenith_deg: float | None
+    facets: list[dict[str, Any]],
+    parameters: dict[str, Any],
+    configuration_seed: int,
+    zenith_deg: float | None,
 ) -> None:
     """Resolve panel errors once; retain sim_telarray's Euler aperture frame.
 
     Per-panel random streams are keyed by catalogue ID, independent of ordering.
     Angular widths are normal-distribution standard deviations, not FWHM.
     """
-    if isinstance(seed, bool) or not isinstance(seed, int) or not 0 <= seed < 2**64:
-        raise OpticalModelCompileError("alignment requires a uint64 seed")
+    if (
+        isinstance(configuration_seed, bool)
+        or not isinstance(configuration_seed, int)
+        or not 0 <= configuration_seed < 2**64
+    ):
+        raise OpticalModelCompileError("alignment requires a uint64 detector configuration seed")
     widths = []
     for name in ("mirror_align_random_horizontal", "mirror_align_random_vertical"):
         record = parameters.get(name)
@@ -1082,7 +1095,9 @@ def apply_panel_alignment(
         x, y, _ = facet["nominal_centre_m"]
         phi = math.atan2(y, x)
         inclination = math.acos(max(-1.0, min(1.0, normal[2])))
-        rng = random.Random(f"obdeect-panel-alignment-v1:{seed}:{facet.get('id', (x, y))}")
+        rng = random.Random(
+            f"obdeect-panel-alignment-v1:{configuration_seed}:{facet.get('id', (x, y))}"
+        )
         horizontal, vertical = (rng.gauss(0.0, sigma) for sigma in widths)
         inclination += -horizontal * math.sin(phi) + vertical * math.cos(phi)
         gamma = horizontal * math.cos(phi) + vertical * math.sin(phi)
@@ -1239,8 +1254,7 @@ def compile_optical_model(
     ir: dict[str, Any],
     source_root: Path,
     *,
-    scatter_seed: int | None = 0,
-    alignment_seed: int = 0,
+    detector_configuration_seed: int = 0,
     alignment_zenith_deg: float | None = None,
 ) -> dict[str, Any]:
     """Compile ``obdeect.simulation-models-optical-model-ir.v1`` into generic optical model data."""
@@ -1254,6 +1268,12 @@ def compile_optical_model(
         raise OpticalModelCompileError("IR model identity is invalid")
     if not isinstance(parameters, dict) or not isinstance(assets, dict):
         raise OpticalModelCompileError("IR parameters and assets must be objects")
+    if (
+        isinstance(detector_configuration_seed, bool)
+        or not isinstance(detector_configuration_seed, int)
+        or not 0 <= detector_configuration_seed < 2**64
+    ):
+        raise OpticalModelCompileError("detector configuration seed must be uint64")
 
     def table_options(name):
         value = parameters.get(name, {}).get("value")
@@ -1322,9 +1342,11 @@ def compile_optical_model(
             "value"
         ) == 0 and nominal_fields.issubset(parameters)
         if nominal_geometry:
-            resolve_panel_prescription(facets, parameters, alignment_seed)
+            resolve_panel_prescription(facets, parameters, detector_configuration_seed)
             derive_nominal_single_reflector(facets, parameters)
-            apply_panel_alignment(facets, parameters, alignment_seed, alignment_zenith_deg)
+            apply_panel_alignment(
+                facets, parameters, detector_configuration_seed, alignment_zenith_deg
+            )
             consumed.update(
                 name
                 for name in (
@@ -1340,7 +1362,7 @@ def compile_optical_model(
                 if name in parameters
             )
             primary["alignment"] = {
-                "seed": alignment_seed,
+                "detector_configuration_seed": detector_configuration_seed,
                 "zenith_angle_deg": alignment_zenith_deg,
                 "method": "sim_telarray_euler_frame",
             }
@@ -1498,8 +1520,6 @@ def compile_optical_model(
         )
         consumed.add("secondary_mirror_degraded_reflection")
     if "mirror_reflection_random_angle" in parameters:
-        if scatter_seed is None:
-            scatter_seed = 0
         parameter = parameters["mirror_reflection_random_angle"]
         values, units = parameter.get("value"), parameter.get("unit")
         if (
@@ -1510,13 +1530,8 @@ def compile_optical_model(
             or units[0] != "deg"
             or units[1] not in ("", "null")
             or units[2] != "deg"
-            or isinstance(scatter_seed, bool)
-            or not isinstance(scatter_seed, int)
-            or not 0 <= scatter_seed < 2**64
         ):
-            raise OpticalModelCompileError(
-                "mirror scatter requires three components and uint64 seed"
-            )
+            raise OpticalModelCompileError("mirror scatter requires three valid components")
         first, fraction, second = [
             _number(value, "mirror_reflection_random_angle") for value in values
         ]
@@ -1527,7 +1542,6 @@ def compile_optical_model(
             "fraction2": fraction,
             "sigma2_rad": math.radians(second),
             "method": "surface_slopes" if dual_surfaces is not None else "outgoing_angles",
-            "seed": scatter_seed,
         }
         primary["scatter"] = scatter
         if dual_surfaces is not None:
@@ -1857,12 +1871,6 @@ def compile_optical_model(
             for name in sorted(parameters)
         },
         "trace_blockers": [
-            *(
-                ["mirror scatter requires an explicit --scatter-seed"]
-                if "mirror_reflection_random_angle" in parameters
-                and "mirror_reflection_random_angle" not in consumed
-                else []
-            ),
             *([] if nominal_geometry else ["facet surface normals and alignment are not compiled"]),
             "physical detector surfaces and materials remain deferred",
             *(
@@ -1916,6 +1924,7 @@ def compile_optical_model(
             compiled_focal_surface["outer_radius_m"] = _camera_extent_m(camera)
     compiled = {
         "format": "obdeect.compiled-optical-model.v1",
+        "random_seeds": {"detector_configuration_seed": detector_configuration_seed},
         "provenance": {
             "model": model,
             "model_version": version,
@@ -1942,7 +1951,7 @@ def compile_optical_model(
                 )
                 if name in parameters
             },
-            "alignment_seed": alignment_seed,
+            "detector_configuration_seed": detector_configuration_seed,
             "zenith_angle_deg": alignment_zenith_deg,
             "nominal_focal_surface": {
                 **compiled_focal_surface,
@@ -2831,12 +2840,11 @@ def main() -> None:
     parser.add_argument("--version", required=True, help="production model version")
     parser.add_argument("--output", type=Path, required=True, help="compiled optical model JSON")
     parser.add_argument(
-        "--scatter-seed",
+        "--detector-configuration-seed",
         type=int,
         default=0,
-        help="explicit uint64 seed for measured mirror scatter",
+        help="uint64 seed for one-time random mirror geometry and alignment in the optical model",
     )
-    parser.add_argument("--alignment-seed", type=int, default=0)
     parser.add_argument("--alignment-zenith-deg", type=float)
     parser.add_argument(
         "--require-trace-ready",
@@ -2849,8 +2857,7 @@ def main() -> None:
         optical_model = compile_optical_model(
             ir,
             args.source_root,
-            scatter_seed=args.scatter_seed,
-            alignment_seed=args.alignment_seed,
+            detector_configuration_seed=args.detector_configuration_seed,
             alignment_zenith_deg=args.alignment_zenith_deg,
         )
         if args.require_trace_ready:

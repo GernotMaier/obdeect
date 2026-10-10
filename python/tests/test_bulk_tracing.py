@@ -210,7 +210,6 @@ def test_bulk_measured_camera_response_and_keyed_scatter(model_path):
         "sigma2_rad": 0.002,
         "fraction2": 0.2,
         "method": "outgoing_angles",
-        "seed": 123,
     }
     data["optical_model_sha256"] = hashlib.sha256(
         json.dumps(data, sort_keys=True, separators=(",", ":")).encode()
@@ -218,13 +217,19 @@ def test_bulk_measured_camera_response_and_keyed_scatter(model_path):
     model_path.write_text(json.dumps(data, sort_keys=True))
     tracer = core.OpticalModel(str(model_path))
     arrays = photons()
-    result = tracer.trace(*arrays)
+    result = tracer.trace(*arrays, ray_tracing_seed=123)
+    repeated = tracer.trace(*arrays, ray_tracing_seed=123)
+    different_seed = tracer.trace(*arrays, ray_tracing_seed=124)
+    np.testing.assert_array_equal(result["direction"], repeated["direction"])
+    assert not np.array_equal(result["direction"], different_seed["direction"])
     np.testing.assert_allclose(result["throughput"], 0.8 * 0.5 * 0.8 * 0.9)
-    reversed_result = tracer.trace(*(np.ascontiguousarray(array[::-1]) for array in arrays))
+    reversed_result = tracer.trace(
+        *(np.ascontiguousarray(array[::-1]) for array in arrays), ray_tracing_seed=123
+    )
     for key, values in result.items():
         np.testing.assert_array_equal(values, reversed_result[key][::-1])
     pieces = [
-        tracer.trace(*(array[start : start + 3] for array in arrays))
+        tracer.trace(*(array[start : start + 3] for array in arrays), ray_tracing_seed=123)
         for start in range(0, len(arrays[0]), 3)
     ]
     for key, values in result.items():

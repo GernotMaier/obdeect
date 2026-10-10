@@ -330,6 +330,19 @@ private:
   return static_cast<std::uint32_t>(*number);
 }
 
+[[nodiscard]] inline std::optional<std::uint64_t> uint64_field(const json::Value &value,
+                                                               std::string_view name) {
+  const auto *result = field(value, name);
+  if (!result || result->kind() != json::Value::Kind::number)
+    return std::nullopt;
+  std::uint64_t parsed{};
+  const auto &text = result->number_text();
+  const auto conversion = std::from_chars(text.data(), text.data() + text.size(), parsed);
+  if (text.empty() || conversion.ec != std::errc{} || conversion.ptr != text.data() + text.size())
+    return std::nullopt;
+  return parsed;
+}
+
 [[nodiscard]] inline std::optional<Vec3> vec3_field(const json::Value &value,
                                                     std::string_view name) {
   const auto *result = field(value, name);
@@ -598,21 +611,22 @@ opaque_fields(const json::Value &trace) {
 [[nodiscard]] inline std::optional<MirrorScatter> scatter_field(const json::Value &parent,
                                                                 std::string_view name) {
   const auto *value = parent.find(name);
-  if (!value ||
-      !fields_supported(*value, {"sigma1_rad", "sigma2_rad", "fraction2", "method", "seed"}))
+  if (!value || !fields_supported(*value, {"sigma1_rad", "sigma2_rad", "fraction2", "method", "seed"}))
     return std::nullopt;
   const auto first = number_field(*value, "sigma1_rad"),
              second = number_field(*value, "sigma2_rad"),
              fraction = number_field(*value, "fraction2");
-  const auto seed = uint_field(*value, "seed");
   const auto *method = string_field(*value, "method");
-  if (!first || !second || !fraction || !seed || !method ||
+  if (!first || !second || !fraction || !method ||
       (*method != "outgoing_angles" && *method != "surface_slopes"))
+    return std::nullopt;
+  // v1 artifacts stored a compile-time scatter seed. Scatter is now seeded per
+  // trace, so accept the legacy metadata while deliberately ignoring it.
+  if (value->find("seed") && !uint64_field(*value, "seed"))
     return std::nullopt;
   MirrorScatter result{*first, *fraction, *second,
                        *method == "outgoing_angles" ? MirrorScatterMethod::outgoing_angles
-                                                    : MirrorScatterMethod::surface_slopes,
-                       *seed};
+                                                    : MirrorScatterMethod::surface_slopes};
   return result.is_valid() ? std::optional{result} : std::nullopt;
 }
 
@@ -1507,6 +1521,7 @@ struct LoadedOpticalModel {
   std::optional<CompiledOpticalModel> nonsequential;
   bool production_ready{};
   std::optional<double> imaging_plane_z_m{};
+  std::uint64_t detector_configuration_seed{};
 };
 
 // Verify the artifact once, compile its declared trace model and release the
@@ -1520,6 +1535,15 @@ struct LoadedOpticalModel {
   if (!kind)
     return std::nullopt;
   LoadedOpticalModel loaded;
+  if (const auto *seeds = root->find("random_seeds")) {
+    if (seeds->kind() != json::Value::Kind::object ||
+        !detail::fields_supported(*seeds, {"detector_configuration_seed"}))
+      return std::nullopt;
+    const auto seed = detail::uint64_field(*seeds, "detector_configuration_seed");
+    if (!seed)
+      return std::nullopt;
+    loaded.detector_configuration_seed = *seed;
+  }
   loaded.imaging_plane_z_m = detail::number_field(*root, "detector_vertex_z_m");
   if (*kind == "segmented")
     loaded.segmented = detail::segmented_optical_model_from_json(*root);
@@ -1561,7 +1585,7 @@ read_nonsequential_optical_model(const std::string &path) {
 [[nodiscard]] inline PathRecord
 trace_axisymmetric_optical_model(const Ray &input, std::uint64_t photon_id,
                                  const AxisymmetricOpticalModel &optical_model,
-                                 double wavelength_nm = 400.0) {
+                                 double wavelength_nm = 400.0, std::uint64_t ray_tracing_seed = 0) {
   PathRecord record{};
   record.photon_id = photon_id;
   record.wavelength_nm = wavelength_nm;
@@ -1661,9 +1685,9 @@ trace_axisymmetric_optical_model(const Ray &input, std::uint64_t photon_id,
       std::acos(std::clamp(std::abs(dot(ray.direction, primary->unit_normal)), 0.0, 1.0)) * 180.0 /
       std::numbers::pi;
   const auto after_primary = optical_model.primary_scatter ? [&]() -> std::optional<Ray> {
-    const auto direction =
-        reflect_with_scatter(ray.direction, primary->unit_normal, {1, 0, 0},
-                             *optical_model.primary_scatter, photon_id, record.terminal_surface_id);
+    const auto direction = reflect_with_scatter(ray.direction, primary->unit_normal, {1, 0, 0},
+                                                *optical_model.primary_scatter, photon_id,
+                                                record.terminal_surface_id, ray_tracing_seed);
     return direction ? std::optional{Ray{primary->point_m, *direction}} : std::nullopt;
   }()
       : reflect(ray, *primary);
@@ -1768,7 +1792,7 @@ trace_axisymmetric_optical_model(const Ray &input, std::uint64_t photon_id,
   const auto after_secondary = optical_model.secondary_scatter ? [&]() -> std::optional<Ray> {
     const auto direction = reflect_with_scatter(ray.direction, secondary->unit_normal, {1, 0, 0},
                                                 *optical_model.secondary_scatter, photon_id,
-                                                record.terminal_surface_id);
+                                                record.terminal_surface_id, ray_tracing_seed);
     return direction ? std::optional{Ray{secondary->point_m, *direction}} : std::nullopt;
   }()
       : reflect(ray, *secondary);
