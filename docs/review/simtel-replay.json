@@ -229,7 +229,8 @@
       ],
       "z": 20
     },
-    "seed": 21,
+    "ray_tracing_seed": 21,
+    "detector_configuration_seed": 0,
     "time_ns": 8,
     "wavelength_nm": 400,
     "weight": 1

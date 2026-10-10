@@ -35,7 +35,8 @@ namespace obdeect {
 // The immutable model is validated before this allocation-free photon kernel.
 [[nodiscard]] inline PathRecord
 trace_segmented_path(const Ray &input, std::uint64_t photon_id, double wavelength_nm,
-                     const CompiledSegmentedOpticalModel &optical_model) {
+                     const CompiledSegmentedOpticalModel &optical_model,
+                     std::uint64_t ray_tracing_seed = 0) {
   PathRecord path{};
   path.photon_id = photon_id;
   path.wavelength_nm = wavelength_nm;
@@ -104,11 +105,12 @@ trace_segmented_path(const Ray &input, std::uint64_t photon_id, double wavelengt
           std::acos(
               std::clamp(std::abs(obdeect::dot(*direction, primary_hit->unit_normal)), 0.0, 1.0)) *
           180.0 / std::numbers::pi;
-      const auto reflected = optical_model.primary_scatter
-                                 ? reflect_with_scatter(*direction, primary_hit->unit_normal,
-                                                        {1, 0, 0}, *optical_model.primary_scatter,
-                                                        photon_id, primary_hit->facet_id)
-                                 : obdeect::reflect_specular(*direction, primary_hit->unit_normal);
+      const auto reflected =
+          optical_model.primary_scatter
+              ? reflect_with_scatter(*direction, primary_hit->unit_normal, {1, 0, 0},
+                                     *optical_model.primary_scatter, photon_id,
+                                     primary_hit->facet_id, ray_tracing_seed)
+              : obdeect::reflect_specular(*direction, primary_hit->unit_normal);
       if (!reflected) {
         path.status = obdeect::PhotonStatus::invalid_input;
       } else {

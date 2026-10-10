@@ -24,8 +24,7 @@ class ImagingListMetadata:
     off_axis_x_deg: float
     off_axis_y_deg: float
     zenith_angle_deg: float = 0.0
-    mirror_scatter_seed: int | None = None
-    panel_alignment_seed: int | None = None
+    detector_configuration_seed: int = 0
 
 
 def load_imaging_metadata(
@@ -42,9 +41,7 @@ def load_imaging_metadata(
     """
     model = json.loads(path.read_text(encoding="utf-8"))
     blockers = model.get("report", {}).get("trace_blockers", [])
-    if any(
-        "scatter requires" in item or "panel alignment and distance" in item for item in blockers
-    ):
+    if any("panel alignment and distance" in item for item in blockers):
         raise ValueError(
             "optical model omits configured mirror effects; recompile the optical model"
         )
@@ -117,8 +114,7 @@ def load_imaging_metadata(
         off_axis_x_deg,
         off_axis_y_deg,
         zenith_angle_deg,
-        trace.get("primary_scatter", {}).get("seed"),
-        alignment.get("seed"),
+        model.get("random_seeds", {}).get("detector_configuration_seed", 0),
     )
 
 
@@ -208,7 +204,12 @@ def _imaging_row(arrival: OpticalArrival, metadata: ImagingListMetadata) -> list
 
 
 def write_imaging_list(
-    input_path: Path, output_path: Path, metadata: ImagingListMetadata, emitted_photons: int
+    input_path: Path,
+    output_path: Path,
+    metadata: ImagingListMetadata,
+    emitted_photons: int,
+    *,
+    ray_tracing_seed: int = 0,
 ) -> int:
     """Write the shared imaging-list contract; loss rows count only in the header."""
     if input_path.resolve() == output_path.resolve() or (
@@ -218,6 +219,12 @@ def write_imaging_list(
     arrivals = read_arrivals(input_path)
     if emitted_photons <= 0 or len(arrivals) != emitted_photons:
         raise ArrivalContractError("native arrival count disagrees with emitted_photons")
+    if (
+        isinstance(ray_tracing_seed, bool)
+        or not isinstance(ray_tracing_seed, int)
+        or not 0 <= ray_tracing_seed < 2**64
+    ):
+        raise ArrivalContractError("ray-tracing seed must be uint64")
     if any(arrival.source_kind != "star" or arrival.source_weight != 1 for arrival in arrivals):
         raise ArrivalContractError("imaging lists require unit-weight star photons")
     area = math.pi * metadata.sampling_radius_m**2
@@ -236,9 +243,8 @@ def write_imaging_list(
             "# backend = obdeect\n"
             "# source = finite_distance_star\n"
             "# source_sampling = keyed_uniform_disk\n"
-            "# source_seed = 0\n"
-            f"# mirror_scatter_seed = {metadata.mirror_scatter_seed}\n"
-            f"# panel_alignment_seed = {metadata.panel_alignment_seed}\n"
+            f"# ray_tracing_seed = {ray_tracing_seed}\n"
+            f"# detector_configuration_seed = {metadata.detector_configuration_seed}\n"
             f"# optical_model_sha256 = {metadata.optical_model_sha256}\n"
             f"# Focal_length = {metadata.focal_length_m * 100:.17g} cm\n"
             f"# Camera rotation angle = {metadata.camera_rotation_deg:.17g} deg\n"

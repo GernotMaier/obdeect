@@ -13,7 +13,6 @@ struct MirrorScatter {
   double fraction2{};
   double sigma2_rad{};
   MirrorScatterMethod method{};
-  std::uint64_t seed{};
 
   [[nodiscard]] bool is_valid() const {
     return std::isfinite(sigma1_rad) && sigma1_rad >= 0 && sigma1_rad < std::numbers::pi / 2 &&
@@ -29,12 +28,13 @@ struct MirrorScatter {
 [[nodiscard]] inline std::optional<Vec3>
 reflect_with_scatter(Vec3 incoming, Vec3 normal, Vec3 tangent, const MirrorScatter &scatter,
                      std::uint64_t photon_id, std::uint32_t surface_id,
-                     std::uint32_t encounter = 0) {
+                     std::uint64_t ray_tracing_seed, std::uint32_t encounter = 0) {
   const auto n = normalised_checked(normal);
   if (!n)
     return std::nullopt;
   const std::uint64_t dimension = 16 + 4 * static_cast<std::uint64_t>(encounter);
-  const auto seed = scatter.seed ^ (static_cast<std::uint64_t>(surface_id) * 0x9e3779b97f4a7c15ULL);
+  const auto seed =
+      ray_tracing_seed ^ (static_cast<std::uint64_t>(surface_id) * 0x9e3779b97f4a7c15ULL);
   const double sigma = source_uniform(photon_id, seed, dimension) < scatter.fraction2
                            ? scatter.sigma2_rad
                            : scatter.sigma1_rad;

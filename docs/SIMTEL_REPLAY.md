@@ -35,9 +35,23 @@ export the complete pre-trace input, including undetected photons:
 
 ```sh
 obdeect-simtools-raytrace --optical-model telescope.json --source star \
-  --star-mode finite --distance-m 10000 --entrance-z-m 50 --source-seed 21 \
+  --star-mode finite --distance-m 10000 --entrance-z-m 50 --ray-tracing-seed 21 \
   --photons 10000 --photon-output common-photons.csv --output candidate.csv
 ```
+
+The optical model stores `random_seeds.detector_configuration_seed`. Set it with
+`obdeect-compile-optical-model --detector-configuration-seed N`. This seed is
+used once while compiling random panel positions, focal lengths, and alignment;
+the resulting geometry is saved in the optical model and stays fixed for every
+trace. `--ray-tracing-seed` is a separate run-level seed used for source
+sampling and per-photon mirror-surface scatter. The arrival CSV records both
+`detector_configuration_seed` and `ray_tracing_seed` on every row. Reusing the
+same optical model, run seed, and photon IDs reproduces the same randomized
+trace; changing the run seed does not alter the compiled mirror geometry.
+Both command-line seeds default to zero, so production runs should set and
+retain their chosen values explicitly. `--source-seed` remains a deprecated
+compatibility alias for `--ray-tracing-seed`; new commands should use the
+ray-tracing name because the value also controls per-photon optical scatter.
 
 Run the reference from its normal configuration/data working directory. Supply
 the simulator preprocessor's absolute command because the replay executable

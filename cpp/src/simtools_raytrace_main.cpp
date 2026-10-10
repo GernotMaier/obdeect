@@ -40,6 +40,7 @@ void usage() {
       << "  --interactions-output FILE --interaction-record-limit N --interaction-byte-limit N\n"
       << "  --source star|illuminator|laser  (default: star)\n"
       << "  --photons N --output FILE --field-x-deg D --field-y-deg D\n"
+      << "  --ray-tracing-seed N  deterministic seed for sampled photons and stochastic optics\n"
       << "  --distance-m D --wavelength-nm N[,N...] --divergence-deg D --panel-id N\n"
       << "  --sampling-radius-m R  radius of the photon sampling disk in metres\n"
       << "  --source-x-m D --source-y-m D --source-z-m D\n"
@@ -79,7 +80,7 @@ int main(int argc, char **argv) {
   std::optional<std::uint64_t> source_normalization_photons;
   double emitted_weight = 1;
   bool emitted_weight_set = false;
-  std::optional<std::uint64_t> source_seed;
+  std::optional<std::uint64_t> ray_tracing_seed;
   std::uint64_t first_photon_id = 0;
   std::string star_mode = "plane-wave";
   double beam_radius_m = 0, entrance_z_m = 50;
@@ -132,13 +133,16 @@ int main(int argc, char **argv) {
       usage();
       return 0;
     }
-    if ((std::string{argv[index]} == "--source-seed" ||
+    if ((std::string{argv[index]} == "--ray-tracing-seed" ||
+         std::string{argv[index]} == "--source-seed" ||
          std::string{argv[index]} == "--first-photon-id" ||
          std::string{argv[index]} == "--source-normalization-photons") &&
         index + 1 < argc) {
       const bool normalization_option =
           std::string{argv[index]} == "--source-normalization-photons";
-      const bool seed_option = std::string{argv[index]} == "--source-seed";
+      const bool legacy_seed_option = std::string{argv[index]} == "--source-seed";
+      const bool seed_option =
+          std::string{argv[index]} == "--ray-tracing-seed" || legacy_seed_option;
       const std::string text = argv[++index];
       std::uint64_t parsed{};
       const auto result = std::from_chars(text.data(), text.data() + text.size(), parsed);
@@ -152,9 +156,11 @@ int main(int argc, char **argv) {
           return 2;
         }
         source_normalization_photons = parsed;
-      } else if (seed_option)
-        source_seed = parsed;
-      else {
+      } else if (seed_option) {
+        if (legacy_seed_option)
+          std::cerr << "--source-seed is deprecated; use --ray-tracing-seed\n";
+        ray_tracing_seed = parsed;
+      } else {
         first_photon_id = parsed;
         first_id_set = true;
       }
@@ -223,6 +229,9 @@ int main(int argc, char **argv) {
   auto nonsequential_optical_model =
       loaded ? std::move(loaded->nonsequential) : std::optional<obdeect::CompiledOpticalModel>{};
   production_ready = loaded && loaded->production_ready;
+  const std::uint64_t detector_configuration_seed =
+      loaded ? loaded->detector_configuration_seed : 0;
+  const std::uint64_t trace_seed = ray_tracing_seed.value_or(0);
   if (focal_surface_image) {
     const auto relative_mirror_response = [](auto &response) {
       if (!response)
@@ -283,9 +292,9 @@ int main(int argc, char **argv) {
     usage();
     return 2;
   }
-  const bool sampled_source = source_seed.has_value() || first_id_set || star_mode == "finite" ||
-                              beam_radius_set || source_normalization_photons.has_value() ||
-                              emitted_weight_set;
+  const bool sampled_source = (ray_tracing_seed.has_value() && photon_input_path.empty()) ||
+                              first_id_set || star_mode == "finite" || beam_radius_set ||
+                              source_normalization_photons.has_value() || emitted_weight_set;
   if ((star_mode != "plane-wave" && star_mode != "finite") ||
       (star_mode == "finite" && source != "star") ||
       (beam_radius_set && (source != "laser" || beam_radius_m <= 0)) ||
@@ -441,7 +450,8 @@ int main(int argc, char **argv) {
     output << "x" << point << "_m,y" << point << "_m,z" << point << "_m" << ',';
   output << "run_id,event_id,array_id,telescope_id,bunch_id,arrival_time_ns,terminal_surface_id,"
             "final_dx,final_dy,final_dz,interaction_surface_ids,response_loss_fraction,terminal_"
-            "loss_fraction,optical_path_m,detector_boundary,sampling_area_m2\n";
+            "loss_fraction,optical_path_m,detector_boundary,sampling_area_m2,"
+            "detector_configuration_seed,ray_tracing_seed\n";
   std::size_t detected = 0;
   std::size_t traced_count = 0;
   std::unique_ptr<obdeect::CsvPhotonReader> reader;
@@ -460,7 +470,7 @@ int main(int argc, char **argv) {
       const bool generated = obdeect::fill_source(
           input, first_photon_id + traced_count,
           [&](std::uint64_t id) -> std::optional<obdeect::OpticalPhoton> {
-            const auto seed = source_seed.value_or(0);
+            const auto seed = trace_seed;
             std::optional<obdeect::OpticalPhoton> photon;
             if (source == "star" && star_mode == "finite") {
               photon = obdeect::sample_star(
@@ -575,6 +585,7 @@ int main(int argc, char **argv) {
                << (focal_surface_image ? "continuous_focal_surface" : "compiled_detector") << ',';
         if (source == "star" && !sampled_source)
           output << std::numbers::pi * sampling_radius * sampling_radius;
+        output << ',' << detector_configuration_seed << ',' << trace_seed;
         output << '\n';
         return true;
       };
@@ -590,10 +601,11 @@ int main(int argc, char **argv) {
         path.point_count = 1;
         if (imported_optical_model) {
           path = obdeect::trace_segmented_path(photon.ray, photon.photon_id, photon.wavelength_nm,
-                                               *imported_optical_model);
+                                               *imported_optical_model, trace_seed);
         } else if (axisymmetric_optical_model) {
-          path = obdeect::trace_axisymmetric_optical_model(
-              photon.ray, photon.photon_id, *axisymmetric_optical_model, photon.wavelength_nm);
+          path = obdeect::trace_axisymmetric_optical_model(photon.ray, photon.photon_id,
+                                                           *axisymmetric_optical_model,
+                                                           photon.wavelength_nm, trace_seed);
           path.wavelength_nm = photon.wavelength_nm;
         } else {
           path = obdeect::trace_ctao_reference(photon.ray, photon.photon_id, *model);

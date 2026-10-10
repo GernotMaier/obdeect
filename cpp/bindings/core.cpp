@@ -56,7 +56,7 @@ public:
   }
 
   nb::dict trace(Coordinates positions, Coordinates directions, Scalars wavelengths, Scalars times,
-                 Scalars weights, Ids ids) const {
+                 Scalars weights, Ids ids, std::uint64_t ray_tracing_seed) const {
     const auto count = positions.shape(0);
     if (directions.shape(0) != count || wavelengths.shape(0) != count || times.shape(0) != count ||
         weights.shape(0) != count || ids.shape(0) != count)
@@ -113,9 +113,10 @@ public:
               obdeect::trace_material_path<false>(ray, ids(i), wavelengths(i), *nonsequential_));
         else {
           const auto result =
-              segmented_ ? obdeect::trace_segmented_path(ray, ids(i), wavelengths(i), *segmented_)
-                         : obdeect::trace_axisymmetric_optical_model(ray, ids(i), *axisymmetric_,
-                                                                     wavelengths(i));
+              segmented_ ? obdeect::trace_segmented_path(ray, ids(i), wavelengths(i), *segmented_,
+                                                         ray_tracing_seed)
+                         : obdeect::trace_axisymmetric_optical_model(
+                               ray, ids(i), *axisymmetric_, wavelengths(i), ray_tracing_seed);
           store_result(result);
         }
       }
@@ -152,9 +153,12 @@ NB_MODULE(_core, module) {
   nb::class_<OpticalModel>(module, "OpticalModel")
       .def(nb::init<const std::string &>(), "path"_a)
       .def_prop_ro("optical_model_sha256", &OpticalModel::hash)
-      .def("trace", &OpticalModel::trace, "position_m"_a.noconvert(), "direction"_a.noconvert(),
-           "wavelength_nm"_a.noconvert(), "emission_time_ns"_a.noconvert(),
-           "source_weight"_a.noconvert(), "photon_id"_a.noconvert());
+      .def(
+          "trace", &OpticalModel::trace, "position_m"_a.noconvert(), "direction"_a.noconvert(),
+          "wavelength_nm"_a.noconvert(), "emission_time_ns"_a.noconvert(),
+          "source_weight"_a.noconvert(), "photon_id"_a.noconvert(), "ray_tracing_seed"_a = 0,
+          "Use this run-level seed for per-photon mirror scatter. Reusing it with the same photon "
+          "IDs reproduces the trace; detector geometry uses the seed stored in the optical model.");
   nb::list statuses;
   for (std::size_t i = 0; i < obdeect::kPhotonStatusCount; ++i)
     statuses.append(nb::str(obdeect::to_string(static_cast<obdeect::PhotonStatus>(i)).data()));
