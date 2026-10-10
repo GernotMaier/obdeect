@@ -51,7 +51,7 @@ def load_imaging_metadata(
     alignment = model.get("primary", {}).get("alignment", {})
     alignment_zenith = alignment.get("zenith_angle_deg")
     if alignment_zenith is not None and not math.isclose(
-        alignment_zenith, zenith_angle_deg - off_axis_x_deg, abs_tol=1e-12
+        alignment_zenith, zenith_angle_deg, abs_tol=1e-12
     ):
         raise ValueError(
             "optical model panel alignment was compiled for a different telescope zenith"

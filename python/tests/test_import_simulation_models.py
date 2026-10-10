@@ -66,6 +66,9 @@ class TestSimulationModelsImport(unittest.TestCase):
                 IMPORTER.resolve_model(root, "TEST", "1.2.3")
             site_record["parameter_version"] = "1.0.0"
             site_parameter.write_text(json.dumps(site_record))
+            profile.write_text("altitude refractive_index\n0\n1 0.0002\n2 0.0002\n")
+            with self.assertRaisesRegex(IMPORTER.ImportError, "invalid site environment"):
+                IMPORTER.resolve_model(root, "TEST", "1.2.3")
             profile.write_text("altitude refractive_index\n0 nan\n1 0.0002\n2 0.0002\n")
             with self.assertRaisesRegex(IMPORTER.ImportError, "invalid site environment"):
                 IMPORTER.resolve_model(root, "TEST", "1.2.3")

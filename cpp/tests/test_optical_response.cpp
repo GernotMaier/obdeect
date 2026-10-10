@@ -48,6 +48,14 @@ int main() {
     assert(std::abs(*angular.at(400.9, 30) - 0.225) < 1e-15);
     angular.relative_to_envelope = true;
     assert(std::abs(*angular.at(400.9, 30) - 0.75) < 1e-15);
+    angular.wavelength_sampling.reset();
+    assert(angular.is_valid());
+    assert(std::abs(*angular.at(400.9, 30) - 0.75) < 1e-15);
+    angular.envelope_interpolation.scheme = 2;
+    assert(!angular.is_valid());
+    angular.envelope_interpolation.scheme = 1;
+    angular.spectral_envelope[0] = 1.1;
+    assert(!angular.is_valid());
   }
   const Vec3 incoming{0, 0, -1}, normal{0, 0, 1}, tangent{1, 0, 0};
   MirrorScatter scatter{0.001, 0, 0.004, MirrorScatterMethod::outgoing_angles, 123};

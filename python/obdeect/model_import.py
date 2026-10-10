@@ -316,7 +316,7 @@ def resolve_model(root: Path, model: str, version: str) -> dict[str, Any]:
                 raise ImportError("unsupported site environment units or profile")
             try:
                 index = ambient_group_index(profile_path.read_text(), float(level["value"]))
-            except (ValueError, KeyError) as error:
+            except (ValueError, KeyError, IndexError) as error:
                 raise ImportError(f"invalid site environment: {error}") from error
             environment = dict(propagation_group_index=index, observation_level_m=level["value"])
     return {
