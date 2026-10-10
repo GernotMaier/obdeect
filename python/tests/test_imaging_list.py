@@ -9,7 +9,12 @@ from obdeect.result_contract import ArrivalContractError
 
 
 def model_file(tmp_path: Path, kind: str = "segmented") -> Path:
-    trace = {"kind": kind, "primary_facets": [{"centre_m": [3, 4, 0], "diameter_m": 2}]}
+    trace = {
+        "kind": kind,
+        "primary_facets": [
+            {"centre_m": [3, 4, 0], "diameter_m": 2, "shape": "circle", "normal": [0, 0, 1]}
+        ],
+    }
     if kind == "axisymmetric":
         trace = {
             "kind": kind,
@@ -85,6 +90,26 @@ def test_model_metadata_matches_simtel_launch_disk(tmp_path: Path, kind: str) ->
     assert metadata.sampling_radius_m == pytest.approx(7.2)
     assert metadata.prime_focus == (kind == "segmented")
     assert metadata.camera_rotation_deg == 30
+
+
+@pytest.mark.parametrize(
+    ("shape", "factor"),
+    [
+        ("circle", 1),
+        ("square", math.sqrt(2)),
+        ("hexagon", 2 / math.sqrt(3)),
+        ("hexagon_flat_x", 2 / math.sqrt(3)),
+        ("hexagon_flat_y", 2 / math.sqrt(3)),
+    ],
+)
+def test_sampling_radius_contains_non_circular_facet_corners(tmp_path, shape, factor) -> None:
+    path = model_file(tmp_path)
+    model = json.loads(path.read_text())
+    model["trace_model"]["primary_facets"][0]["shape"] = shape
+    model["trace_model"]["primary_facets"][0]["normal"] = [0, 0, 1]
+    path.write_text(json.dumps(model))
+    metadata = load_imaging_metadata(path, 10000, 0, 0)
+    assert metadata.sampling_radius_m == pytest.approx(1.2 * (5 + factor))
 
 
 def test_imaging_list_preserves_geometric_rows_and_header(tmp_path: Path) -> None:

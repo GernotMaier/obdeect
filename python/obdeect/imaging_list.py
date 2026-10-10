@@ -60,10 +60,26 @@ def load_imaging_metadata(
     kind = trace["kind"]
     if kind == "segmented":
         facets = trace["primary_facets"]
+
+        def facet_circumradius(facet: dict) -> float:
+            factor = {
+                "circle": 1.0,
+                "square": math.sqrt(2),
+                "hexagon": 2 / math.sqrt(3),
+                "hexagon_flat_x": 2 / math.sqrt(3),
+                "hexagon_flat_y": 2 / math.sqrt(3),
+            }.get(facet["shape"])
+            if factor is None:
+                raise ValueError(f"unsupported primary facet shape: {facet['shape']}")
+            return facet["diameter_m"] * factor / 2
+
         radius = max(
-            math.hypot(*facet["centre_m"][:2]) + facet["diameter_m"] / 2 for facet in facets
+            math.hypot(*facet["centre_m"][:2]) + facet_circumradius(facet) for facet in facets
         )
-        top = max(facet["centre_m"][2] + facet["diameter_m"] / 2 for facet in facets)
+        top = max(
+            facet["centre_m"][2] + facet_circumradius(facet) * math.hypot(*facet["normal"][:2])
+            for facet in facets
+        )
     elif kind == "axisymmetric":
         radius = trace["primary"]["outer_radius_m"]
         top = max(trace[role]["vertex_z_m"] for role in ("primary", "secondary", "detector"))

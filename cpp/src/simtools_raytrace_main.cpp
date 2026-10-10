@@ -365,9 +365,17 @@ int main(int argc, char **argv) {
   const double sampling_radius = sampling_radius_set ? sampling_radius_m : imported_optical_model
                                   ? [&] {
                                       double radius = 0.0;
-                                      for (const auto& facet : imported_optical_model->primary_facets)
+                                      for (const auto &facet : imported_optical_model->primary_facets) {
+                                        const double shape_factor =
+                                            facet.shape == obdeect::FacetShape::square
+                                                ? std::sqrt(2.0)
+                                                : (facet.shape == obdeect::FacetShape::hexagon_flat_x ||
+                                                           facet.shape == obdeect::FacetShape::hexagon_flat_y
+                                                       ? 2.0 / std::sqrt(3.0)
+                                                       : 1.0);
                                         radius = std::max(radius, std::hypot(facet.centre_m.x, facet.centre_m.y) +
-                                                                  facet.diameter_m * 0.5);
+                                                                  facet.diameter_m * shape_factor * 0.5);
+                                      }
                                       return radius;
                                     }()
                                   : axisymmetric_optical_model ? axisymmetric_optical_model->primary.outer_radius_m
@@ -573,7 +581,7 @@ int main(int argc, char **argv) {
                << (path.status == obdeect::PhotonStatus::detected ? 0.0 : path.surviving_throughput)
                << ',' << (path.material_transport ? path.optical_path_m : path.path_length_m) << ','
                << (focal_surface_image ? "continuous_focal_surface" : "compiled_detector") << ',';
-        if (source == "star" && !sampled_source)
+        if (source == "star" && photon_input_path.empty())
           output << std::numbers::pi * sampling_radius * sampling_radius;
         output << '\n';
         return true;

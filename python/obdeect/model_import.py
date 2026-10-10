@@ -301,6 +301,7 @@ def resolve_model(root: Path, model: str, version: str) -> dict[str, Any]:
                 if (
                     selected[name].get("instrument") != instrument
                     or selected[name].get("parameter") != name
+                    or selected[name].get("parameter_version") != parameter_version
                 ):
                     raise ImportError("site environment parameter identity mismatch")
                 records[f"environment_parameter:{name}"] = record(path, root)

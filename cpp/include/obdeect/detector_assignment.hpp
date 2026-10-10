@@ -78,13 +78,13 @@ public:
                                                             const Vec3 &reference_point) const {
     const auto &g = description_;
     const double x = dot(reference_point, g.x_basis), y = dot(reference_point, g.y_basis);
-    if (!std::isfinite(x) || !std::isfinite(y) || x < g.x_low_m || x >= g.x_high_m ||
-        y < g.y_low_m || y >= g.y_high_m)
+    if (!std::isfinite(x) || !std::isfinite(y) || x < g.x_low_m || x > g.x_high_m ||
+        y < g.y_low_m || y > g.y_high_m)
       return {};
-    const auto ix = std::size_t((x - g.x_low_m) / (g.x_high_m - g.x_low_m) * g.nx);
-    const auto iy = std::size_t((y - g.y_low_m) / (g.y_high_m - g.y_low_m) * g.ny);
-    if (ix >= g.nx || iy >= g.ny)
-      return {};
+    const auto ix = std::min(std::size_t(g.nx - 1),
+                             std::size_t((x - g.x_low_m) / (g.x_high_m - g.x_low_m) * g.nx));
+    const auto iy = std::min(std::size_t(g.ny - 1),
+                             std::size_t((y - g.y_low_m) / (g.y_high_m - g.y_low_m) * g.ny));
     const std::size_t cell = iy * g.nx + ix;
     for (std::size_t entry = offsets_[cell]; entry < offsets_[cell + 1]; ++entry)
       if (const auto hit = intersect_detector_surface_unchecked(ray, surfaces_[indices_[entry]]))

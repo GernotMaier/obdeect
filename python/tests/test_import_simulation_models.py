@@ -52,6 +52,20 @@ class TestSimulationModelsImport(unittest.TestCase):
                 model["input_records"]["environment_atmospheric_profile"]["sha256"],
                 IMPORTER.sha256(profile),
             )
+            site_parameter = (
+                root
+                / "model_parameters/OBS-Example/corsika_observation_level"
+                / "corsika_observation_level-1.0.0.json"
+            )
+            site_record = json.loads(site_parameter.read_text())
+            site_record["parameter_version"] = "9.9.9"
+            site_parameter.write_text(json.dumps(site_record))
+            with self.assertRaisesRegex(
+                IMPORTER.ImportError, "site environment parameter identity"
+            ):
+                IMPORTER.resolve_model(root, "TEST", "1.2.3")
+            site_record["parameter_version"] = "1.0.0"
+            site_parameter.write_text(json.dumps(site_record))
             profile.write_text("altitude refractive_index\n0 nan\n1 0.0002\n2 0.0002\n")
             with self.assertRaisesRegex(IMPORTER.ImportError, "invalid site environment"):
                 IMPORTER.resolve_model(root, "TEST", "1.2.3")

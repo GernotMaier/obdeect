@@ -25,6 +25,10 @@ int main() {
           "T-IR-001: compiler preserves generic facet geometry");
   require(!compile_segmented_optical_model({provenance, {facet, facet}}),
           "T-IR-002: duplicate facet IDs fail closed");
+  auto invalid_response_model = *optical_model;
+  invalid_response_model.pixel_responses = std::make_shared<const PixelResponses>();
+  require(!is_valid(invalid_response_model),
+          "T-IR-007: compiled model validation checks attached pixel responses");
   auto invalid = facet;
   invalid.unit_normal = {0.0, 0.0, 0.0};
   require(!compile_segmented_optical_model({provenance, {invalid}}),
