@@ -114,6 +114,25 @@ struct ImportedSegmentedOpticalModel {
 class CompiledDetectorPlanes;
 class CompiledDetectorAssignmentGrid;
 
+class DetectorAssignmentHandle {
+public:
+  using Validator = bool (*)(const CompiledDetectorAssignmentGrid *);
+
+  DetectorAssignmentHandle() = default;
+  DetectorAssignmentHandle &operator=(std::shared_ptr<const CompiledDetectorAssignmentGrid> grid);
+  [[nodiscard]] explicit operator bool() const { return static_cast<bool>(grid_); }
+  [[nodiscard]] bool is_valid() const { return !grid_ || (validator_ && validator_(grid_.get())); }
+  [[nodiscard]] const CompiledDetectorAssignmentGrid *operator->() const { return grid_.get(); }
+  void reset() {
+    grid_.reset();
+    validator_ = nullptr;
+  }
+
+private:
+  std::shared_ptr<const CompiledDetectorAssignmentGrid> grid_{};
+  Validator validator_{};
+};
+
 struct CompiledSegmentedOpticalModel {
   ModelProvenance provenance;
   std::vector<ImportedFacet> primary_facets;
@@ -124,7 +143,7 @@ struct CompiledSegmentedOpticalModel {
   std::optional<CameraResponse> camera_response{};
 
   std::shared_ptr<const CompiledDetectorPlanes> detector_planes{};
-  std::shared_ptr<const CompiledDetectorAssignmentGrid> detector_assignment{};
+  DetectorAssignmentHandle detector_assignment{};
   std::shared_ptr<const CompiledDetectorPlanes> incoming_obscurer_planes{};
   std::optional<double> imaging_plane_z_m{};
   std::vector<OpaqueSurface> opaque_obscurers{};
@@ -286,6 +305,7 @@ struct CompiledSegmentedOpticalModel {
   if ((optical_model.primary_reflectivity && !optical_model.primary_reflectivity->is_valid()) ||
       (optical_model.primary_scatter && !optical_model.primary_scatter->is_valid()) ||
       (optical_model.camera_response && !optical_model.camera_response->is_valid()) ||
+      !optical_model.detector_assignment.is_valid() ||
       (optical_model.pixel_responses && !optical_model.pixel_responses->is_valid()) ||
       (optical_model.imaging_plane_z_m && !std::isfinite(*optical_model.imaging_plane_z_m)))
     return false;

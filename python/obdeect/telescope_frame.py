@@ -94,8 +94,28 @@ def resolve_telescope_frame(
     )
 
 
+def single_telescope_identity(source: Path) -> str:
+    """Return the sole telescope identity in a replay input, or reject mixed identities."""
+    with Path(source).open(newline="") as stream:
+        reader = csv.DictReader(stream)
+        identities = {row.get("telescope_id") or "0" for row in reader}
+    if not identities:
+        raise ValueError("ground replay input contains no photons")
+    if len(identities) != 1:
+        raise ValueError("ground replay invocation requires one consistent telescope identity")
+    return identities.pop()
+
+
 def prepare_ground_photons(
-    source: Path, output: Path, context, azimuth_deg, zenith_deg, *, seed=0, pointing_errors=True
+    source: Path,
+    output: Path,
+    context,
+    azimuth_deg,
+    zenith_deg,
+    *,
+    seed=0,
+    pointing_errors=True,
+    telescope_id: str | None = None,
 ):
     """Preserve input identities/weights/time; transform at the boundary, never in analysis."""
     source = Path(source)
@@ -119,7 +139,12 @@ def prepare_ground_photons(
                 local_context["axis_origin_m"] = [
                     float(row[f"telescope_{axis}_m"]) for axis in "xyz"
                 ]
-            identity = row.get("telescope_id", "0")
+            row_identity = row.get("telescope_id") or "0"
+            if telescope_id is not None and row_identity != telescope_id:
+                raise ValueError(
+                    "ground replay photon telescope identity changed during preparation"
+                )
+            identity = row_identity if telescope_id is None else telescope_id
             key = (identity, tuple(local_context["axis_origin_m"] or []))
             if key not in frames:
                 frames[key] = resolve_telescope_frame(

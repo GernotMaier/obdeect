@@ -7,7 +7,11 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from obdeect.optical_model_compiler import compile_telescope_frame, compile_telescope_transmission
-from obdeect.telescope_frame import prepare_ground_photons, resolve_telescope_frame
+from obdeect.telescope_frame import (
+    prepare_ground_photons,
+    resolve_telescope_frame,
+    single_telescope_identity,
+)
 
 
 class TestTelescopeFrame(unittest.TestCase):
@@ -91,6 +95,15 @@ class TestTelescopeFrame(unittest.TestCase):
                 rows = list(csv.DictReader(stream))
             self.assertEqual(rows[0], rows[1])
             self.assertNotEqual(rows[0]["dx"], rows[2]["dx"])
+
+    def test_single_telescope_identity_rejects_mixed_inputs(self):
+        with TemporaryDirectory() as directory:
+            source = Path(directory) / "ground.csv"
+            source.write_text("telescope_id,x_m\n4,0\n4,1\n")
+            self.assertEqual(single_telescope_identity(source), "4")
+            source.write_text("telescope_id,x_m\n4,0\n5,1\n")
+            with self.assertRaisesRegex(ValueError, "one consistent telescope identity"):
+                single_telescope_identity(source)
 
     def test_transmission_reference_defaults_and_class_two_outer_power(self):
         parameter = dict(value=[0.96, 1, 0.2, 0, 0, 3])

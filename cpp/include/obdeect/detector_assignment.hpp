@@ -50,7 +50,7 @@ public:
           visit(std::size_t(iy) * g.nx + std::size_t(ix));
     };
     for (const auto &surface : surfaces) {
-      if (!is_valid(surface) || !std::isfinite(surface.assignment_radius_m) ||
+      if (!obdeect::is_valid(surface) || !std::isfinite(surface.assignment_radius_m) ||
           surface.assignment_radius_m <= 0)
         return {};
       const double x = dot(surface.centre_m, g.x_basis), y = dot(surface.centre_m, g.y_basis);
@@ -74,17 +74,53 @@ public:
 
   [[nodiscard]] const DetectorAssignmentGrid &description() const { return description_; }
 
+  [[nodiscard]] bool is_valid() const {
+    const auto &g = description_;
+    const std::size_t nx = g.nx, ny = g.ny;
+    if (!nx || !ny || nx > std::numeric_limits<std::size_t>::max() / ny)
+      return false;
+    const std::size_t cells = nx * ny;
+    if (cells > 1000000 || !std::isfinite(g.x_low_m) || !std::isfinite(g.x_high_m) ||
+        !std::isfinite(g.y_low_m) || !std::isfinite(g.y_high_m) || g.x_low_m >= g.x_high_m ||
+        g.y_low_m >= g.y_high_m || !normalised_checked(g.x_basis) ||
+        !normalised_checked(g.y_basis) || std::abs(norm(g.x_basis) - 1) > kEpsilon ||
+        std::abs(norm(g.y_basis) - 1) > kEpsilon ||
+        std::abs(dot(g.x_basis, g.y_basis)) > kEpsilon ||
+        (g.reference_plane_z_m && !std::isfinite(*g.reference_plane_z_m)) || surfaces_.empty() ||
+        offsets_.size() != cells + 1 || offsets_.front() != 0 ||
+        offsets_.back() != indices_.size() || indices_.empty())
+      return false;
+    for (std::size_t cell = 0; cell < cells; ++cell)
+      if (offsets_[cell] > offsets_[cell + 1] || offsets_[cell + 1] > indices_.size())
+        return false;
+    for (const auto index : indices_)
+      if (index >= surfaces_.size())
+        return false;
+    for (const auto &surface : surfaces_) {
+      if (!obdeect::is_valid(surface) || !std::isfinite(surface.assignment_radius_m) ||
+          surface.assignment_radius_m <= 0)
+        return false;
+      const double x = dot(surface.centre_m, g.x_basis), y = dot(surface.centre_m, g.y_basis);
+      if (x - surface.assignment_radius_m < g.x_low_m - kEpsilon ||
+          x + surface.assignment_radius_m > g.x_high_m + kEpsilon ||
+          y - surface.assignment_radius_m < g.y_low_m - kEpsilon ||
+          y + surface.assignment_radius_m > g.y_high_m + kEpsilon)
+        return false;
+    }
+    return true;
+  }
+
   [[nodiscard]] std::optional<DetectorSurfaceHit> intersect(const Ray &ray,
                                                             const Vec3 &reference_point) const {
     const auto &g = description_;
     const double x = dot(reference_point, g.x_basis), y = dot(reference_point, g.y_basis);
-    if (!std::isfinite(x) || !std::isfinite(y) || x < g.x_low_m || x >= g.x_high_m ||
-        y < g.y_low_m || y >= g.y_high_m)
+    if (!std::isfinite(x) || !std::isfinite(y) || x < g.x_low_m || x > g.x_high_m ||
+        y < g.y_low_m || y > g.y_high_m)
       return {};
-    const auto ix = std::size_t((x - g.x_low_m) / (g.x_high_m - g.x_low_m) * g.nx);
-    const auto iy = std::size_t((y - g.y_low_m) / (g.y_high_m - g.y_low_m) * g.ny);
-    if (ix >= g.nx || iy >= g.ny)
-      return {};
+    const auto ix = std::min(std::size_t(g.nx - 1),
+                             std::size_t((x - g.x_low_m) / (g.x_high_m - g.x_low_m) * g.nx));
+    const auto iy = std::min(std::size_t(g.ny - 1),
+                             std::size_t((y - g.y_low_m) / (g.y_high_m - g.y_low_m) * g.ny));
     const std::size_t cell = iy * g.nx + ix;
     for (std::size_t entry = offsets_[cell]; entry < offsets_[cell + 1]; ++entry)
       if (const auto hit = intersect_detector_surface_unchecked(ray, surfaces_[indices_[entry]]))
@@ -98,5 +134,15 @@ private:
   std::vector<std::uint32_t> indices_{};
   std::vector<ImportedDetectorSurface> surfaces_{};
 };
+
+inline DetectorAssignmentHandle &
+DetectorAssignmentHandle::operator=(std::shared_ptr<const CompiledDetectorAssignmentGrid> grid) {
+  grid_ = std::move(grid);
+  if (grid_)
+    validator_ = [](const CompiledDetectorAssignmentGrid *value) { return value->is_valid(); };
+  else
+    validator_ = nullptr;
+  return *this;
+}
 
 } // namespace obdeect

@@ -187,6 +187,31 @@ int main(int argc, char **argv) {
   require(std::abs(std::stod(fields(line)[column.at("sampling_area_m2")]) - 4 * std::acos(-1.0)) <
               1.e-12,
           "native star output records the exact sampled pupil area");
+  const auto keyed_star_area_csv = directory / "keyed-star-area.csv";
+  const std::string keyed_star_area_command =
+      quoted(argv[1]) + " --optical-model " + quoted(model.string()) +
+      " --source star --photons 1 --sampling-radius-m 2 --source-seed 7 --output " +
+      quoted(keyed_star_area_csv.string());
+  require(std::system(keyed_star_area_command.c_str()) == 0,
+          "keyed star sampling-area fixture runs");
+  std::ifstream keyed_star_area_input(keyed_star_area_csv);
+  std::getline(keyed_star_area_input, line);
+  std::getline(keyed_star_area_input, line);
+  require(std::abs(std::stod(fields(line)[column.at("sampling_area_m2")]) - 4 * std::acos(-1.0)) <
+              1.e-12,
+          "keyed star output records the sampled pupil area");
+  const auto default_star_area_csv = directory / "default-star-area.csv";
+  const std::string default_star_area_command =
+      quoted(argv[1]) + " --optical-model " + quoted(model.string()) +
+      " --source star --photons 1 --output " + quoted(default_star_area_csv.string());
+  require(std::system(default_star_area_command.c_str()) == 0,
+          "default star sampling-area fixture runs");
+  std::ifstream default_star_area_input(default_star_area_csv);
+  std::getline(default_star_area_input, line);
+  std::getline(default_star_area_input, line);
+  require(std::abs(std::stod(fields(line)[column.at("sampling_area_m2")]) -
+                   std::acos(-1.0) * 1.2 * 1.2) < 1.e-12,
+          "default star sampling area follows the 1.2-times mirror convention");
   const auto interactions = directory / "interactions.csv";
   require(run(2, directory / "with-diagnostics.csv", false,
               " --interactions-output " + quoted(interactions.string()) +
@@ -279,6 +304,14 @@ int main(int argc, char **argv) {
       require(generated_fields.at(2) == source && replayed_fields.at(2) == "replay",
               "source provenance distinguishes generation from resolved replay");
       generated_fields.at(2) = "replay";
+      const auto sampling_area = column.at("sampling_area_m2");
+      if (source == "star") {
+        require(!generated_fields.at(sampling_area).empty() &&
+                    replayed_fields.at(sampling_area).empty(),
+                "generated stars carry launch-area metadata; replay inputs do not invent it");
+      }
+      generated_fields.at(sampling_area).clear();
+      replayed_fields.at(sampling_area).clear();
       require(generated_fields == replayed_fields,
               "resolved replay exactly preserves all physical results and identities");
     }

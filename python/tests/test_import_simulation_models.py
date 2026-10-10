@@ -9,6 +9,19 @@ from obdeect import model_import as IMPORTER
 
 
 class TestSimulationModelsImport(unittest.TestCase):
+    def test_declared_site_requires_environment_manifest(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.make_tree(root)
+            parameter = root / "model_parameters/TEST/focal_length/focal_length-1.0.0.json"
+            record = json.loads(parameter.read_text())
+            record["site"] = "North"
+            parameter.write_text(json.dumps(record))
+            with self.assertRaisesRegex(
+                IMPORTER.ImportError, "site environment manifest is missing"
+            ):
+                IMPORTER.resolve_model(root, "TEST", "1.2.3")
+
     def test_explicit_site_environment_is_resolved_with_provenance(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -48,10 +61,41 @@ class TestSimulationModelsImport(unittest.TestCase):
             model = IMPORTER.resolve_model(root, "TEST", "1.2.3")
             self.assertEqual(model["environment"]["propagation_group_index"], 1.0002)
             self.assertEqual(model["environment"]["observation_level_m"], 1000)
+            self.assertEqual(model["parameters"]["focal_length"]["site"], "Example")
             self.assertEqual(
                 model["input_records"]["environment_atmospheric_profile"]["sha256"],
                 IMPORTER.sha256(profile),
             )
+            profile_parameter = (
+                root
+                / "model_parameters/OBS-Example/atmospheric_profile"
+                / "atmospheric_profile-1.0.0.json"
+            )
+            profile_record = json.loads(profile_parameter.read_text())
+            for invalid_value in (None, "missing.ecsv", "../outside.ecsv", "bad\0.ecsv"):
+                profile_record["value"] = invalid_value
+                profile_parameter.write_text(json.dumps(profile_record))
+                with self.assertRaisesRegex(IMPORTER.ImportError, "site atmospheric profile"):
+                    IMPORTER.resolve_model(root, "TEST", "1.2.3")
+            profile_record["value"] = "profile.ecsv"
+            profile_parameter.write_text(json.dumps(profile_record))
+            site_parameter = (
+                root
+                / "model_parameters/OBS-Example/corsika_observation_level"
+                / "corsika_observation_level-1.0.0.json"
+            )
+            site_record = json.loads(site_parameter.read_text())
+            site_record["parameter_version"] = "9.9.9"
+            site_parameter.write_text(json.dumps(site_record))
+            with self.assertRaisesRegex(
+                IMPORTER.ImportError, "site environment parameter identity"
+            ):
+                IMPORTER.resolve_model(root, "TEST", "1.2.3")
+            site_record["parameter_version"] = "1.0.0"
+            site_parameter.write_text(json.dumps(site_record))
+            profile.write_text("altitude refractive_index\n0\n1 0.0002\n2 0.0002\n")
+            with self.assertRaisesRegex(IMPORTER.ImportError, "invalid site environment"):
+                IMPORTER.resolve_model(root, "TEST", "1.2.3")
             profile.write_text("altitude refractive_index\n0 nan\n1 0.0002\n2 0.0002\n")
             with self.assertRaisesRegex(IMPORTER.ImportError, "invalid site environment"):
                 IMPORTER.resolve_model(root, "TEST", "1.2.3")
@@ -306,10 +350,10 @@ class TestSimulationModelsImport(unittest.TestCase):
             self.make_tree(root)
             parameter = root / "model_parameters/TEST/mirror_list/mirror_list-1.0.0.json"
             data = json.loads(parameter.read_text())
-            data.update(value=None, site="North", schema_version="0.4.0")
+            data.update(value=None, schema_version="0.4.0")
             parameter.write_text(json.dumps(data))
             result = IMPORTER.resolve_model(root, "TEST", "1.2.3")
-            self.assertEqual(result["parameters"]["mirror_list"]["site"], "North")
+            self.assertEqual(result["parameters"]["mirror_list"]["schema_version"], "0.4.0")
             self.assertNotIn("mirror_list", result["assets"])
 
     def test_accepts_repository_root_containing_data_package(self):

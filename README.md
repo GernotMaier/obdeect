@@ -1,5 +1,9 @@
 # obdeect
 
+<p align="center">
+  <img src="docs/_static/images/obdeect_21ratio_small.jpg" alt="Obdeect optical ray tracing for imaging atmospheric Cherenkov telescopes" width="800">
+</p>
+
 `obdeect` is a C++20 optical ray tracing prototype for imaging atmospheric
 Cherenkov telescopes. The C++ core uses only the standard library. Python
 provides plotting, PSF analysis, and model import tools.

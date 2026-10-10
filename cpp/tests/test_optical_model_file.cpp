@@ -102,6 +102,15 @@ int main() {
   const auto loaded_segmented = obdeect::read_optical_model(segmented_path);
   assert(loaded_segmented && loaded_segmented->segmented && !loaded_segmented->axisymmetric &&
          !loaded_segmented->nonsequential && !loaded_segmented->production_ready);
+  const char *invalid_pixel_response_path = "obdeect-invalid-pixel-response-test.json";
+  {
+    std::ofstream output(invalid_pixel_response_path);
+    output << with_valid_hash(
+        R"({"format":"obdeect.compiled-optical-model.v1","optical_model_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","provenance":{"model":"invalid-pixel-response","model_version":"1"},"trace_model":{"kind":"segmented","primary_facets":[{"id":0,"shape":"circle","centre_m":[0,0,0],"normal":[0,0,1],"tangent":[1,0,0],"diameter_m":1,"focal_length_m":10}],"detector_surfaces":[{"id":1,"shape":"circle","centre_m":[0,0,10],"normal":[0,0,1],"tangent":[1,0,0],"diameter_m":1}],"pixel_responses":{"tables":[{"id":1,"method":"measured","tangent_bin_width":1,"angular_efficiency":[1]}],"bindings":[{"id":1,"table_id":2}]}}})");
+  }
+  assert(!obdeect::read_segmented_optical_model(invalid_pixel_response_path));
+  assert(!obdeect::read_optical_model(invalid_pixel_response_path));
+  std::remove(invalid_pixel_response_path);
   assert_unknown_fields_rejected(segmented_path, obdeect::read_segmented_optical_model,
                                  {"", "primary_facets", "detector_surfaces", "cylinder_obscurers",
                                   "incoming_obscurer_planes"});

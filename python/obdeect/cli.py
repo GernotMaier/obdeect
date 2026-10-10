@@ -95,7 +95,11 @@ def simtools_raytrace_main() -> int:
         raise ValueError("ground photon input requires explicit pointing zenith and azimuth")
     seed = int(take("--pointing-seed", "0"))
     from obdeect.observing_geometry import prepare_observing_model
-    from obdeect.telescope_frame import prepare_ground_photons, resolve_telescope_frame
+    from obdeect.telescope_frame import (
+        prepare_ground_photons,
+        resolve_telescope_frame,
+        single_telescope_identity,
+    )
 
     if "--optical-model" not in arguments or "--photon-input" not in arguments:
         raise ValueError("ground replay requires an optical model and photon input")
@@ -117,7 +121,14 @@ def simtools_raytrace_main() -> int:
         if not all(f"telescope_{axis}_m" in first for axis in "xyz"):
             raise ValueError("ground replay requires elevation-axis coordinates in model or input")
         context["axis_origin_m"] = [float(first[f"telescope_{axis}_m"]) for axis in "xyz"]
-    pointing = resolve_telescope_frame(context, float(azimuth), float(zenith), seed=seed)
+    telescope_id = single_telescope_identity(original_input)
+    pointing = resolve_telescope_frame(
+        context,
+        float(azimuth),
+        float(zenith),
+        seed=seed,
+        telescope_id=telescope_id,
+    )
     with tempfile.TemporaryDirectory(prefix="obdeect-ground-replay-") as temporary:
         directory = Path(temporary)
         prepared_model = prepare_observing_model(
@@ -131,6 +142,7 @@ def simtools_raytrace_main() -> int:
             float(azimuth),
             float(zenith),
             seed=seed,
+            telescope_id=telescope_id,
         )
         arguments[model_index], arguments[input_index] = str(prepared_model), str(prepared_input)
         return subprocess.call([str(executable_path()), *arguments])

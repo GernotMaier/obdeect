@@ -371,16 +371,31 @@ int main(int argc, char **argv) {
         std::make_shared<const obdeect::CompiledDetectorPlanes>(std::move(*planes));
   }
   const double radians_per_degree = std::numbers::pi / 180.0;
-  const double sampling_radius = sampling_radius_set ? sampling_radius_m : imported_optical_model
+  const double model_sampling_radius = imported_optical_model
                                   ? [&] {
                                       double radius = 0.0;
-                                      for (const auto& facet : imported_optical_model->primary_facets)
+                                      for (const auto &facet : imported_optical_model->primary_facets) {
+                                        const double shape_factor =
+                                            facet.shape == obdeect::FacetShape::square
+                                                ? std::sqrt(2.0)
+                                                : (facet.shape == obdeect::FacetShape::hexagon_flat_x ||
+                                                           facet.shape == obdeect::FacetShape::hexagon_flat_y
+                                                       ? 2.0 / std::sqrt(3.0)
+                                                       : 1.0);
                                         radius = std::max(radius, std::hypot(facet.centre_m.x, facet.centre_m.y) +
-                                                                  facet.diameter_m * 0.5);
+                                                                  facet.diameter_m * shape_factor * 0.5);
+                                      }
                                       return radius;
                                     }()
-                                  : axisymmetric_optical_model ? axisymmetric_optical_model->primary.outer_radius_m
-                                                       : nonsequential_optical_model ? 1.0 : model->primary_outer_radius_m;
+                                  : axisymmetric_optical_model
+                                        ? axisymmetric_optical_model->primary.outer_radius_m
+                                        : nonsequential_optical_model
+                                              ? 1.0
+                                              : model->primary_outer_radius_m;
+  const double star_sampling_factor =
+      source == "star" && photon_input_path.empty() && !sampling_radius_set ? 1.2 : 1.0;
+  const double sampling_radius =
+      sampling_radius_set ? sampling_radius_m : model_sampling_radius * star_sampling_factor;
   if (!std::isfinite(sampling_radius) || sampling_radius <= 0.0)
     return 1;
   std::vector<obdeect::OpticalPhoton> input;
@@ -583,7 +598,7 @@ int main(int argc, char **argv) {
                << (path.status == obdeect::PhotonStatus::detected ? 0.0 : path.surviving_throughput)
                << ',' << (path.material_transport ? path.optical_path_m : path.path_length_m) << ','
                << (focal_surface_image ? "continuous_focal_surface" : "compiled_detector") << ',';
-        if (source == "star" && !sampled_source)
+        if (source == "star" && photon_input_path.empty())
           output << std::numbers::pi * sampling_radius * sampling_radius;
         output << ',' << detector_configuration_seed << ',' << trace_seed;
         output << '\n';

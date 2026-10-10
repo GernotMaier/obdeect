@@ -7,6 +7,19 @@ from typing import Any
 from obdeect.camera_config import PIXEL_APERTURE_SHAPES, CameraConfigError
 
 
+def _circumradius(diameter: float, shape_code: int) -> float:
+    """Return the aperture's maximum centre-to-edge distance."""
+    if shape_code == 0:  # circle
+        factor = 1.0
+    elif shape_code == 2:  # square, diameter is side length
+        factor = math.sqrt(2)
+    elif shape_code in (1, 3):  # hexagon, diameter is flat-to-flat
+        factor = 2 / math.sqrt(3)
+    else:
+        raise CameraConfigError(f"unsupported pixel aperture shape code: {shape_code}")
+    return diameter * factor / 2
+
+
 def compile_camera_surfaces(
     camera: dict[str, Any], focal: dict[str, Any], orientation_mode: int, *, reflected: bool
 ) -> dict[str, list[dict[str, Any]]]:
@@ -112,9 +125,9 @@ def compile_camera_surfaces(
             "source_type_id": pixel["type_id"],
             "enabled": pixel["enabled"],
             "response_y_sign": -1 if reflected else 1,
-            "assignment_radius_m": pixel_type["funnel_diameter_m"]
-            * 0.5
-            * (2 / math.sqrt(3) if pixel_type["funnel_shape_code"] in (1, 3) else 1),
+            "assignment_radius_m": _circumradius(
+                pixel_type["funnel_diameter_m"], pixel_type["funnel_shape_code"]
+            ),
             "normal": normal,
             "tangent": tangent,
         }
@@ -136,9 +149,7 @@ def compile_camera_surfaces(
     if not entrances:
         raise CameraConfigError("physical camera has no enabled pixel entrances")
     radius_by_type = {
-        identifier: entry["funnel_diameter_m"]
-        * 0.5
-        * (2 / math.sqrt(3) if entry["funnel_shape_code"] in (1, 3) else 1)
+        identifier: _circumradius(entry["funnel_diameter_m"], entry["funnel_shape_code"])
         for identifier, entry in types.items()
     }
     x_low = min(

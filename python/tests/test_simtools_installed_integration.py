@@ -8,7 +8,6 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 
-import numpy as np
 import pytest
 
 try:
@@ -51,17 +50,18 @@ def test_ray_tracing_executes_packaged_model_for_unique_offsets(installed_model,
     for offset in (0.0, 0.1):
         simulator = ray._create_simulator(offset, 0, 0, ray.mirrors[0], True, False)
         simulator.run()
-        photons = np.loadtxt(simulator.output_file)
-        assert 0 < len(photons) < simulator.photons_per_run
+        arrivals = read_arrivals(simulator.output_file)
+        detected = [arrival for arrival in arrivals if arrival.detected]
+        assert 0 < len(detected) < simulator.photons_per_run
         metadata = load_imaging_metadata(installed_model, 10000, offset, 0, 0)
         image = ray._create_psf_image(simulator.output_file, 1000, 0.8)
         expected_area_m2 = (
-            math.pi * metadata.sampling_radius_m**2 * len(photons) / simulator.photons_per_run
+            math.pi * metadata.sampling_radius_m**2 * len(detected) / simulator.photons_per_run
         )
         assert image.get_effective_area() == pytest.approx(expected_area_m2)
         result = ray._analyze_image(image, offset, 0, offset, 0.8, 1)
         assert result[5].to_value(u.m**2) == pytest.approx(expected_area_m2)
-        assert np.all(photons[:, 17] == 1)
+        assert all(arrival.throughput == pytest.approx(0.8) for arrival in detected)
         files.append(simulator.output_file)
         # Reuse preserves an existing result; force regenerates a damaged file.
         original = simulator.output_file.read_text()

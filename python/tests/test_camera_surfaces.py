@@ -18,12 +18,33 @@ class TestCameraSurfaces(unittest.TestCase):
         )
         grid = planes["assignment_grid"]
         self.assertEqual((grid["nx"], grid["ny"]), (4, 4))
-        self.assertEqual((grid["x_low_m"], grid["x_high_m"]), (0, 1.02))
-        self.assertEqual((grid["y_low_m"], grid["y_high_m"]), (-0.02, 0.02))
+        self.assertEqual(grid["x_low_m"], 0)
+        self.assertAlmostEqual(grid["x_high_m"], 1 + 0.02 * math.sqrt(2))
+        self.assertAlmostEqual(grid["y_low_m"], -0.02 * math.sqrt(2))
+        self.assertAlmostEqual(grid["y_high_m"], 0.02 * math.sqrt(2))
         self.assertEqual(grid["reference_plane_z_m"], 10)
         self.assertAlmostEqual(grid["x_basis"][1], 1)
         self.assertAlmostEqual(grid["y_basis"][0], -1)
-        self.assertEqual(planes["entrance_surfaces"][0]["assignment_radius_m"], 0.02)
+        self.assertAlmostEqual(
+            planes["entrance_surfaces"][0]["assignment_radius_m"], 0.02 * math.sqrt(2)
+        )
+
+    def test_assignment_radius_uses_aperture_shape_circumradius(self):
+        for shape_code, factor in (
+            (0, 1),
+            (1, 2 / math.sqrt(3)),
+            (2, math.sqrt(2)),
+            (3, 2 / math.sqrt(3)),
+        ):
+            camera = self.camera([0])
+            camera["pixel_types"][0]["funnel_shape_code"] = shape_code
+            plane = compile_camera_surfaces(
+                camera, dict(coefficient_m=[10], radial_scale_m=1), 1, reflected=False
+            )
+            self.assertAlmostEqual(
+                plane["entrance_surfaces"][0]["assignment_radius_m"], 0.02 * factor
+            )
+            self.assertAlmostEqual(plane["assignment_grid"]["x_high_m"], 0.02 * factor)
 
     def test_global_camera_rotation_follows_inverse_reference_frame(self):
         for reflected, expected_y in ((False, 1), (True, 1)):

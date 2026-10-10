@@ -35,7 +35,9 @@ int main() {
         {18, {0, 0, 2}, {0, 0, 1}, 2, FacetShape::square, {1, 0, 0}, 1}};
     DetectorAssignmentGrid description{4, 4, -2, 2, -2, 2, {1, 0, 0}, {0, 1, 0}, 0};
     const auto grid = CompiledDetectorAssignmentGrid::compile(description, surfaces);
-    require(grid.has_value(), "explicit assignment grid compiles");
+    require(grid.has_value() && grid->is_valid(),
+            "explicit assignment grid compiles and validates");
+    require(!CompiledDetectorAssignmentGrid{}.is_valid(), "empty assignment grid is invalid");
     const Ray ray{{0, 0, 3}, {0, 0, -1}};
     const auto nearest = compile_detector_planes(surfaces)->intersect(ray);
     require(nearest->surface_id == 18, "physical intersection selects nearest plane");
@@ -49,6 +51,15 @@ int main() {
             "assignment keeps declared candidate order and immutable surface data");
     require(!rejected, "projected candidate cell can reject a physical intersection");
     require(allocations == 0, "assignment path does not allocate");
+
+    const std::vector<ImportedDetectorSurface> boundary_surface{
+        {19, {1, 1, 1}, {0, 0, 1}, 2, FacetShape::square, {1, 0, 0}, 1}};
+    const DetectorAssignmentGrid boundary_description{2, 2, 0, 2, 0, 2, {1, 0, 0}, {0, 1, 0}, 0};
+    const auto boundary_grid =
+        CompiledDetectorAssignmentGrid::compile(boundary_description, boundary_surface);
+    require(boundary_grid.has_value(), "grid containing the aperture boundary compiles");
+    require(boundary_grid->intersect({{2, 2, 0}, {0, 0, 1}}, {2, 2, 0}).has_value(),
+            "upper grid corner clamps into the final cell and accepts an aperture edge hit");
   }
   using namespace obdeect;
   const ImportedDetectorSurface left{11, {-0.6, 0, 3}, {0, 0, 1}, 1, FacetShape::square, {1, 0, 0}};
