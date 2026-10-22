@@ -1,166 +1,173 @@
-#include "obdeect/material_path.hpp"
-#include "obdeect/optical_model_file.hpp"
-#include "obdeect/segmented_path.hpp"
-#include "obdeect/sources.hpp"
+#include "obdeect/model_json.hpp"
+#include "obdeect/source.hpp"
+#include "obdeect/trace.hpp"
 
 #include <nanobind/nanobind.h>
 #include <nanobind/ndarray.h>
 #include <nanobind/stl/string.h>
 
 #include <memory>
+#include <string>
+#include <thread>
+#include <vector>
 
 namespace nb = nanobind;
 using namespace nb::literals;
-using Coordinates =
-    nb::ndarray<nb::numpy, const double, nb::shape<-1, 3>, nb::c_contig, nb::device::cpu>;
-using Scalars = nb::ndarray<nb::numpy, const double, nb::ndim<1>, nb::c_contig, nb::device::cpu>;
-using Ids = nb::ndarray<nb::numpy, const std::uint64_t, nb::ndim<1>, nb::c_contig, nb::device::cpu>;
 
 namespace {
-struct Output {
-  std::vector<double> position, direction, path, optical_path, time, weight, throughput,
-      response_loss, terminal_loss;
-  std::vector<std::uint64_t> ids;
-  std::vector<std::uint32_t> surfaces;
-  std::vector<std::uint8_t> status;
-  explicit Output(std::size_t n)
-      : position(3 * n), direction(3 * n), path(n), optical_path(n), time(n), weight(n),
-        throughput(n), response_loss(n), terminal_loss(n), ids(n), surfaces(n), status(n) {}
-};
 
-template <class T>
-nb::object array(std::vector<T> &values, const nb::capsule &owner, std::size_t n,
-                 bool coordinates = false) {
-  if (coordinates)
-    return nb::ndarray<nb::numpy, T>(values.data(), {n, 3}, owner).cast();
-  return nb::ndarray<nb::numpy, T>(values.data(), {n}, owner).cast();
+template <class T> using In1 = nb::ndarray<const T, nb::ndim<1>, nb::c_contig, nb::device::cpu>;
+using In3 = nb::ndarray<const double, nb::shape<-1, 3>, nb::c_contig, nb::device::cpu>;
+
+// A NumPy array that owns its buffer, left uninitialised: the tracer writes
+// every element.
+template <class T> nb::object owned_array(std::size_t rows, std::size_t columns = 0) {
+  auto *data = new T[rows * (columns ? columns : 1)];
+  nb::capsule owner(data, [](void *p) noexcept { delete[] static_cast<T *>(p); });
+  if (columns)
+    return nb::ndarray<nb::numpy, T>(data, {rows, columns}, owner).cast();
+  return nb::ndarray<nb::numpy, T>(data, {rows}, owner).cast();
 }
 
-class OpticalModel {
+template <class T> T *data_of(const nb::object &array) {
+  return static_cast<T *>(nb::cast<nb::ndarray<nb::numpy, T>>(array).data());
+}
+
+unsigned thread_count(unsigned requested) {
+  return requested ? requested : std::max(1U, std::thread::hardware_concurrency());
+}
+
+class Model {
 public:
-  explicit OpticalModel(const std::string &path) {
-    if (auto loaded = obdeect::read_optical_model(path)) {
-      segmented_ = std::move(loaded->segmented);
-      axisymmetric_ = std::move(loaded->axisymmetric);
-      if (loaded->nonsequential)
-        nonsequential_.emplace(std::move(*loaded->nonsequential));
+  explicit Model(const std::string &json) {
+    try {
+      model_ = obdeect::load_model(json);
+    } catch (const obdeect::ModelError &error) {
+      throw nb::value_error(error.what());
     }
-    if (!segmented_ && !axisymmetric_ && !nonsequential_)
-      throw nb::value_error("Cannot load optical model: invalid schema, content hash or geometry");
   }
 
-  std::string hash() const {
-    return segmented_      ? segmented_->provenance.content_hash
-           : axisymmetric_ ? axisymmetric_->provenance.content_hash
-                           : nonsequential_->provenance().content_hash;
-  }
-
-  nb::dict trace(Coordinates positions, Coordinates directions, Scalars wavelengths, Scalars times,
-                 Scalars weights, Ids ids, std::uint64_t ray_tracing_seed) const {
-    const auto count = positions.shape(0);
-    if (directions.shape(0) != count || wavelengths.shape(0) != count || times.shape(0) != count ||
-        weights.shape(0) != count || ids.shape(0) != count)
-      throw nb::value_error("Photon arrays must have the same length");
-    std::vector<std::uint64_t> identities;
-    if (count)
-      identities.assign(ids.data(), ids.data() + count);
-    std::sort(identities.begin(), identities.end());
-    if (std::adjacent_find(identities.begin(), identities.end()) != identities.end())
-      throw nb::value_error("Photon IDs must be unique within the batch");
-    for (std::size_t i = 0; i < count; ++i) {
-      const obdeect::Vec3 direction{directions(i, 0), directions(i, 1), directions(i, 2)};
-      if (!std::isfinite(positions(i, 0)) || !std::isfinite(positions(i, 1)) ||
-          !std::isfinite(positions(i, 2)) || !std::isfinite(obdeect::norm(direction)) ||
-          std::abs(obdeect::norm(direction) - 1) > 1e-12 ||
-          !obdeect::is_valid_wavelength(wavelengths(i)) || !std::isfinite(times(i)) ||
-          !std::isfinite(weights(i)) || weights(i) < 0)
-        throw nb::value_error(
-            "Photon positions, unit directions, wavelengths, times and weights must be valid");
-    }
-    auto output = std::make_unique<Output>(count);
+  nb::dict trace(In3 position, In3 direction, In1<double> wavelength_nm, In1<double> time_ns,
+                 In1<double> weight, In1<std::uint64_t> photon_id, std::uint64_t seed,
+                 bool apply_responses, unsigned threads) const {
+    const std::size_t n = position.shape(0);
+    if (direction.shape(0) != n || wavelength_nm.shape(0) != n || time_ns.shape(0) != n ||
+        weight.shape(0) != n || photon_id.shape(0) != n)
+      throw nb::value_error("photon arrays must have the same length");
+    nb::dict result;
+    const auto add = [&](const char *name, nb::object array) {
+      result[name] = array;
+      return array;
+    };
+    const auto status = add("status", owned_array<std::uint8_t>(n));
+    const auto surface = add("terminal_surface", owned_array<std::uint32_t>(n));
+    const auto pos = add("position_m", owned_array<double>(n, 3));
+    const auto dir = add("direction", owned_array<double>(n, 3));
+    const auto path = add("path_length_m", owned_array<double>(n));
+    const auto time = add("time_ns", owned_array<double>(n));
+    const auto w = add("weight", owned_array<double>(n));
+    const auto m1 = add("primary_point_m", owned_array<double>(n, 3));
+    const auto m1_id = add("primary_surface", owned_array<std::uint32_t>(n));
+    const auto m1_angle = add("primary_incidence_deg", owned_array<double>(n));
+    const auto m2 = add("secondary_point_m", owned_array<double>(n, 3));
+    const auto m2_id = add("secondary_surface", owned_array<std::uint32_t>(n));
+    const auto m2_angle = add("secondary_incidence_deg", owned_array<double>(n));
+    const auto focal_angle = add("focal_incidence_deg", owned_array<double>(n));
+    const obdeect::PhotonBlock in{position.data(),
+                                  direction.data(),
+                                  wavelength_nm.data(),
+                                  time_ns.data(),
+                                  weight.data(),
+                                  photon_id.data(),
+                                  n};
+    const obdeect::ResultBlock out{data_of<std::uint8_t>(status),
+                                   data_of<std::uint32_t>(surface),
+                                   data_of<std::uint32_t>(m1_id),
+                                   data_of<std::uint32_t>(m2_id),
+                                   data_of<double>(pos),
+                                   data_of<double>(dir),
+                                   data_of<double>(path),
+                                   data_of<double>(time),
+                                   data_of<double>(w),
+                                   data_of<double>(m1),
+                                   data_of<double>(m2),
+                                   data_of<double>(m1_angle),
+                                   data_of<double>(m2_angle),
+                                   data_of<double>(focal_angle)};
     {
       nb::gil_scoped_release release;
-      for (std::size_t i = 0; i < count; ++i) {
-        const obdeect::Ray ray{{positions(i, 0), positions(i, 1), positions(i, 2)},
-                               {directions(i, 0), directions(i, 1), directions(i, 2)}};
-        const auto store_result = [&](const auto &result) {
-          const auto point = result.points_m[result.point_count - 1];
-          output->position[3 * i] = point.x;
-          output->position[3 * i + 1] = point.y;
-          output->position[3 * i + 2] = point.z;
-          output->direction[3 * i] = result.final_direction.x;
-          output->direction[3 * i + 1] = result.final_direction.y;
-          output->direction[3 * i + 2] = result.final_direction.z;
-          output->path[i] = result.path_length_m;
-          output->optical_path[i] =
-              result.material_transport ? result.optical_path_m : result.path_length_m;
-          output->time[i] = times(i) + (result.material_transport
-                                            ? result.group_delay_ns
-                                            : result.path_length_m / obdeect::kSpeedOfLightMPerNs);
-          output->throughput[i] =
-              result.status == obdeect::PhotonStatus::detected ? result.surviving_throughput : 0;
-          output->weight[i] = weights(i) * output->throughput[i];
-          output->response_loss[i] = weights(i) * (1 - result.surviving_throughput);
-          output->terminal_loss[i] = result.status == obdeect::PhotonStatus::detected
-                                         ? 0
-                                         : weights(i) * result.surviving_throughput;
-          output->ids[i] = ids(i);
-          output->surfaces[i] = result.terminal_surface_id;
-          output->status[i] = static_cast<std::uint8_t>(result.status);
-        };
-        if (nonsequential_)
-          store_result(
-              obdeect::trace_material_path<false>(ray, ids(i), wavelengths(i), *nonsequential_));
-        else {
-          const auto result =
-              segmented_ ? obdeect::trace_segmented_path(ray, ids(i), wavelengths(i), *segmented_,
-                                                         ray_tracing_seed)
-                         : obdeect::trace_axisymmetric_optical_model(
-                               ray, ids(i), *axisymmetric_, wavelengths(i), ray_tracing_seed);
-          store_result(result);
-        }
-      }
+      obdeect::trace_block(model_, in, out, seed, apply_responses, thread_count(threads));
     }
-    Output *storage = output.get();
-    const nb::capsule owner(storage,
-                            [](void *pointer) noexcept { delete static_cast<Output *>(pointer); });
-    output.release();
-    nb::dict result;
-    result["position_m"] = array(storage->position, owner, count, true);
-    result["direction"] = array(storage->direction, owner, count, true);
-    result["path_length_m"] = array(storage->path, owner, count);
-    result["optical_path_m"] = array(storage->optical_path, owner, count);
-    result["arrival_time_ns"] = array(storage->time, owner, count);
-    result["optical_weight"] = array(storage->weight, owner, count);
-    result["throughput"] = array(storage->throughput, owner, count);
-    result["response_loss_weight"] = array(storage->response_loss, owner, count);
-    result["terminal_loss_weight"] = array(storage->terminal_loss, owner, count);
-    result["photon_id"] = array(storage->ids, owner, count);
-    result["terminal_surface_id"] = array(storage->surfaces, owner, count);
-    result["status"] = array(storage->status, owner, count);
     return result;
   }
 
 private:
-  std::optional<obdeect::CompiledSegmentedOpticalModel> segmented_;
-  std::optional<obdeect::AxisymmetricOpticalModel> axisymmetric_;
-  std::optional<obdeect::CompiledOpticalModel> nonsequential_;
+  obdeect::OpticalModel model_;
 };
+
+nb::dict sample_source(In1<double> towards_source, double distance_m, double disk_radius_m,
+                       double disk_z_m, double start_z_m, double wavelength_nm,
+                       std::uint64_t first_id, std::size_t count, std::uint64_t seed) {
+  if (towards_source.shape(0) != 3)
+    throw nb::value_error("towards_source must have three components");
+  const obdeect::Vec3 towards{towards_source(0), towards_source(1), towards_source(2)};
+  if (std::abs(obdeect::norm(towards) - 1.0) > 1e-9 || towards.z <= 0.0)
+    throw nb::value_error("towards_source must be a unit vector pointing upwards");
+  if (!(distance_m > 0.0) || !(disk_radius_m > 0.0) || !(wavelength_nm > 0.0) ||
+      !std::isfinite(disk_z_m) || !std::isfinite(start_z_m))
+    throw nb::value_error("distance, disk radius and wavelength must be positive; heights finite");
+  const obdeect::PointSource source{towards,  distance_m, disk_radius_m,
+                                    disk_z_m, start_z_m,  wavelength_nm};
+  nb::dict result;
+  const auto position = owned_array<double>(count, 3), direction = owned_array<double>(count, 3);
+  const auto time = owned_array<double>(count), wavelength = owned_array<double>(count);
+  const auto weight = owned_array<double>(count);
+  const auto id = owned_array<std::uint64_t>(count);
+  double *p = data_of<double>(position), *d = data_of<double>(direction),
+         *t = data_of<double>(time);
+  double *l = data_of<double>(wavelength), *w = data_of<double>(weight);
+  std::uint64_t *k = data_of<std::uint64_t>(id);
+  {
+    nb::gil_scoped_release release;
+    obdeect::parallel_for(count, thread_count(0), [&](std::size_t begin, std::size_t end) {
+      for (std::size_t i = begin; i < end; ++i) {
+        const auto photon = obdeect::sample_source(source, first_id + i, seed);
+        p[3 * i] = photon.ray.origin.x;
+        p[3 * i + 1] = photon.ray.origin.y;
+        p[3 * i + 2] = photon.ray.origin.z;
+        d[3 * i] = photon.ray.direction.x;
+        d[3 * i + 1] = photon.ray.direction.y;
+        d[3 * i + 2] = photon.ray.direction.z;
+        t[i] = photon.time_ns;
+        l[i] = wavelength_nm;
+        w[i] = 1.0;
+        k[i] = first_id + i;
+      }
+    });
+  }
+  result["position_m"] = position;
+  result["direction"] = direction;
+  result["time_ns"] = time;
+  result["wavelength_nm"] = wavelength;
+  result["weight"] = weight;
+  result["photon_id"] = id;
+  return result;
+}
+
 } // namespace
 
 NB_MODULE(_core, module) {
-  module.doc() = "Bulk nominal optical transport through an immutable compiled optical model";
-  nb::class_<OpticalModel>(module, "OpticalModel")
-      .def(nb::init<const std::string &>(), "path"_a)
-      .def_prop_ro("optical_model_sha256", &OpticalModel::hash)
-      .def(
-          "trace", &OpticalModel::trace, "position_m"_a.noconvert(), "direction"_a.noconvert(),
-          "wavelength_nm"_a.noconvert(), "emission_time_ns"_a.noconvert(),
-          "source_weight"_a.noconvert(), "photon_id"_a.noconvert(), "ray_tracing_seed"_a = 0,
-          "Use this run-level seed for per-photon mirror scatter. Reusing it with the same photon "
-          "IDs reproduces the trace; detector geometry uses the seed stored in the optical model.");
-  nb::list statuses;
-  for (std::size_t i = 0; i < obdeect::kPhotonStatusCount; ++i)
-    statuses.append(nb::str(obdeect::to_string(static_cast<obdeect::PhotonStatus>(i)).data()));
-  module.attr("STATUS_NAMES") = nb::tuple(statuses);
+  module.doc() = "obdeect native optical transport";
+  nb::class_<Model>(module, "Model")
+      .def(nb::init<const std::string &>(), "json"_a)
+      .def("trace", &Model::trace, "position_m"_a, "direction"_a, "wavelength_nm"_a, "time_ns"_a,
+           "weight"_a, "photon_id"_a, nb::kw_only(), "seed"_a, "apply_responses"_a = true,
+           "threads"_a = 0U);
+  module.def("sample_source", &sample_source, "towards_source"_a, "distance_m"_a, "disk_radius_m"_a,
+             "disk_z_m"_a, "start_z_m"_a, "wavelength_nm"_a, "first_id"_a, "count"_a, "seed"_a);
+  nb::list names;
+  for (std::size_t i = 0; i < obdeect::kStatusCount; ++i)
+    names.append(nb::str(std::string(obdeect::to_string(static_cast<obdeect::Status>(i))).c_str()));
+  module.attr("STATUS_NAMES") = nb::tuple(names);
+  module.attr("MODEL_FORMAT") = std::string(obdeect::kModelFormat);
 }

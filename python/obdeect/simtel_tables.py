@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import bisect
 import math
 import re
 from typing import Any
@@ -233,3 +234,28 @@ def parse_rpol_table(
     options["scheme"] = 1  # Reference implementation always uses bilinear 2-D interpolation.
     options["coefficients"] = []
     return dict(x=x, y=y, response=[grid[xx, yy] for xx in x for yy in y], interpolation=options)
+
+
+def evaluate(
+    axis: list[float], values: list[float], interpolation: dict[str, Any], x: float
+) -> float:
+    """Evaluate a 1-D RPOL table at x with its declared interpolation and boundary."""
+    if x < axis[0] or x > axis[-1]:
+        if interpolation["boundary"] == "zero":
+            return 0.0
+        x = min(max(x, axis[0]), axis[-1])
+    transform = math.log if interpolation.get("x_log") else (lambda v: v)
+    low = min(max(bisect.bisect_right(axis, x) - 1, 0), len(axis) - 2)
+    t = (transform(x) - transform(axis[low])) / (transform(axis[low + 1]) - transform(axis[low]))
+    scheme = interpolation.get("scheme", 1)
+    logarithmic = interpolation.get("value_log", False)
+    if scheme == 0:
+        return values[low] if t < 0.5 else values[low + 1]
+    if scheme >= 2:
+        c = interpolation["coefficients"][low]
+        value = ((c[3] * t + c[2]) * t + c[1]) * t + c[0]
+    elif logarithmic:
+        value = (1 - t) * math.log(values[low]) + t * math.log(values[low + 1])
+    else:
+        return (1 - t) * values[low] + t * values[low + 1]
+    return math.exp(value) if logarithmic else value

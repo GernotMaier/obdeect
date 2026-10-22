@@ -4,13 +4,13 @@
   <img src="docs/_static/images/obdeect_21ratio_small.jpg" alt="Obdeect optical ray tracing for imaging atmospheric Cherenkov telescopes" width="800">
 </p>
 
-`obdeect` is a C++20 optical ray tracing prototype for imaging atmospheric
-Cherenkov telescopes. The C++ core uses only the standard library. Python
-provides plotting, PSF analysis, and model import tools.
+`obdeect` is a C++20 optical ray tracer for imaging atmospheric Cherenkov
+telescopes. The C++ core uses only the standard library. Python compiles
+optical models from the simulation models, traces photons, and plots results;
+simtools uses it as a ray-tracing backend.
 
-It currently supports **nominal geometry studies**, not full CTAO production simulations.
-
-For example use cases, see [optical-study recipes](docs/USE_CASES.md).
+See the [user guide](docs/USER_GUIDE.md), the [physics](docs/PHYSICS.md) of the
+photon path, and the [validation](docs/VALIDATION.md) against sim_telarray.
 
 ## User Installation
 
@@ -24,11 +24,14 @@ python -m pip install obdeect-dev
 
 (requires python 3.14 or higher)
 
-Run a simple test to verify the installation.
-The following command simulates a simple ray tracing scenario of a mid-size telescope:
+Verify the installation by compiling an optical model from a
+[simulation-models](https://gitlab.cta-observatory.org/cta-science/simulations/simulation-model/simulation-models)
+checkout and tracing a star:
 
 ```sh
-obdeect-simtools-raytrace --telescope MST --photons 10000 --output trace.csv
+obdeect compile --simulation-models ../simulation-models --model MSTN-01 \
+  --version 7.0.0 --seed 1 --zenith-deg 20 --output mst.json
+obdeect trace --model mst.json --seed 2 --photons 10000 --field-deg 0.5 0
 ```
 
 ## Developer Installation
@@ -41,13 +44,13 @@ cmake --preset debug   # add '--target clean' if you want to clean the build dir
 cmake --build --preset debug
 ```
 
-Executables are in `build/debug/` and tests in `build/debug/tests/`.
+The C++ tests are in `build/debug/tests/`.
 
 Test your installation with:
 
 ```sh
 ctest --test-dir build/debug --output-on-failure
-python -m unittest discover -s python/tests
+python -m pytest python/tests
 ```
 
 ## License and Citation
