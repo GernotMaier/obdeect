@@ -61,7 +61,7 @@ database is current.
 cmake --preset debug
 cmake --build --preset debug
 ctest --test-dir build/debug --output-on-failure
-python -m unittest discover -s python/tests
+python -m pytest python/tests
 ruff format --check python
 ruff check python
 find cpp -type f \( -name '*.cpp' -o -name '*.hpp' \) -print0 | \

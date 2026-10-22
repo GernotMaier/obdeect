@@ -1,148 +1,135 @@
-"""Launch the C++ executables shipped in the obdeect wheel."""
+"""The ``obdeect`` command: compile optical models, trace sources, plot."""
 
 from __future__ import annotations
 
-import csv
+import argparse
 import json
-import os
-import subprocess
+import math
 import sys
-import tempfile
 from pathlib import Path
 
+import numpy as np
 
-def executable_path(name: str = "obdeect-simtools-raytrace") -> Path:
-    """Return the native executable from a wheel or editable package installation.
+from obdeect.formats import ModelError
+from obdeect.model import STATUS_NAMES, OpticalModel
+from obdeect.psf import summary
 
-    Parameters
-    ----------
-    name : str
-        Executable name, without a Windows ``.exe`` suffix.
 
-    Raises
-    ------
-    FileNotFoundError
-        If the wheel does not contain the requested executable.
-    """
-
-    from obdeect import __path__ as package_paths
-
-    # Editable installs can put Python sources and native files in separate
-    # package locations. Search the package paths in their declared order.
-    native_dirs = [Path(location) / "_native" for location in package_paths]
-    candidates = []
-    for native_dir in native_dirs:
-        candidates.append(native_dir / name)
-        if os.name == "nt" and not name.endswith(".exe"):
-            candidates.append(native_dir / f"{name}.exe")
-    for candidate in candidates:
-        if candidate.is_file():
-            if os.name != "nt" and not os.access(candidate, os.X_OK):
-                raise PermissionError(f"Packaged obdeect executable is not executable: {candidate}")
-            return candidate
-    raise FileNotFoundError(
-        f"Packaged obdeect executable {name!r} was not found in "
-        f"{', '.join(str(directory) for directory in native_dirs)}. "
-        "Reinstall obdeect-dev with a wheel for this platform."
+def _compile(args: argparse.Namespace) -> None:
+    model = OpticalModel.from_simulation_models(
+        args.simulation_models,
+        args.model,
+        args.version,
+        configuration_seed=args.seed,
+        zenith_deg=args.zenith_deg,
     )
-
-
-def _run(name: str) -> int:
-    """Forward command-line arguments to a packaged C++ executable."""
-
-    command = [str(executable_path(name)), *sys.argv[1:]]
-    if os.name == "nt":
-        return subprocess.call(command)
-    os.execv(command[0], command)
-    return 1
-
-
-def demo_mst_main() -> int:
-    """Run the packaged developer MST demonstration."""
-
-    return _run("obdeect-demo-mst")
-
-
-def analytic_optics_main() -> int:
-    """Run the packaged analytic-optics developer diagnostic."""
-
-    return _run("obdeect-analytic-optics")
-
-
-def simtools_raytrace_main() -> int:
-    """Run the packaged simtools-compatible ray tracer."""
-    arguments = sys.argv[1:]
-    if "--photon-input-frame" not in arguments:
-        return _run("obdeect-simtools-raytrace")
-
-    def take(name, default=None):
-        if name not in arguments:
-            return default
-        index = arguments.index(name)
-        if index + 1 >= len(arguments):
-            raise ValueError(f"missing value for {name}")
-        value = arguments[index + 1]
-        del arguments[index : index + 2]
-        return value
-
-    frame = take("--photon-input-frame")
-    if frame == "telescope":
-        return subprocess.call([str(executable_path()), *arguments])
-    if frame != "ground":
-        raise ValueError("photon input frame must be ground or telescope")
-    zenith, azimuth = take("--pointing-zenith-deg"), take("--pointing-azimuth-deg")
-    if zenith is None or azimuth is None:
-        raise ValueError("ground photon input requires explicit pointing zenith and azimuth")
-    seed = int(take("--pointing-seed", "0"))
-    from obdeect.observing_geometry import prepare_observing_model
-    from obdeect.telescope_frame import (
-        prepare_ground_photons,
-        resolve_telescope_frame,
-        single_telescope_identity,
+    model.save(args.output)
+    print(
+        f"{args.model} {args.version}: optical model {model.sha256[:12]} written to {args.output}"
     )
+    for note in model.document["notes"]:
+        print(f"note: {note}")
 
-    if "--optical-model" not in arguments or "--photon-input" not in arguments:
-        raise ValueError("ground replay requires an optical model and photon input")
-    model_index, input_index = (
-        arguments.index("--optical-model") + 1,
-        arguments.index("--photon-input") + 1,
+
+def _trace(args: argparse.Namespace) -> None:
+    model = OpticalModel.load(args.model)
+    fx, fy = (math.radians(a) for a in args.field_deg)
+    towards = np.array([math.tan(fx), math.tan(fy), 1.0])
+    photons = model.star_photons(
+        args.photons,
+        seed=args.seed,
+        towards_source=tuple(towards / np.linalg.norm(towards)),
+        distance_m=args.distance_m,
+        wavelength_nm=args.wavelength_nm,
     )
-    original_model = Path(arguments[model_index])
-    original_input = Path(arguments[input_index])
-    for name in ("--output", "--photon-output", "--interactions-output"):
-        if name in arguments:
-            output = Path(arguments[arguments.index(name) + 1]).resolve()
-            if output in (original_input.resolve(), original_model.resolve()):
-                raise ValueError("ground replay output must not overwrite its input")
-    context = json.loads(original_model.read_text())["telescope_frame"]
-    if context["axis_origin_m"] is None:
-        with original_input.open(newline="") as stream:
-            first = next(csv.DictReader(stream), {})
-        if not all(f"telescope_{axis}_m" in first for axis in "xyz"):
-            raise ValueError("ground replay requires elevation-axis coordinates in model or input")
-        context["axis_origin_m"] = [float(first[f"telescope_{axis}_m"]) for axis in "xyz"]
-    telescope_id = single_telescope_identity(original_input)
-    pointing = resolve_telescope_frame(
-        context,
-        float(azimuth),
-        float(zenith),
-        seed=seed,
-        telescope_id=telescope_id,
+    arrivals = model.trace(
+        photons, seed=args.seed, apply_responses=not args.geometry_only, threads=args.threads
     )
-    with tempfile.TemporaryDirectory(prefix="obdeect-ground-replay-") as temporary:
-        directory = Path(temporary)
-        prepared_model = prepare_observing_model(
-            original_model, directory / "optical-model.json", pointing.known_zenith_deg
+    if args.output:
+        _write(args.output, photons, arrivals)
+    print(
+        json.dumps(
+            {"model_sha256": model.sha256, **summary(arrivals, model.sampling_area_m2)}, indent=1
         )
-        prepared_input = directory / "photons.csv"
-        prepare_ground_photons(
-            original_input,
-            prepared_input,
-            context,
-            float(azimuth),
-            float(zenith),
-            seed=seed,
-            telescope_id=telescope_id,
-        )
-        arguments[model_index], arguments[input_index] = str(prepared_model), str(prepared_input)
-        return subprocess.call([str(executable_path()), *arguments])
+    )
+
+
+def _write(path: Path, photons: dict, arrivals: dict) -> None:
+    columns = {"photon_id": photons["photon_id"], **arrivals}
+    if path.suffix == ".npz":
+        np.savez_compressed(path, status_names=np.array(STATUS_NAMES), **columns)
+        return
+    names, data = [], []
+    for name, values in columns.items():
+        if values.ndim == 2:
+            names += [f"{name}_{axis}" for axis in "xyz"]
+            data += list(values.T)
+        else:
+            names.append(name)
+            data.append(values)
+    np.savetxt(
+        path, np.column_stack(data), delimiter=",", header=",".join(names), comments="", fmt="%.17g"
+    )
+
+
+def _plot(args: argparse.Namespace) -> None:
+    from obdeect.plot import plot
+
+    arrivals = dict(np.load(args.arrivals)) if args.arrivals else None
+    plot(OpticalModel.load(args.model), arrivals, args.output)
+    print(f"plot written to {args.output}")
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(prog="obdeect", description=__doc__)
+    commands = parser.add_subparsers(dest="command", required=True)
+
+    c = commands.add_parser("compile", help="compile an optical model from simulation-models")
+    c.add_argument(
+        "--simulation-models", type=Path, required=True, help="simulation-models checkout"
+    )
+    c.add_argument("--model", required=True, help="telescope model, e.g. LSTN-design")
+    c.add_argument("--version", required=True, help="production version, e.g. 7.0.0")
+    c.add_argument("--seed", type=int, required=True, help="seed of the random mirror errors")
+    c.add_argument(
+        "--zenith-deg", type=float, help="telescope zenith angle for zenith-dependent errors"
+    )
+    c.add_argument("--output", type=Path, required=True)
+    c.set_defaults(run=_compile)
+
+    t = commands.add_parser("trace", help="trace a star or point source")
+    t.add_argument("--model", type=Path, required=True)
+    t.add_argument(
+        "--seed", type=int, required=True, help="seed of source sampling and mirror scatter"
+    )
+    t.add_argument("--photons", type=int, default=100000)
+    t.add_argument(
+        "--field-deg",
+        type=float,
+        nargs=2,
+        default=(0.0, 0.0),
+        metavar=("X", "Y"),
+        help="source direction: field angles from the optical axis",
+    )
+    t.add_argument(
+        "--distance-m", type=float, default=math.inf, help="source distance (default: star)"
+    )
+    t.add_argument("--wavelength-nm", type=float, default=400.0)
+    t.add_argument("--geometry-only", action="store_true", help="do not apply optical responses")
+    t.add_argument("--threads", type=int, default=0, help="0 uses every core")
+    t.add_argument("--output", type=Path, help="per-photon results (.npz or .csv)")
+    t.set_defaults(run=_trace)
+
+    p = commands.add_parser("plot", help="plot the dish layout and the focal-plane image")
+    p.add_argument("--model", type=Path, required=True)
+    p.add_argument("--arrivals", type=Path, help="results of 'obdeect trace' (.npz)")
+    p.add_argument("--output", type=Path, required=True)
+    p.set_defaults(run=_plot)
+
+    args = parser.parse_args(argv)
+    try:
+        args.run(args)
+    except (ModelError, OSError) as error:
+        print(f"obdeect: error: {error}", file=sys.stderr)
+        return 1
+    return 0
