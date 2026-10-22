@@ -42,6 +42,13 @@ Largest deviation of obdeect from sim_telarray over nine offsets:
 | MSTS-01 (FlashCam) | 0.5% | 0.3% | 0.06% (realisation spread) |
 | SSTS-01 | 0.15% | 0.3% | < 0.01% |
 | SCTS-01 (one-pixel camera) | 0.15% | 0.13% | < 0.01% |
+| LSTS-01 | 0.4% | 0.11% | 0.01% |
+| LSTN-design | 0.5% | 0.15% | 0.01% |
+| LSTS-design | 0.4% | 0.10% | 0.01% |
+| MSTx-FlashCam | 1.1% | 0.24% | 0.1% (realisation spread) |
+| MSTx-NectarCam | 0.5% | 0.23% | 0.04% |
+| SSTS-design | 0.12% | 0.45% | 0.01% |
+| SCTS-design (one-pixel camera) | 0.10% | 0.22% | < 0.01% |
 
 - Star at 10,000 km (LSTN-01, 0-2 deg): D80 within 0.15%, area within 0.13%.
 - Per mirror (MSTN-01, on axis, 86 mirrors): the fractions of photons
@@ -64,12 +71,15 @@ resources:
 | `validate-cumulative-psf` (6.0.2, 20 deg) | D80 3.051 cm, area 365.8 m², 31 s | D80 3.059 cm, area 365.4 m², 3 s |
 | `derive-psf-parameters` (6.0.2, 20 deg) | RMSD 0.0131, D80 3.053 cm | RMSD 0.0127, D80 3.059 cm |
 | `derive-mirror-rnda` (7.0.0, test mode, 5 mirrors) | fitted D80 within 0.9-3.8% of measured, 117 s | within 0.8-4.9%, 19 s |
+| `derive-mirror-rnda` (7.0.0, all 198 mirrors) | | within 5% for every mirror (median 2.4%), 241 s |
 
 Both backends start `derive-psf-parameters` below its RMSD threshold, so the
-optimisation stops at once. Its final D80-versus-offset plot (46 offsets of 2
-million photons) needs more than 2 GB of memory with either backend, because
-simtools keeps every photon image; in `--test` mode the whole application
-takes 11 s (sim_telarray) and 6 s (obdeect). With 5000 photons per evaluation the
+optimisation stops at once. Its final D80-versus-offset plot (46 offsets in four
+directions, 2 million photons each) needed more than 2 GB of memory with either
+backend, because simtools kept every photon image (fixed in simtools#2664): at
+full statistics the obdeect run now takes 115 s with a peak of 1.45 GB (RMSD
+0.0107 after one step); in `--test` mode the whole application takes 11 s
+(sim_telarray) and 6 s (obdeect). With 5000 photons per evaluation the
 `derive-mirror-rnda` fits differ by their noise; with a fixed `--obdeect_seed`
 every evaluation reuses the same photons, so the obdeect objective is smooth.
 
