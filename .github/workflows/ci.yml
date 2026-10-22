@@ -14,8 +14,6 @@ concurrency:
 jobs:
   lint:
     runs-on: ubuntu-24.04
-    env:
-      ENABLE_CHANGELOG_CHECK: 'false'
     steps:
       - uses: actions/checkout@v7
         with:
@@ -23,12 +21,6 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: '3.14'
-      - name: Require a release note for every pull request
-        # Temporarily disabled; keep the checker and workflow step for later.
-        if: env.ENABLE_CHANGELOG_CHECK == 'true' && github.event_name == 'pull_request'
-        env:
-          CHANGELOG_BASE: ${{ github.event.pull_request.base.sha }}
-        run: python tools/check_changelog.py --base "$CHANGELOG_BASE"
       - name: Install linters
         run: python -m pip install --upgrade pip pre-commit ruff clang-format
       - name: Run repository hooks

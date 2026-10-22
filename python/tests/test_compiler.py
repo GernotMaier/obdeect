@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 from obdeect.compiler import compile_model, convex_hull, model_hash, response_grid
 from obdeect.formats import ModelError
-from telescopes import CYLINDERS, POLYHEDRA, dual, record, segmented
+from telescopes import STRUCTURE, dual, record, segmented
 
 
 def build(records_files, **options):
@@ -81,12 +81,7 @@ def test_camera_body_and_transmission():
 
 
 def test_structure_replaces_the_telescope_transmission():
-    model = build(
-        segmented(
-            telescope_obscuration_cylinders=CYLINDERS,
-            telescope_obscuration_quadrilaterals=POLYHEDRA,
-        )
-    )
+    model = build(segmented(telescope_structure=STRUCTURE))
     optics = model["optics"]
     assert optics["telescope_transmission"] is None
     assert model["provenance"]["structure"]
@@ -98,6 +93,21 @@ def test_structure_replaces_the_telescope_transmission():
     assert plate["shape"] == "polyhedron" and len(plate["planes"]) == 4
     ids = [o["id"] for o in optics["obscurers"]] + [f["id"] for f in optics["primary"]["facets"]]
     assert len(ids) == len(set(ids)) and optics["focal_surface"]["id"] not in ids
+
+
+@pytest.mark.parametrize(
+    ("old", "new", "message"),
+    [
+        ("cylinder 0.1", "cylinder nan", "two end points and a diameter"),
+        ("0.0 0.5 7.9 nan nan nan", "nan nan nan 0.0 0.5 7.9", "unused points must come last"),
+        ("0.0 0.5 7.9 nan nan nan", "0.0 0.5 7.9 1.0 nan nan", "nan and numeric"),
+        ("convex_polyhedron nan", "convex_polyhedron 0.2", "has no diameter"),
+        ("convex_polyhedron", "box", "unsupported shape box"),
+    ],
+)
+def test_structure_rows_are_checked(old, new, message):
+    with pytest.raises(ModelError, match=message):
+        build(segmented(telescope_structure=STRUCTURE.replace(old, new)))
 
 
 def test_convex_hull():
@@ -153,6 +163,27 @@ def test_secondary_reflects_like_the_primary_without_its_own_table():
         optics = build((records, files), zenith_deg=20.0)["optics"]
         assert optics["secondary"]["reflectivity"] == optics["primary"]["reflectivity"]
         assert optics["primary"]["reflectivity"]["values"][100] == [pytest.approx(0.85)]
+
+
+def test_degradation_maps_accept_filename_options():
+    spatial_map = "#@RPOL@ 2\n 0 100\n0 1 0.9\n50 0.8 0.7\n"
+    primary_record = record("primary_mirror_degraded_map", "map.dat#rpol:clip=1", file=True)
+    single_records, files = segmented(primary_mirror_degraded_map=primary_record)
+    files["primary_mirror_degraded_map"] = spatial_map
+    model = build((single_records, files))
+    assert model["optics"]["primary"]["degradation"]["outside"] == "zero"
+
+    primary_record = record("primary_mirror_degraded_map", "map.dat#rpol:clip=1", file=True)
+    secondary_record = record("secondary_mirror_degraded_map", "map.dat#rpol:clip=1", file=True)
+    dual_records, files = dual(
+        primary_mirror_degraded_map=primary_record,
+        secondary_mirror_degraded_map=secondary_record,
+    )
+    files["primary_mirror_degraded_map"] = spatial_map
+    files["secondary_mirror_degraded_map"] = spatial_map
+    optics = build((dual_records, files), zenith_deg=20.0)["optics"]
+    assert optics["primary"]["degradation"]["outside"] == "zero"
+    assert optics["secondary"]["degradation"]["outside"] == "zero"
 
 
 def test_rejected_models():

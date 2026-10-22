@@ -339,10 +339,14 @@ def read_spatial_map(contents: str, name: str, *, filename_options: str = "") ->
     }
 
 
+_STRUCTURE_TEXT = ("id", "group", "shape")
+
+
 def read_structure_table(contents: str, name: str) -> dict[str, Any]:
     """Read an ECSV structure table; check units (m) and the coordinate frame.
 
-    Returns ``{"frame": str, "rows": [{column: value}]}``; numeric columns are floats.
+    Returns ``{"frame": str, "columns": [str], "rows": [{column: value}]}``;
+    numeric columns are floats, ``nan`` marking a column the row does not use.
     """
     header = None
     units: dict[str, str] = {}
@@ -369,20 +373,20 @@ def read_structure_table(contents: str, name: str) -> dict[str, Any]:
             raise ModelError(f"{name} row {len(rows)}: wrong column count")
         row: dict[str, Any] = {}
         for column, field in zip(header, fields, strict=True):
-            if column in ("id", "group"):
+            if column in _STRUCTURE_TEXT:
                 row[column] = field
                 continue
             try:
                 row[column] = float(field)
             except ValueError as error:
                 raise ModelError(f"{name} row {len(rows)}: invalid {column}") from error
-            if not math.isfinite(row[column]):
-                raise ModelError(f"{name} row {len(rows)}: non-finite {column}")
+            if math.isinf(row[column]):
+                raise ModelError(f"{name} row {len(rows)}: infinite {column}")
         rows.append(row)
     if header is None or not rows:
         raise ModelError(f"{name} is empty")
     for column in header:
-        if column not in ("id", "group") and units.get(column) != "m":
+        if column not in _STRUCTURE_TEXT and units.get(column) != "m":
             raise ModelError(f"{name}: column {column} must be declared in metres")
     if frame is None:
         raise ModelError(f"{name} does not declare a coordinate_frame")

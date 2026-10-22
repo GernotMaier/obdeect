@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import math
 from collections.abc import Callable, Mapping
+from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
@@ -26,14 +27,20 @@ class OpticalModel:
     """
 
     def __init__(self, document: dict[str, Any]):
-        if document.get("sha256") != model_hash(document):
+        isolated_document = deepcopy(document)
+        if isolated_document.get("sha256") != model_hash(isolated_document):
             raise ModelError("optical model content does not match its sha256")
-        text = json.dumps(document, ensure_ascii=False, sort_keys=True)
+        text = json.dumps(isolated_document, ensure_ascii=False, sort_keys=True)
         try:
             self._native = _core.Model(text)
         except ValueError as error:
             raise ModelError(str(error)) from error
-        self.document = document
+        self._document = isolated_document
+
+    @property
+    def document(self) -> dict[str, Any]:
+        """Return a copy of the compiled document."""
+        return deepcopy(self._document)
 
     @classmethod
     def from_records(
@@ -85,22 +92,22 @@ class OpticalModel:
 
     def save(self, path: Path) -> None:
         Path(path).write_text(
-            json.dumps(self.document, ensure_ascii=False, indent=1) + "\n", encoding="utf-8"
+            json.dumps(self._document, ensure_ascii=False, indent=1) + "\n", encoding="utf-8"
         )
 
     @property
     def sha256(self) -> str:
-        return self.document["sha256"]
+        return self._document["sha256"]
 
     @property
     def has_structure(self) -> bool:
         """True if the model's own geometry shadows instead of ``telescope_transmission``."""
-        return self.document["provenance"]["structure"]
+        return self._document["provenance"]["structure"]
 
     @property
     def sampling_area_m2(self) -> float:
         """Area of the disk star photons are sampled on (sim_telarray convention)."""
-        return math.pi * self.document["sampling"]["disk_radius_m"] ** 2
+        return math.pi * self._document["sampling"]["disk_radius_m"] ** 2
 
     @property
     def focal_surface_z_m(self) -> float:
@@ -179,7 +186,7 @@ class OpticalModel:
         source distance from the dish vertex (the centre of the sampled disk,
         as in sim_telarray). Times are zero for the wavefront at that point.
         """
-        sampling = self.document["sampling"]
+        sampling = self._document["sampling"]
         direction = np.asarray(towards_source, dtype=float)
         return _core.sample_source(
             direction / np.linalg.norm(direction),

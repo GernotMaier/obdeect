@@ -159,7 +159,8 @@ inline double mirror_response(const Mirror &mirror, const MirrorHit &mh, double 
   out.direction = ray.direction;
   const double length = norm(ray.direction);
   if (!finite(ray.origin) || !std::isfinite(length) || std::abs(length - 1.0) > 1e-6 ||
-      !(wavelength_nm > 0.0) || !std::isfinite(time_ns) || !(weight >= 0.0))
+      !(wavelength_nm > 0.0) || !std::isfinite(wavelength_nm) || !std::isfinite(time_ns) ||
+      !(weight >= 0.0) || !std::isfinite(weight))
     return out;
   ray.direction = ray.direction * (1.0 / length);
   out.weight = weight;

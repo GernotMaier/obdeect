@@ -193,7 +193,7 @@ inline Map2D map2d(const Node &node) {
   m.x_m = node["x_m"].increasing();
   m.y_m = node["y_m"].increasing();
   m.values = node["values"].matrix(m.x_m.size(), m.y_m.size(), true);
-  const auto &outside = node["outside"].string();
+  const auto outside = node["outside"].string();
   if (outside != "clamp" && outside != "zero")
     node["outside"].fail("expected 'clamp' or 'zero'");
   m.zero_outside = outside == "zero";
@@ -204,7 +204,7 @@ inline Scatter scatter(const Node &node) {
   (void)node.object({"sigma1_rad", "fraction2", "sigma2_rad", "method"});
   Scatter s{node["sigma1_rad"].non_negative(), node["fraction2"].fraction(),
             node["sigma2_rad"].non_negative()};
-  const auto &method = node["method"].string();
+  const auto method = node["method"].string();
   if (method != "outgoing_angles" && method != "surface_slopes")
     node["method"].fail("expected 'outgoing_angles' or 'surface_slopes'");
   s.surface_slopes = method == "surface_slopes";
@@ -229,7 +229,7 @@ inline Asphere asphere(const Node &node, std::uint32_t id) {
 inline Segment segment(const Node &node) {
   constexpr double degree = 3.14159265358979323846 / 180.0;
   Segment s;
-  const auto &shape = node["shape"].string();
+  const auto shape = node["shape"].string();
   if (shape == "annular_sector") {
     (void)node.object({"id", "shape", "inner_radius_m", "outer_radius_m", "start_deg", "span_deg",
                        "gap_m", "gap_at_start"});
@@ -336,7 +336,7 @@ inline std::uint8_t legs(const Node &node) {
 
 inline Obscurer obscurer(const Node &node, std::vector<Plane> &planes) {
   Obscurer o;
-  const auto &shape = node["shape"].string();
+  const auto shape = node["shape"].string();
   if (shape == "cylinder") {
     (void)node.object({"id", "name", "group", "legs", "shape", "start_m", "end_m", "diameter_m"});
     o.kind = Obscurer::Kind::cylinder;

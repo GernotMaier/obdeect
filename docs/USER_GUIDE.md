@@ -24,8 +24,9 @@ obdeect trace --model lst.json --seed 2 --photons 100000 \
 obdeect plot --model lst.json --arrivals lst-arrivals.npz --output lst.png
 ```
 
-`compile` reads full productions of the simulation models (patch productions
-are resolved by simtools). `--seed` fixes the random mirror errors (focal
+`compile` reads full and patch productions of the simulation models; a patch
+production is laid over the productions in its `model_version_history`, as in
+simtools. `--seed fixes the random mirror errors (focal
 lengths, alignment); `--zenith-deg` is the telescope zenith angle used by
 zenith-dependent focus offsets and alignment errors. `trace --seed` fixes source
 sampling and mirror scattering. `--geometry-only` leaves the photon weights
@@ -122,13 +123,17 @@ path of the first error. Surface and obscurer ids are unique.
 
 ## Telescope structure
 
-If a telescope model contains the parameters `telescope_obscuration_cylinders`
-or `telescope_obscuration_quadrilaterals`, their shadows (masts, quadrupods,
-dish structure) are traced on all legs, and `telescope_transmission` is not
-applied: the geometry replaces the parameterised shadowing. sim_telarray has no
-equivalent. Both tables are ECSV in metres in the `primary_mirror_frame`
-(z = 0 at the dish vertex), one row per element:
+If a telescope model contains the parameter `telescope_structure`, the shadows
+of its structure (masts, quadrupods, dish frame) are traced on all legs, and
+`telescope_transmission` is not applied: the geometry replaces the
+parameterised shadowing (as in sim_telarray's own mast option,
+`RAYTRACING_INTERSECT_RODS`). The camera body shadow stays. The table is ECSV
+in metres in the `primary_mirror_frame` (the frame of `mirror_list`, z = 0 at
+the dish vertex), one row per element, by its `shape`:
 
-- cylinders: `id`, `group`, `x1 y1 z1`, `x2 y2 z2` (axis end points), `diameter`;
-- quadrilaterals: `id`, `group`, `x1 y1 z1` ... (four or more vertices); each
-  row is the solid convex hull of its vertices.
+- `cylinder`: axis end points `x1 y1 z1`, `x2 y2 z2` and `diameter`;
+- `convex_polyhedron`: corner points `x1 y1 z1`, `x2 y2 z2`, ... (at least
+  four); the element is the solid convex hull of its corners.
+
+Columns `id`, `group` (optional) and `shape` are text. A row leaves the
+columns it does not use as `nan`; unused points come last.

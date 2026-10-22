@@ -31,6 +31,31 @@ def test_store_and_reload(tmp_path):
         OpticalModel(tampered)
 
 
+def test_model_document_is_isolated_from_mutation(tmp_path):
+    document = model_of(segmented()).document
+    model = OpticalModel(document)
+    original_area = model.sampling_area_m2
+    original_hash = model.sha256
+    original_photons = model.star_photons(8, seed=3)
+
+    document["sampling"]["disk_radius_m"] = 1.0
+    document["optics"]["focal_surface"]["plane_z_m"] = -99.0
+    exposed = model.document
+    exposed["sampling"]["disk_radius_m"] = 2.0
+    exposed["optics"]["focal_surface"]["plane_z_m"] = -50.0
+
+    assert model.sampling_area_m2 == original_area
+    assert model.sha256 == original_hash
+    assert np.array_equal(
+        model.star_photons(8, seed=3)["position_m"], original_photons["position_m"]
+    )
+    assert model.document["optics"]["focal_surface"]["plane_z_m"] != -50.0
+    saved = tmp_path / "model.json"
+    model.save(saved)
+    assert json.loads(saved.read_text()) == OpticalModel.load(saved).document
+    assert json.loads(saved.read_text())["sampling"]["disk_radius_m"] != 1.0
+
+
 def test_native_errors_name_the_json_path():
     document = model_of(segmented()).document
     document["optics"]["primary"]["facets"][2]["normal"] = [0.0, 0.0, 2.0]
@@ -182,6 +207,30 @@ def test_repository_and_command_line(tmp_path, capsys):
     assert main(f"plot --model {model} --arrivals {arrivals} --output {plot}".split()) == 0
     assert plot.stat().st_size > 0
     assert main([*compile_args.split(), "--model", "MISSING"]) == 1
-    (root / "productions" / "9.9.9" / "info.yml").write_text('model_update: "patch_update"\n')
-    with pytest.raises(ModelError, match="patch production"):
-        read_telescope(root, "TEST-design", "9.9.9")
+
+
+def test_patch_production_overlays_its_history(tmp_path):
+    root = tmp_path / "simulation-models"
+    records, files = segmented()
+    write_simulation_models(root, "TEST-design", records, files)
+    patch = root / "productions" / "9.9.10"
+    patch.mkdir()
+    (patch / "info.yml").write_text(
+        'model_version: "9.9.10"\nmodel_update: "patch_update"\n'
+        'model_version_history:\n  - "9.9.9"\nmodel_status: "production"\n'
+    )
+    table = {"focal_length": "2.0.0"}
+    manifest = {"model_version": "9.9.10", "parameters": {"TEST-design": table}}
+    manifest["deprecated_parameters"] = ["camera_depth"]
+    (patch / "TEST-design.json").write_text(json.dumps(manifest))
+    focal = records["focal_length"] | {"parameter_version": "2.0.0", "value": 810.0}
+    directory = root / "model_parameters" / "TEST-design" / "focal_length"
+    (directory / "focal_length-2.0.0.json").write_text(json.dumps(focal))
+
+    patched = read_telescope(root, "TEST-design", "9.9.10")
+    assert patched.records["focal_length"]["value"] == 810.0
+    assert "camera_depth" not in patched.records
+    assert set(patched.records) == set(records) - {"camera_depth"}
+    assert read_telescope(root, "TEST-design", "9.9.9").records["focal_length"]["value"] == 800.0
+    with pytest.raises(ModelError, match="no production table MISSING in 9.9.10"):
+        read_telescope(root, "MISSING", "9.9.10")

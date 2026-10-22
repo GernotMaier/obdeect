@@ -40,7 +40,8 @@ obdeect trace --model mst.json --seed 2 --photons 10000 --field-deg 0.5 0
 python -m venv .venv
 source .venv/bin/activate
 python -m pip install -e '.[dev]'
-cmake --preset debug   # add '--target clean' if you want to clean the build directory before building
+cmake --preset debug
+cmake --build --preset debug --target clean  # optional: clean the build directory before building
 cmake --build --preset debug
 ```
 
