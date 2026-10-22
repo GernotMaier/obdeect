@@ -54,34 +54,62 @@ def _parameter_path(root: Path, instrument: str, name: str, version: str) -> Pat
     return root / "model_parameters" / instrument / name / f"{name}-{version}.json"
 
 
+def _production_versions(root: Path, version: str) -> list[str]:
+    """The production and, for a patch production, the productions it patches
+    (its model_version_history), oldest first, as simtools merges them."""
+    versions = {version}
+    info = root / "productions" / version / "info.yml"
+    text = info.read_text(encoding="utf-8") if info.is_file() else ""
+    if re.search(r"^model_update:\s*[\"']?patch_update", text, re.MULTILINE):
+        history = re.search(
+            r"^model_version_history:(.*?)(?=^\S|\Z)", text, re.MULTILINE | re.DOTALL
+        )
+        versions |= set(re.findall(r"\d+\.\d+\.\d+", history[1] if history else ""))
+    return sorted(versions, key=lambda v: tuple(int(part) for part in v.split(".")))
+
+
+def _production_table(
+    root: Path, versions: list[str], instrument: str
+) -> tuple[dict[str, str], str | None]:
+    """Parameter versions and design model of `instrument`, merged over `versions`."""
+    table: dict[str, str] = {}
+    parent = None
+    deprecated: list[str] = []
+    found = False
+    for version in versions:
+        path = root / "productions" / version / f"{instrument}.json"
+        if not path.is_file():
+            continue
+        manifest = _load(path)
+        parameters = manifest.get("parameters", {}).get(instrument)
+        if manifest.get("model_version") != version or not isinstance(parameters, dict):
+            raise ModelError(f"invalid production table {instrument} {version}")
+        found = True
+        table |= parameters
+        parent = manifest.get("design_model", {}).get(instrument, parent)
+        deprecated = manifest.get("deprecated_parameters", deprecated)
+    if not found:
+        raise ModelError(f"no production table {instrument} in {versions[-1]}")
+    return {k: v for k, v in table.items() if k not in deprecated}, parent
+
+
 def read_telescope(root: Path, model: str, version: str) -> TelescopeRecords:
-    """Records of `model` in production `version`, following design-model
-    inheritance, plus the site's air group index at the observation level."""
+    """Records of `model` in production `version` (a full or a patch
+    production), following design-model inheritance, plus the site's air
+    group index at the observation level."""
     root = Path(root).resolve()
     if (
         not (root / "productions").is_dir()
         and (root / "simulation-models" / "productions").is_dir()
     ):
         root = root / "simulation-models"
-    version = _component(version)
-    info = root / "productions" / version / "info.yml"
-    if info.is_file() and re.search(
-        r"^model_update:\s*[\"']?patch_update", info.read_text(encoding="utf-8"), re.MULTILINE
-    ):
-        raise ModelError(
-            f"{version} is a patch production; only full productions are read "
-            "(simtools resolves patch productions)"
-        )
+    versions = _production_versions(root, _component(version))
     chosen: dict[str, tuple[str, str]] = {}
 
     def inherit(instrument: str, chain: tuple[str, ...] = ()) -> None:
         if _component(instrument) in chain:
             raise ModelError("cyclic design-model inheritance")
-        manifest = _load(root / "productions" / version / f"{instrument}.json")
-        table = manifest.get("parameters", {}).get(instrument)
-        if manifest.get("model_version") != version or not isinstance(table, dict):
-            raise ModelError(f"invalid production table {instrument} {version}")
-        parent = manifest.get("design_model", {}).get(instrument)
+        table, parent = _production_table(root, versions, instrument)
         if parent is not None:
             inherit(parent, (*chain, instrument))
         for name, parameter_version in table.items():
@@ -112,15 +140,17 @@ def read_telescope(root: Path, model: str, version: str) -> TelescopeRecords:
     if len(sites) > 1:
         raise ModelError(f"{model}: parameters disagree on the site")
     site = next(iter(sites), None)
-    return TelescopeRecords(model, version, site, records, files, _group_index(root, version, site))
+    return TelescopeRecords(
+        model, version, site, records, files, _group_index(root, versions, site)
+    )
 
 
-def _group_index(root: Path, version: str, site: str | None) -> float:
+def _group_index(root: Path, versions: list[str], site: str | None) -> float:
     """Air group index at the observation level, from the site's atmosphere."""
     if site is None:
         return 1.0
     instrument = f"OBS-{_component(site)}"
-    table = _load(root / "productions" / version / f"{instrument}.json")["parameters"][instrument]
+    table = _production_table(root, versions, instrument)[0]
     profile = _load(
         _parameter_path(root, instrument, "atmospheric_profile", table["atmospheric_profile"])
     )
