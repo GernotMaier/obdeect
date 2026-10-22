@@ -41,8 +41,8 @@ from obdeect.formats import (
 from obdeect.simtel_tables import evaluate
 
 MODEL_FORMAT = "obdeect.optical-model.v2"
-# Structure tables (masts, quadrupods, dish frame); see docs/USER_GUIDE.md.
-STRUCTURE_PARAMETERS = ("telescope_obscuration_cylinders", "telescope_obscuration_quadrilaterals")
+# Structure table (masts, quadrupods, dish frame); see docs/USER_GUIDE.md.
+STRUCTURE_PARAMETER = "telescope_structure"
 ALL_LEGS = ["incoming", "after_primary", "after_secondary"]
 
 
@@ -807,47 +807,58 @@ def _baffle(record: dict[str, Any], overall: float) -> dict[str, Any] | None:
 def _structure(p: _Parameters, first_id: int) -> list[dict[str, Any]]:
     """Opaque structure in the dish frame (z = 0 at the dish vertex).
 
-    Cylinders: id, group, x1..z2, diameter. Polyhedra: id, group and vertex
-    columns x1, y1, z1, x2, ...; each row is the convex hull of its vertices.
+    One row per element, by its ``shape``: ``cylinder`` (axis end points 1 and
+    2, ``diameter``) or ``convex_polyhedron`` (the convex hull of its corner
+    points 1, 2, ...). Columns a row does not use are nan.
     """
-    obscurers: list[dict[str, Any]] = []
+    if not p.has_file(STRUCTURE_PARAMETER):
+        return []
+    name = STRUCTURE_PARAMETER
+    table = read_structure_table(p.file(name)[0], name)
+    if table["frame"] != "primary_mirror_frame":
+        raise ModelError(f"{name}: unsupported coordinate_frame {table['frame']}")
+    if not {"id", "shape", "diameter", "x1", "x2"} <= set(table["columns"]):
+        raise ModelError(f"{name} needs the columns id, shape, diameter and x1, y1, z1, ...")
+    corners = sum(1 for column in table["columns"] if column[0] == "x" and column[1:].isdigit())
     overall = (
         signed_length_m(p.record("mirror_offset"), "mirror_offset") if "mirror_offset" in p else 0.0
     )
-    for name in STRUCTURE_PARAMETERS:
-        if not p.has_file(name):
-            continue
-        table = read_structure_table(p.file(name)[0], name)
-        if table["frame"] != "primary_mirror_frame":
-            raise ModelError(f"{name}: unsupported coordinate_frame {table['frame']}")
-
-        def point(row: dict[str, Any], i: int) -> list[float]:
-            return [row[f"x{i}"], row[f"y{i}"], row[f"z{i}"] - overall]
-
-        for row in table["rows"]:
-            base = {
-                "id": first_id + len(obscurers),
-                "name": row["id"],
-                "group": row.get("group", "structure"),
-                "legs": ALL_LEGS,
-            }
-            if name == "telescope_obscuration_cylinders":
-                obscurers.append({
-                    **base,
-                    "shape": "cylinder",
-                    "start_m": point(row, 1),
-                    "end_m": point(row, 2),
-                    "diameter_m": row["diameter"],
-                })
-            else:
-                count = sum(1 for column in table["columns"] if column.startswith("x"))
-                vertices = [point(row, i) for i in range(1, count + 1)]
-                obscurers.append({
-                    **base,
-                    "shape": "polyhedron",
-                    "vertices_m": vertices,
-                    "planes": convex_hull(vertices),
-                })
+    obscurers: list[dict[str, Any]] = []
+    for row in table["rows"]:
+        where = f"{name} {row['id']}"
+        points = [[row[f"{a}{i}"] for a in "xyz"] for i in range(1, corners + 1)]
+        if any(math.isnan(v) != math.isnan(point[0]) for point in points for v in point):
+            raise ModelError(f"{where}: a point has nan and numeric coordinates")
+        used = [[x, y, z - overall] for x, y, z in points if not math.isnan(x)]
+        if any(math.isnan(point[0]) for point in points[: len(used)]):
+            raise ModelError(f"{where}: unused points must come last")
+        base = {
+            "id": first_id + len(obscurers),
+            "name": row["id"],
+            "group": row.get("group", "structure"),
+            "legs": ALL_LEGS,
+        }
+        if row["shape"] == "cylinder":
+            if len(used) != 2 or not row["diameter"] > 0.0:
+                raise ModelError(f"{where}: a cylinder needs two end points and a diameter")
+            obscurers.append({
+                **base,
+                "shape": "cylinder",
+                "start_m": used[0],
+                "end_m": used[1],
+                "diameter_m": row["diameter"],
+            })
+        elif row["shape"] == "convex_polyhedron":
+            if not math.isnan(row["diameter"]):
+                raise ModelError(f"{where}: a convex_polyhedron has no diameter")
+            obscurers.append({
+                **base,
+                "shape": "polyhedron",
+                "vertices_m": used,
+                "planes": convex_hull(used),
+            })
+        else:
+            raise ModelError(f"{where}: unsupported shape {row['shape']}")
     return obscurers
 
 

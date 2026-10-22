@@ -31,30 +31,13 @@ MIRROR_LIST = """# x y diameter focal shape
  -62.5  -108.3  100.0  0.0  0
 """
 
-CYLINDERS = """# %ECSV 1.0
+STRUCTURE = """# %ECSV 1.0
 # ---
 # datatype:
 # - {name: id, datatype: string}
 # - {name: group, datatype: string}
-# - {name: x1, unit: m, datatype: float64}
-# - {name: y1, unit: m, datatype: float64}
-# - {name: z1, unit: m, datatype: float64}
-# - {name: x2, unit: m, datatype: float64}
-# - {name: y2, unit: m, datatype: float64}
-# - {name: z2, unit: m, datatype: float64}
+# - {name: shape, datatype: string}
 # - {name: diameter, unit: m, datatype: float64}
-# meta:
-#   coordinate_frame: primary_mirror_frame
-# schema: astropy-2.0
-id group x1 y1 z1 x2 y2 z2 diameter
-mast-0 camera_support 0.0 1.6 0.1 0.0 0.5 7.9 0.1
-"""
-
-POLYHEDRA = """# %ECSV 1.0
-# ---
-# datatype:
-# - {name: id, datatype: string}
-# - {name: group, datatype: string}
 # - {name: x1, unit: m, datatype: float64}
 # - {name: y1, unit: m, datatype: float64}
 # - {name: z1, unit: m, datatype: float64}
@@ -70,8 +53,9 @@ POLYHEDRA = """# %ECSV 1.0
 # meta:
 #   coordinate_frame: primary_mirror_frame
 # schema: astropy-2.0
-id group x1 y1 z1 x2 y2 z2 x3 y3 z3 x4 y4 z4
-plate-0 dish_structure 1.0 -1.0 3.0 1.2 -1.0 3.0 1.0 -0.8 3.0 1.0 -1.0 3.2
+id group shape diameter x1 y1 z1 x2 y2 z2 x3 y3 z3 x4 y4 z4
+mast-0 camera_support cylinder 0.1 0.0 1.6 0.1 0.0 0.5 7.9 nan nan nan nan nan nan
+plate-0 dish_structure convex_polyhedron nan 1.0 -1.0 3.0 1.2 -1.0 3.0 1.0 -0.8 3.0 1.0 -1.0 3.2
 """
 
 
@@ -95,10 +79,7 @@ def segmented(**changes) -> tuple[dict, dict]:
     }
     files = {"mirror_list": MIRROR_LIST}
     for name, value in changes.items():
-        if isinstance(value, str) and name in (
-            "telescope_obscuration_cylinders",
-            "telescope_obscuration_quadrilaterals",
-        ):
+        if isinstance(value, str) and name == "telescope_structure":
             records[name] = record(name, f"{name}.ecsv", file=True)
             files[name] = value
         elif value is None:

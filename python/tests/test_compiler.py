@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 from obdeect.compiler import compile_model, convex_hull, model_hash, response_grid
 from obdeect.formats import ModelError
-from telescopes import CYLINDERS, POLYHEDRA, dual, record, segmented
+from telescopes import STRUCTURE, dual, record, segmented
 
 
 def build(records_files, **options):
@@ -81,12 +81,7 @@ def test_camera_body_and_transmission():
 
 
 def test_structure_replaces_the_telescope_transmission():
-    model = build(
-        segmented(
-            telescope_obscuration_cylinders=CYLINDERS,
-            telescope_obscuration_quadrilaterals=POLYHEDRA,
-        )
-    )
+    model = build(segmented(telescope_structure=STRUCTURE))
     optics = model["optics"]
     assert optics["telescope_transmission"] is None
     assert model["provenance"]["structure"]
@@ -98,6 +93,21 @@ def test_structure_replaces_the_telescope_transmission():
     assert plate["shape"] == "polyhedron" and len(plate["planes"]) == 4
     ids = [o["id"] for o in optics["obscurers"]] + [f["id"] for f in optics["primary"]["facets"]]
     assert len(ids) == len(set(ids)) and optics["focal_surface"]["id"] not in ids
+
+
+@pytest.mark.parametrize(
+    ("old", "new", "message"),
+    [
+        ("cylinder 0.1", "cylinder nan", "two end points and a diameter"),
+        ("0.0 0.5 7.9 nan nan nan", "nan nan nan 0.0 0.5 7.9", "unused points must come last"),
+        ("0.0 0.5 7.9 nan nan nan", "0.0 0.5 7.9 1.0 nan nan", "nan and numeric"),
+        ("convex_polyhedron nan", "convex_polyhedron 0.2", "has no diameter"),
+        ("convex_polyhedron", "box", "unsupported shape box"),
+    ],
+)
+def test_structure_rows_are_checked(old, new, message):
+    with pytest.raises(ModelError, match=message):
+        build(segmented(telescope_structure=STRUCTURE.replace(old, new)))
 
 
 def test_convex_hull():

@@ -17,7 +17,7 @@ from obdeect.formats import (
     segmentation_from_record,
 )
 from obdeect.simtel_tables import evaluate, parse_rpol_table
-from telescopes import CYLINDERS, MIRROR_LIST, POLYHEDRA
+from telescopes import MIRROR_LIST, STRUCTURE
 
 
 def test_lengths_convert_to_metres():
@@ -114,15 +114,18 @@ def test_spatial_map():
 
 
 def test_structure_tables():
-    cylinders = read_structure_table(CYLINDERS, "c")
-    assert cylinders["frame"] == "primary_mirror_frame"
-    assert cylinders["rows"][0]["id"] == "mast-0" and cylinders["rows"][0]["diameter"] == 0.1
-    polyhedra = read_structure_table(POLYHEDRA, "q")
-    assert polyhedra["columns"][2:5] == ["x1", "y1", "z1"]
+    table = read_structure_table(STRUCTURE, "s")
+    assert table["frame"] == "primary_mirror_frame"
+    assert table["columns"][:5] == ["id", "group", "shape", "diameter", "x1"]
+    mast, plate = table["rows"]
+    assert mast["id"] == "mast-0" and mast["shape"] == "cylinder" and mast["diameter"] == 0.1
+    assert math.isnan(mast["x3"]) and math.isnan(plate["diameter"])
+    assert math.isclose(plate["z4"], 3.2)
     with pytest.raises(ModelError, match="metres"):
-        read_structure_table(CYLINDERS.replace("diameter, unit: m", "diameter, unit: cm"), "c")
+        read_structure_table(STRUCTURE.replace("diameter, unit: m", "diameter, unit: cm"), "s")
     with pytest.raises(ModelError, match="coordinate_frame"):
         read_structure_table(
-            CYLINDERS.replace("#   coordinate_frame: primary_mirror_frame\n", ""), "c"
+            STRUCTURE.replace("#   coordinate_frame: primary_mirror_frame\n", ""), "s"
         )
-    assert math.isclose(polyhedra["rows"][0]["z4"], 3.2)
+    with pytest.raises(ModelError, match="infinite"):
+        read_structure_table(STRUCTURE.replace("0.1 0.0 1.6", "inf 0.0 1.6"), "s")

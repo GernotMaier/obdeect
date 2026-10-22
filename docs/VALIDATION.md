@@ -79,9 +79,20 @@ origin (0.02% plate-scale difference for the SCT at 10 km).
 
 ## Telescope structure (beyond sim_telarray)
 
-With the MSTx-FlashCam structure prototype (simulation-models branch
-`simulation-model-masts`), the traced structure transmits 0.895 of the light on
-axis and 0.882 at 4 deg, against 0.898 and 0.885 from `telescope_transmission`.
-This needs one prototype error fixed: `dish-structure-prism-046` has its fourth
-vertex at x = -5.48 m instead of +5.48 m, which spans a slab across the dish and
-lowers the transmission to 0.856.
+`telescope_transmission` is sim_telarray's fit of the ratio of the effective
+mirror area of a detailed ray tracing (with masts) to its own (camera body
+only), versus the off-axis angle. The same ratio from obdeect, the same photons
+traced with and without the structure (geometry only, mean of four azimuths),
+for MSTx-FlashCam (`telescope_structure` 1.0.0 on simulation-models branch
+`simulation-model-masts`):
+
+| Off axis | 0 deg | 1 deg | 2 deg | 3 deg | 4 deg |
+| --- | --- | --- | --- | --- | --- |
+| obdeect structure | 0.8945 | 0.8917 | 0.8897 | 0.8866 | 0.8855 |
+| `telescope_transmission` 2.0.0 | 0.8980 | 0.8967 | 0.8939 | 0.8898 | 0.8846 |
+
+`simtools-validate-optics` for MSTS-01 (production 7.0.0, both backends)
+agrees in effective area within 0.4% on axis and 1.2% up to 4 deg; obdeect
+shows the azimuthal dependence (up to 2% between N and E) that the radial
+parameterisation cannot. The structure also widens D80 by 1.4% on axis (same
+photons with and without structure), since it shades the dish unevenly.
