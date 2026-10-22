@@ -71,6 +71,26 @@ comes from a Philox-4x32-10 counter keyed by the seed, photon id and stream, so
 results do not depend on threads, blocks or photon order. Times use the group
 index stored in the model.
 
+## Calibration light
+
+A point emitter sends N photons into 4 pi with the relative intensity I(theta)
+per solid angle, theta measured from its axis. The photons crossing a target
+disk (unit normal n, radius R, distance h of the emitter from its plane) are
+sampled without waste: target points are uniform on the disk, and a photon to
+a point at distance r carries the weight
+
+```latex
+w = \frac{I(\theta)}{I_\mathrm{max}} \left(\frac{h}{r}\right)^3 \le 1,
+```
+
+its fluence relative to the largest possible. The number of candidates is
+Poisson with mean N I_max R^2 / (2 h^2 \int I \, d(1 - \cos\theta)), so
+keeping each with the probability of its weight gives a Poisson number of
+photons crossing the disk, as for the real source. Angular profiles are linear
+in 1 - cos(theta), as in the sim_telarray LightEmission tables; emission times
+follow the pulse table. simtools hands the photons reaching the camera to
+sim_telarray, which simulates the camera with its optics bypassed.
+
 ## Known differences from sim_telarray
 
 - sim_telarray (`sim_imaging.c`, two places) rotates the scattered direction
@@ -79,3 +99,8 @@ index stored in the model.
 - Telescope structure is traced only by obdeect.
 - The camera front-face test on the dual-mirror leg is compiled out of
   sim_telarray; obdeect follows the compiled behaviour.
+- Flashers: the camera is where the optics put it, at `focal_length +
+  focus_offset`; simtools places it for `ff-1m` at `focal_length` (0.3% more
+  light for a 2.55 cm focus offset at 16.5 m). `ff-1m` traces no structure.
+- Illuminators: `xyzls` refracts the light; over the 600 m to a telescope this
+  bends it by about 4 arcsec, which obdeect neglects.

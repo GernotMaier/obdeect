@@ -92,6 +92,45 @@ def test_star_photons_depend_only_on_their_ids():
         assert np.array_equal(values, many[name][9000:16000]), name
 
 
+def test_emitter_photons_cross_the_disk_in_the_expected_number():
+    model = model_of(segmented())
+    sampling = model.document["sampling"]
+    height, radius = 500.0, sampling["disk_radius_m"]
+    position = (0.0, 0.0, sampling["disk_z_m"] + height)
+    emitted = 2e8
+    photons = model.emitter_photons(
+        emitted, seed=4, position_m=position, intensity=([0.0, 180.0], [1.0, 1.0])
+    )
+    expected = emitted * (1.0 - height / math.hypot(height, radius)) / 2.0
+    assert abs(len(photons["weight"]) - expected) < 4.0 * math.sqrt(expected)
+    assert np.all((photons["weight"] > 0.99) & (photons["weight"] <= 1.0))
+    assert np.all(photons["position_m"] == position)
+    again = model.emitter_photons(
+        emitted, seed=4, position_m=position, intensity=([0.0, 180.0], [1.0, 1.0])
+    )
+    assert np.array_equal(again["direction"], photons["direction"])
+    assert np.all(photons["time_ns"] == 0.0)
+
+
+def test_flasher_light_goes_straight_to_the_camera():
+    model = model_of(segmented())
+    camera = model.focal_surface_z_m
+    photons = model.emitter_photons(
+        1e7,
+        seed=2,
+        position_m=(0.0, 0.0, 0.0),
+        intensity=([0.0, 10.0, 10.001], [1.0, 1.0, 0.0]),
+        pulse=([-1.0, 1.0], [1.0, 1.0]),
+        disk=((0.0, 0.0, camera), (0.0, 0.0, 1.0), 0.5),
+    )
+    arrivals = model.trace(photons, seed=2, direct=True)
+    assert np.all(arrivals["status"] == DETECTED)
+    assert np.allclose(arrivals["position_m"][:, 2], camera)
+    assert np.array_equal(arrivals["weight"], photons["weight"])
+    assert np.all(arrivals["primary_surface"] == np.iinfo(np.uint32).max)  # No mirror.
+    assert np.all(np.abs(photons["time_ns"]) <= 1.0)
+
+
 def test_off_axis_image_moves_by_the_plate_scale():
     model = model_of(segmented(camera_body_diameter=record("camera_body_diameter", 0.0, "cm")))
     theta = math.radians(1.0)

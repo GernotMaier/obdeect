@@ -85,3 +85,34 @@ axis and 0.882 at 4 deg, against 0.898 and 0.885 from `telescope_transmission`.
 This needs one prototype error fixed: `dish-structure-prism-046` has its fourth
 vertex at x = -5.48 m instead of +5.48 m, which spans a slab across the dish and
 lowers the transmission to 0.856.
+
+## Calibration light (Phase 2)
+
+`simtools-simulate-flasher --run_mode full_simulation` and
+`simtools-simulate-illuminator` with `--ray_tracing_backend obdeect`: obdeect
+makes and traces the light, simtools writes the photons at the camera entrance
+as photon bunches, and sim_telarray simulates the camera with
+`Bypass_Optics=1`. The reference is `ff-1m` or `xyzls` followed by sim_telarray
+(simulation models 7.0.0).
+
+- Photon bunch file: the bunches of an `ff-1m` file, written again by simtools,
+  give an identical sim_telarray output (photoelectrons of every pixel).
+- Flasher (MSFx-FlashCam on MSTS-04, 200 pulses of 10^6 photons):
+  photoelectrons 0.24% and charge 0.46% below `ff-1m`, as expected from the
+  camera position (`focus_offset` 2.55 cm, 0.31%); time centroid of the camera
+  sum 9.80 and 9.79 samples. Two `ff-1m` runs differ per pixel by 1.2 times
+  Poisson, as obdeect does from `ff-1m`.
+- Illuminator, mirrors without random errors (10^10 photons):
+
+| Case | Photoelectrons sim_telarray / obdeect | Image centre [m] sim_telarray / obdeect |
+| --- | --- | --- |
+| ILLN-01 to MSTN-02 (axes offset 1.6 m) | 58969 / 58843 | (0.0122, -0.0025) / (0.0119, -0.0017) |
+| ILLN-02 to LSTN-01 | 56902 / 56802 | (-0.0084, 0.0024) / (-0.0106, 0.0023) |
+| LSTN-01, source 2 deg off axis (camera rotated 10.9 deg) | 62343 / 61844 | (-0.8679, -0.3747) / (-0.8701, -0.3726) |
+
+  Image widths agree within 2%. Single illuminator pulses fluctuate more than
+  Poisson: two sim_telarray runs of the off-axis case differ by 1.9% in total
+  and per pixel by 2.1 times Poisson, obdeect from sim_telarray by 0.8% and 2.3.
+- With random mirror errors, each realisation shapes the defocused image of a
+  source at 600 m: two runs of either code differ per pixel by 7 to 9 times
+  Poisson; the totals agree within 0.6%.

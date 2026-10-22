@@ -102,6 +102,66 @@ class OpticalModel:
         """Area of the disk star photons are sampled on (sim_telarray convention)."""
         return math.pi * self.document["sampling"]["disk_radius_m"] ** 2
 
+    @property
+    def focal_surface_z_m(self) -> float:
+        """Height of the focal plane, or of the focal-surface vertex, in the telescope frame."""
+        focal = self.document["optics"]["focal_surface"]
+        return focal["asphere"]["vertex_z_m"] if "asphere" in focal else focal["plane_z_m"]
+
+    def emitter_photons(
+        self,
+        emitted: float,
+        *,
+        seed: int,
+        position_m: tuple[float, float, float],
+        intensity: tuple[np.ndarray, np.ndarray],
+        axis: tuple[float, float, float] = (0.0, 0.0, 1.0),
+        pulse: tuple[np.ndarray, np.ndarray] | None = None,
+        wavelength_nm: float = 400.0,
+        disk: tuple[tuple[float, float, float], tuple[float, float, float], float] | None = None,
+        first_id: int = 0,
+    ) -> dict[str, np.ndarray]:
+        """Photons of a point emitter (a calibration light source) that cross a disk.
+
+        The emitter at `position_m` (telescope frame) sends `emitted` photons
+        into 4 pi with the relative intensity per solid angle `intensity`
+        (angles from `axis` [deg], values; linear in 1 - cos(angle), zero
+        beyond the last angle) and emission times from the relative density
+        `pulse` (times [ns], values; None: all at 0). Photons are made only
+        on their way through `disk` (centre, unit normal, radius [m]; default
+        the star-light disk). Their weights are in [0, 1], and their number is
+        Poisson distributed, so keeping each photon with the probability of
+        its weight gives the photons crossing the disk; the sum of weights
+        estimates their mean number. Start positions are the emitter, times
+        are emission times.
+        """
+        if disk is None:
+            sampling = self.document["sampling"]
+            disk = ((0.0, 0.0, sampling["disk_z_m"]), (0.0, 0.0, 1.0), sampling["disk_radius_m"])
+        angle_deg, values = (np.asarray(column, dtype=float) for column in intensity)
+        pulse_ns, pulse_values = (
+            (np.empty(0), np.empty(0))
+            if pulse is None
+            else (np.asarray(column, dtype=float) for column in pulse)
+        )
+        centre, normal, radius = disk
+        source = _core.Emitter(
+            np.asarray(position_m, dtype=float),
+            np.asarray(axis, dtype=float),
+            1.0 - np.cos(np.radians(angle_deg)),
+            values,
+            pulse_ns,
+            pulse_values,
+            np.asarray(centre, dtype=float),
+            np.asarray(normal, dtype=float),
+            float(radius),
+            wavelength_nm,
+        )
+        count = np.random.default_rng([seed, first_id]).poisson(
+            emitted * source.candidates_per_photon()
+        )
+        return source.sample(first_id, int(count), seed)
+
     def star_photons(
         self,
         count: int,
@@ -140,12 +200,16 @@ class OpticalModel:
         seed: int,
         apply_responses: bool = True,
         threads: int = 0,
+        direct: bool = False,
     ) -> dict[str, np.ndarray]:
         """Trace photons; returns per-photon arrays (see docs/USER_GUIDE.md).
 
         `photons` holds position_m (n, 3), direction (n, 3), wavelength_nm,
         time_ns, weight and photon_id. With apply_responses False only geometry
-        acts (weights unchanged); `threads` 0 uses every core.
+        acts (weights unchanged); `threads` 0 uses every core. `direct`
+        photons start inside the telescope on their way to the focal surface
+        (e.g. from a flasher): mirrors and telescope transmission do not act,
+        the obscurers of that leg do.
         """
 
         def column(name: str, dtype: type) -> np.ndarray:
@@ -161,4 +225,5 @@ class OpticalModel:
             seed=seed,
             apply_responses=apply_responses,
             threads=threads,
+            direct=direct,
         )

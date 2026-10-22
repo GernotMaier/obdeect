@@ -5,6 +5,7 @@
 #include "obdeect/random.hpp"
 #include "obdeect/source.hpp"
 
+#include <stdexcept>
 #include <vector>
 
 using namespace obdeect;
@@ -375,6 +376,65 @@ void sources() {
              1e-9);
 }
 
+void densities() {
+  // Density 2x on [0, 1], 2 on [1, 3]: integral 5, CDF x^2 / 5 below 1.
+  const LinearDensity d({0.0, 1.0, 3.0}, {0.0, 2.0, 2.0});
+  CHECK_NEAR(d.integral(), 5.0, 1e-15);
+  CHECK_NEAR(d.maximum(), 2.0, 0.0);
+  CHECK_NEAR(d.at(0.5), 1.0, 1e-15);
+  CHECK_NEAR(d.at(3.5), 0.0, 0.0);
+  CHECK_NEAR(d.sample(0.1), std::sqrt(0.5), 1e-15);
+  CHECK_NEAR(d.sample(0.6), 2.0, 1e-15);
+  CHECK_NEAR(d.sample(1.0), 3.0, 1e-15);
+  CHECK_NEAR(LinearDensity().sample(0.3), 0.0, 0.0); // Empty: point mass at zero.
+  bool rejected = false;
+  try {
+    const LinearDensity bad({1.0, 0.0}, {1.0, 1.0});
+  } catch (const std::invalid_argument &) {
+    rejected = true;
+  }
+  CHECK(rejected);
+}
+
+void emitters() {
+  // An isotropic emitter 10 m above the centre of a 2 m disk: the photons
+  // crossing it per emitted photon are the disk's solid angle over 4 pi.
+  Emitter lamp{{0.0, 0.0, 10.0},
+               {0.0, 0.0, -1.0},
+               LinearDensity({0.0, 2.0}, {1.0, 1.0}),
+               LinearDensity({-1.0, 1.0}, {1.0, 1.0}),
+               {0.0, 0.0, 0.0},
+               {0.0, 0.0, 1.0},
+               2.0,
+               355.0};
+  CHECK_NEAR(lamp.candidates_per_photon(), 4.0 / (4.0 * 100.0), 1e-15);
+  const std::size_t n = 200000;
+  double weights = 0.0, time = 0.0, time2 = 0.0;
+  for (std::uint64_t i = 0; i < n; ++i) {
+    const auto p = sample_emitter(lamp, i, 5);
+    CHECK(p.weight > 0.0 && p.weight <= 1.0);
+    CHECK_NEAR(norm(p.ray.origin - lamp.position), 0.0, 0.0);
+    const Vec3 target = p.ray.at(-p.ray.origin.z / p.ray.direction.z);
+    CHECK(std::hypot(target.x, target.y) <= 2.0 + 1e-9);
+    weights += p.weight;
+    time += p.time_ns;
+    time2 += p.time_ns * p.time_ns;
+  }
+  const double solid_angle = 2.0 * 3.141592653589793 * (1.0 - 10.0 / std::sqrt(104.0));
+  CHECK_NEAR(weights / n * lamp.candidates_per_photon(), solid_angle / (4.0 * 3.141592653589793),
+             2e-5);
+  CHECK_NEAR(time / n, 0.0, 0.003); // Flat pulse on [-1, 1]: mean 0, variance 1/3.
+  CHECK_NEAR(time2 / n, 1.0 / 3.0, 0.003);
+  // A 5 deg filled cone lights only the inner part of the disk.
+  const double u5 = 1.0 - std::cos(5.0 / 57.29577951308232);
+  lamp.intensity = LinearDensity({0.0, u5, u5 * 1.000001}, {1.0, 1.0, 0.0});
+  for (std::uint64_t i = 0; i < 10000; ++i) {
+    const auto p = sample_emitter(lamp, i, 5);
+    const double angle = std::acos(-p.ray.direction.z) * 57.29577951308232;
+    CHECK(angle < 5.0 + 1e-6 ? p.weight > 0.0 : p.weight == 0.0);
+  }
+}
+
 void transmission() {
   const TelescopeTransmission t{0.9, 0.5, 0.1, 2.0, 1.0};
   CHECK_NEAR(t.at({0, 0, -1}), 0.9, 1e-15);
@@ -394,6 +454,8 @@ void all_tests() {
   obscurers();
   obscurer_hierarchy();
   sources();
+  densities();
+  emitters();
   transmission();
 }
 

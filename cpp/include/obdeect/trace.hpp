@@ -145,11 +145,14 @@ inline double mirror_response(const Mirror &mirror, const MirrorHit &mh, double 
 } // namespace detail
 
 // Trace one photon through the optical model. With `apply_responses` false
-// the weight stays at its input value (geometry-only transport).
+// the weight stays at its input value (geometry-only transport). A `direct`
+// photon starts inside the telescope on the leg to the focal surface (after
+// the last mirror), e.g. from a flasher: no mirror and no telescope
+// transmission act, only the obscurers of that leg.
 [[nodiscard]] inline TraceResult trace_photon(const OpticalModel &model, Ray ray,
                                               double wavelength_nm, double time_ns, double weight,
                                               std::uint64_t photon_id, std::uint64_t seed,
-                                              bool apply_responses = true) {
+                                              bool apply_responses = true, bool direct = false) {
   using namespace detail;
   TraceResult out;
   out.position = ray.origin;
@@ -181,60 +184,62 @@ inline double mirror_response(const Mirror &mirror, const MirrorHit &mh, double 
     return std::nullopt;
   };
 
-  if (apply_responses && model.telescope_transmission)
-    out.weight *= model.telescope_transmission->at(ray.direction);
-
-  // Source to primary mirror.
   bool failed = false;
-  const auto m1 = intersect_mirror(model.primary, ray, failed);
-  if (failed)
-    return finish(Status::numerical_failure, ray.origin, kNoSurface);
-  double t_m1 = m1 ? m1->hit.t : std::numeric_limits<double>::infinity();
-  if (model.secondary_blocks_incoming) {
-    const auto back = intersect_mirror(*model.secondary, ray, failed);
+  if (!direct) {
+    if (apply_responses && model.telescope_transmission)
+      out.weight *= model.telescope_transmission->at(ray.direction);
+
+    // Source to primary mirror.
+    const auto m1 = intersect_mirror(model.primary, ray, failed);
     if (failed)
       return finish(Status::numerical_failure, ray.origin, kNoSurface);
-    if (back && back->hit.t < t_m1) {
-      if (auto b = blocked_on(Leg::incoming, back->hit.t))
+    double t_m1 = m1 ? m1->hit.t : std::numeric_limits<double>::infinity();
+    if (model.secondary_blocks_incoming) {
+      const auto back = intersect_mirror(*model.secondary, ray, failed);
+      if (failed)
+        return finish(Status::numerical_failure, ray.origin, kNoSurface);
+      if (back && back->hit.t < t_m1) {
+        if (auto b = blocked_on(Leg::incoming, back->hit.t))
+          return *b;
+        path += back->hit.t;
+        return finish(Status::blocked, back->hit.point, back->hit.id);
+      }
+    }
+    if (auto b = blocked_on(Leg::incoming, t_m1))
+      return *b;
+    if (!m1)
+      return finish(Status::missed_primary, ray.origin, kNoSurface);
+
+    path += m1->hit.t;
+    out.primary_point = m1->hit.point;
+    out.primary_surface = m1->hit.id;
+    out.primary_incidence_deg = incidence_deg(ray.direction, m1->hit.normal);
+    if (apply_responses)
+      out.weight *= mirror_response(model.primary, *m1, wavelength_nm, out.primary_incidence_deg);
+    ray = {m1->hit.point,
+           reflect_at(model.primary, *m1, ray.direction, photon_id, seed, Stream::primary_scatter)};
+
+    if (model.secondary) {
+      const auto m2 = intersect_mirror(*model.secondary, ray, failed);
+      if (failed)
+        return finish(Status::numerical_failure, ray.origin, kNoSurface);
+      if (auto b = blocked_on(Leg::after_primary,
+                              m2 ? m2->hit.t : std::numeric_limits<double>::infinity()))
         return *b;
-      path += back->hit.t;
-      return finish(Status::blocked, back->hit.point, back->hit.id);
+      if (!m2)
+        return finish(Status::missed_secondary, ray.origin, kNoSurface);
+      path += m2->hit.t;
+      out.secondary_point = m2->hit.point;
+      out.secondary_surface = m2->hit.id;
+      out.secondary_incidence_deg = incidence_deg(ray.direction, m2->hit.normal);
+      if (apply_responses)
+        out.weight *=
+            mirror_response(*model.secondary, *m2, wavelength_nm, out.secondary_incidence_deg);
+      ray = {m2->hit.point, reflect_at(*model.secondary, *m2, ray.direction, photon_id, seed,
+                                       Stream::secondary_scatter)};
     }
   }
-  if (auto b = blocked_on(Leg::incoming, t_m1))
-    return *b;
-  if (!m1)
-    return finish(Status::missed_primary, ray.origin, kNoSurface);
-
-  path += m1->hit.t;
-  out.primary_point = m1->hit.point;
-  out.primary_surface = m1->hit.id;
-  out.primary_incidence_deg = incidence_deg(ray.direction, m1->hit.normal);
-  if (apply_responses)
-    out.weight *= mirror_response(model.primary, *m1, wavelength_nm, out.primary_incidence_deg);
-  ray = {m1->hit.point,
-         reflect_at(model.primary, *m1, ray.direction, photon_id, seed, Stream::primary_scatter)};
-
-  Leg leg = Leg::after_primary;
-  if (model.secondary) {
-    const auto m2 = intersect_mirror(*model.secondary, ray, failed);
-    if (failed)
-      return finish(Status::numerical_failure, ray.origin, kNoSurface);
-    if (auto b = blocked_on(leg, m2 ? m2->hit.t : std::numeric_limits<double>::infinity()))
-      return *b;
-    if (!m2)
-      return finish(Status::missed_secondary, ray.origin, kNoSurface);
-    path += m2->hit.t;
-    out.secondary_point = m2->hit.point;
-    out.secondary_surface = m2->hit.id;
-    out.secondary_incidence_deg = incidence_deg(ray.direction, m2->hit.normal);
-    if (apply_responses)
-      out.weight *=
-          mirror_response(*model.secondary, *m2, wavelength_nm, out.secondary_incidence_deg);
-    ray = {m2->hit.point, reflect_at(*model.secondary, *m2, ray.direction, photon_id, seed,
-                                     Stream::secondary_scatter)};
-    leg = Leg::after_secondary;
-  }
+  const Leg leg = model.secondary ? Leg::after_secondary : Leg::after_primary;
 
   // To the focal surface.
   std::optional<SurfaceHit> focal;
@@ -294,13 +299,14 @@ template <class Body> void parallel_for(std::size_t n, unsigned threads, const B
 // and its random numbers depend only on (seed, photon_id), so results do not
 // depend on the thread count or the order of photons.
 inline void trace_block(const OpticalModel &model, const PhotonBlock &in, const ResultBlock &out,
-                        std::uint64_t seed, bool apply_responses, unsigned threads) {
+                        std::uint64_t seed, bool apply_responses, unsigned threads,
+                        bool direct = false) {
   parallel_for(in.size, threads, [&](std::size_t begin, std::size_t end) {
     for (std::size_t i = begin; i < end; ++i) {
       const Ray ray{{in.position[3 * i], in.position[3 * i + 1], in.position[3 * i + 2]},
                     {in.direction[3 * i], in.direction[3 * i + 1], in.direction[3 * i + 2]}};
       const auto r = trace_photon(model, ray, in.wavelength_nm[i], in.time_ns[i], in.weight[i],
-                                  in.photon_id[i], seed, apply_responses);
+                                  in.photon_id[i], seed, apply_responses, direct);
       const auto put = [i](double *target, const Vec3 &v) {
         target[3 * i] = v.x;
         target[3 * i + 1] = v.y;
