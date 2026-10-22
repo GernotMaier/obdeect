@@ -71,17 +71,22 @@ resources:
 | `validate-cumulative-psf` (6.0.2, 20 deg) | D80 3.051 cm, area 365.8 m², 31 s | D80 3.059 cm, area 365.4 m², 3 s |
 | `derive-psf-parameters` (6.0.2, 20 deg) | RMSD 0.0131, D80 3.053 cm | RMSD 0.0127, D80 3.059 cm |
 | `derive-mirror-rnda` (7.0.0, test mode, 5 mirrors) | fitted D80 within 0.9-3.8% of measured, 117 s | within 0.8-4.9%, 19 s |
-| `derive-mirror-rnda` (7.0.0, all 198 mirrors) | | within 5% for every mirror (median 2.4%), 241 s |
+| `derive-mirror-rnda` (7.0.0, full statistics) | first 20 mirrors: within 4.2% (median 1.7%), 848 s | all 198 mirrors: within 5% (median 2.4%), 241 s |
 
 Both backends start `derive-psf-parameters` below its RMSD threshold, so the
 optimisation stops at once. Its final D80-versus-offset plot (46 offsets in four
 directions, 2 million photons each) needed more than 2 GB of memory with either
 backend, because simtools kept every photon image (fixed in simtools#2664): at
-full statistics the obdeect run now takes 115 s with a peak of 1.45 GB (RMSD
-0.0107 after one step); in `--test` mode the whole application takes 11 s
+full statistics it takes 2120 s with sim_telarray (RMSD 0.0132 to 0.0101 in
+one step, peak 0.3 GB) and 115 s with obdeect (0.0127 to 0.0107, peak 1.45
+GB); in `--test` mode the whole application takes 11 s
 (sim_telarray) and 6 s (obdeect). With 5000 photons per evaluation the
 `derive-mirror-rnda` fits differ by their noise; with a fixed `--obdeect_seed`
 every evaluation reuses the same photons, so the obdeect objective is smooth.
+On the 20 mirrors fitted by both, the fitted random reflection angle of obdeect
+is 2.8% below sim_telarray's on average, with a spread of 6.6% between mirrors
+(fit noise). A full sim_telarray fit needs `--max_workers 1`: parallel mirror
+jobs share one model directory and rewrite its files while others read them.
 
 The comparison found and fixed one convention: sim_telarray measures the
 distance of a point source from the dish vertex, not from the telescope frame
