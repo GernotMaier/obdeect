@@ -255,7 +255,8 @@ def _segmented_telescope(p: _Parameters, seed: int, zenith_deg: float | None) ->
     _scatter(p, primary, surface_slopes=False)
     for name in ("primary_mirror_degraded_map", "primary_degraded_map"):
         if p.has_file(name):
-            primary["degradation"] = read_spatial_map(*_file_args(p, name))
+            contents, filename, options = _file_args(p, name)
+            primary["degradation"] = read_spatial_map(contents, filename, filename_options=options)
     focus = _focus_offset(p, zenith_deg)
     obscurers = _camera_body(p, focal_length - overall_offset, after_primary=False)
     return {
@@ -665,11 +666,9 @@ def _dual_mirror_telescope(p: _Parameters, zenith_deg: float | None) -> dict[str
     ):
         for name in names:
             if p.has_file(name):
-                mirror["degradation"] = (
-                    _flip_x(read_spatial_map(*_file_args(p, name)))
-                    if flip
-                    else (read_spatial_map(*_file_args(p, name)))
-                )
+                contents, filename, options = _file_args(p, name)
+                degradation = read_spatial_map(contents, filename, filename_options=options)
+                mirror["degradation"] = _flip_x(degradation) if flip else degradation
 
     obscurers = _camera_body(p, camera_front, after_primary=True)
     blocks_incoming = True

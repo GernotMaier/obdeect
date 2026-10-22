@@ -144,6 +144,10 @@ void responses_and_timing() {
   CHECK_NEAR(shoot(m, {0.1, 0.0, 30.0}, {0, 0, -1}, 0, false).weight, 1.0, 0.0);
   CHECK(trace_photon(m, {{0, 0, 30}, {0, 0, -1}}, 0.0, 0.0, 1.0, 0, 1).status ==
         Status::invalid_input);
+  CHECK(trace_photon(m, {{0, 0, 30}, {0, 0, -1}}, kInfinity, 0.0, 1.0, 0, 1).status ==
+        Status::invalid_input);
+  CHECK(trace_photon(m, {{0, 0, 30}, {0, 0, -1}}, 400.0, 0.0, kInfinity, 0, 1).status ==
+        Status::invalid_input);
   CHECK(trace_photon(m, {{0, 0, 30}, {0, 0, -1.1}}, 400.0, 0.0, 1.0, 0, 1).status ==
         Status::invalid_input);
 }

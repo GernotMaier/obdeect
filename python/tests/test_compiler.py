@@ -155,6 +155,27 @@ def test_secondary_reflects_like_the_primary_without_its_own_table():
         assert optics["primary"]["reflectivity"]["values"][100] == [pytest.approx(0.85)]
 
 
+def test_degradation_maps_accept_filename_options():
+    spatial_map = "#@RPOL@ 2\n 0 100\n0 1 0.9\n50 0.8 0.7\n"
+    primary_record = record("primary_mirror_degraded_map", "map.dat#rpol:clip=1", file=True)
+    single_records, files = segmented(primary_mirror_degraded_map=primary_record)
+    files["primary_mirror_degraded_map"] = spatial_map
+    model = build((single_records, files))
+    assert model["optics"]["primary"]["degradation"]["outside"] == "zero"
+
+    primary_record = record("primary_mirror_degraded_map", "map.dat#rpol:clip=1", file=True)
+    secondary_record = record("secondary_mirror_degraded_map", "map.dat#rpol:clip=1", file=True)
+    dual_records, files = dual(
+        primary_mirror_degraded_map=primary_record,
+        secondary_mirror_degraded_map=secondary_record,
+    )
+    files["primary_mirror_degraded_map"] = spatial_map
+    files["secondary_mirror_degraded_map"] = spatial_map
+    optics = build((dual_records, files), zenith_deg=20.0)["optics"]
+    assert optics["primary"]["degradation"]["outside"] == "zero"
+    assert optics["secondary"]["degradation"]["outside"] == "zero"
+
+
 def test_rejected_models():
     with pytest.raises(ModelError, match="mirror_class 1"):
         build(segmented(mirror_class=record("mirror_class", 1)))

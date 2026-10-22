@@ -31,6 +31,31 @@ def test_store_and_reload(tmp_path):
         OpticalModel(tampered)
 
 
+def test_model_document_is_isolated_from_mutation(tmp_path):
+    document = model_of(segmented()).document
+    model = OpticalModel(document)
+    original_area = model.sampling_area_m2
+    original_hash = model.sha256
+    original_photons = model.star_photons(8, seed=3)
+
+    document["sampling"]["disk_radius_m"] = 1.0
+    document["optics"]["focal_surface"]["plane_z_m"] = -99.0
+    exposed = model.document
+    exposed["sampling"]["disk_radius_m"] = 2.0
+    exposed["optics"]["focal_surface"]["plane_z_m"] = -50.0
+
+    assert model.sampling_area_m2 == original_area
+    assert model.sha256 == original_hash
+    assert np.array_equal(
+        model.star_photons(8, seed=3)["position_m"], original_photons["position_m"]
+    )
+    assert model.document["optics"]["focal_surface"]["plane_z_m"] != -50.0
+    saved = tmp_path / "model.json"
+    model.save(saved)
+    assert json.loads(saved.read_text()) == OpticalModel.load(saved).document
+    assert json.loads(saved.read_text())["sampling"]["disk_radius_m"] != 1.0
+
+
 def test_native_errors_name_the_json_path():
     document = model_of(segmented()).document
     document["optics"]["primary"]["facets"][2]["normal"] = [0.0, 0.0, 2.0]
