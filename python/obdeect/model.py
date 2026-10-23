@@ -112,8 +112,13 @@ class OpticalModel:
     @property
     def focal_surface_z_m(self) -> float:
         """Height of the focal plane, or of the focal-surface vertex, in the telescope frame."""
-        focal = self.document["optics"]["focal_surface"]
+        focal = self._document["optics"]["focal_surface"]
         return focal["asphere"]["vertex_z_m"] if "asphere" in focal else focal["plane_z_m"]
+
+    @property
+    def propagation_group_index(self) -> float:
+        """Group index of air the photon times use."""
+        return self._document["optics"]["propagation_group_index"]
 
     def emitter_photons(
         self,
@@ -142,8 +147,54 @@ class OpticalModel:
         estimates their mean number. Start positions are the emitter, times
         are emission times.
         """
+        source = self._emitter(position_m, intensity, axis, pulse, wavelength_nm, disk)
+        return source.sample(first_id, _emitter_count(source, emitted, seed, first_id), seed)
+
+    def trace_emitter(
+        self,
+        emitted: float,
+        *,
+        seed: int,
+        position_m: tuple[float, float, float],
+        intensity: tuple[np.ndarray, np.ndarray],
+        axis: tuple[float, float, float] = (0.0, 0.0, 1.0),
+        pulse: tuple[np.ndarray, np.ndarray] | None = None,
+        wavelength_nm: float = 400.0,
+        disk: tuple[tuple[float, float, float], tuple[float, float, float], float] | None = None,
+        first_id: int = 0,
+        direct: bool = False,
+        threads: int = 0,
+        block_size: int = 1_000_000,
+    ) -> dict[str, np.ndarray]:
+        """Make and trace the photons of a point emitter, `block_size` photons at a time.
+
+        The photons are those of `emitter_photons`, traced as by `trace`;
+        memory is bounded by the photons kept. Returns the photons reaching
+        the focal surface with a positive weight: position_m, direction,
+        time_ns and weight of the trace, and wavelength_nm. The result does not
+        depend on `block_size`.
+        """
+        if block_size < 1:
+            raise ValueError("block_size must be positive")
+        source = self._emitter(position_m, intensity, axis, pulse, wavelength_nm, disk)
+        count = _emitter_count(source, emitted, seed, first_id)
+        blocks = []
+        for start in range(0, count, block_size) or [0]:
+            photons = source.sample(first_id + start, min(block_size, count - start), seed)
+            traced = self.trace(photons, seed=seed, direct=direct, threads=threads)
+            kept = (traced["status"] == DETECTED) & (traced["weight"] > 0.0)
+            blocks.append(
+                {name: traced[name][kept] for name in ("position_m", "direction", "time_ns")}
+                | {
+                    "weight": traced["weight"][kept],
+                    "wavelength_nm": photons["wavelength_nm"][kept],
+                }
+            )
+        return {name: np.concatenate([block[name] for block in blocks]) for name in blocks[0]}
+
+    def _emitter(self, position_m, intensity, axis, pulse, wavelength_nm, disk) -> _core.Emitter:
         if disk is None:
-            sampling = self.document["sampling"]
+            sampling = self._document["sampling"]
             disk = ((0.0, 0.0, sampling["disk_z_m"]), (0.0, 0.0, 1.0), sampling["disk_radius_m"])
         angle_deg, values = (np.asarray(column, dtype=float) for column in intensity)
         pulse_ns, pulse_values = (
@@ -152,7 +203,7 @@ class OpticalModel:
             else (np.asarray(column, dtype=float) for column in pulse)
         )
         centre, normal, radius = disk
-        source = _core.Emitter(
+        return _core.Emitter(
             np.asarray(position_m, dtype=float),
             np.asarray(axis, dtype=float),
             1.0 - np.cos(np.radians(angle_deg)),
@@ -164,10 +215,6 @@ class OpticalModel:
             float(radius),
             wavelength_nm,
         )
-        count = np.random.default_rng([seed, first_id]).poisson(
-            emitted * source.candidates_per_photon()
-        )
-        return source.sample(first_id, int(count), seed)
 
     def star_photons(
         self,
@@ -234,3 +281,10 @@ class OpticalModel:
             threads=threads,
             direct=direct,
         )
+
+
+def _emitter_count(source: _core.Emitter, emitted: float, seed: int, first_id: int) -> int:
+    """Poisson number of candidate photons of an emitter (see ``OpticalModel.emitter_photons``)."""
+    return int(
+        np.random.default_rng([seed, first_id]).poisson(emitted * source.candidates_per_photon())
+    )

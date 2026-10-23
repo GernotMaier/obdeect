@@ -93,6 +93,18 @@ star-light disk in front of the telescope. `direct=True` traces light that
 starts inside the telescope straight to the focal surface: no mirror and no
 telescope transmission act, the obscurers of that leg do.
 
+A bright source (an illuminator emits about 10^10 photons per pulse) gives
+more photons than fit in memory at once. `trace_emitter` takes the same
+arguments as `emitter_photons` plus those of `trace`, makes and traces the
+photons `block_size` at a time, and keeps only those reaching the focal surface
+with a positive weight (`position_m`, `direction`, `time_ns`, `weight`,
+`wavelength_nm`). The result does not depend on `block_size`:
+
+```python
+arrivals = model.trace_emitter(1e10, seed=3, position_m=(0.0, 0.0, 600.0),
+                               intensity=([0.0, 180.0], [1.0, 1.0]), axis=(0.0, 0.0, -1.0))
+```
+
 ## Frames and units
 
 All lengths are metres, angles in degrees unless named `_rad`. The telescope

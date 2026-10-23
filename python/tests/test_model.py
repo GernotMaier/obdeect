@@ -156,6 +156,32 @@ def test_flasher_light_goes_straight_to_the_camera():
     assert np.all(np.abs(photons["time_ns"]) <= 1.0)
 
 
+def test_traced_emitter_light_does_not_depend_on_blocks():
+    model = model_of(segmented())
+    camera = model.focal_surface_z_m
+    emitter = {
+        "seed": 3,
+        "position_m": (0.05, 0.0, 0.0),
+        "intensity": ([0.0, 2.0, 2.001], [1.0, 1.0, 0.0]),  # Lights part of the disk.
+        "disk": ((0.0, 0.0, camera), (0.0, 0.0, 1.0), 0.5),
+        "first_id": 1 << 40,
+        "direct": True,
+    }
+    photons = model.emitter_photons(2e6, **{k: v for k, v in emitter.items() if k != "direct"})
+    traced = model.trace(photons, seed=3, direct=True)
+    kept = (traced["status"] == DETECTED) & (traced["weight"] > 0.0)
+    whole = model.trace_emitter(2e6, **emitter)
+    assert 0 < len(whole["weight"]) == np.count_nonzero(kept) < len(photons["weight"])
+    assert np.array_equal(whole["position_m"], traced["position_m"][kept])
+    assert np.array_equal(whole["wavelength_nm"], photons["wavelength_nm"][kept])
+    blocks = model.trace_emitter(2e6, block_size=997, **emitter)
+    for name, values in whole.items():
+        assert np.array_equal(blocks[name], values), name
+    assert len(model.trace_emitter(0.0, **emitter)["weight"]) == 0
+    with pytest.raises(ValueError, match="block_size"):
+        model.trace_emitter(1.0, block_size=0, **emitter)
+
+
 def test_off_axis_image_moves_by_the_plate_scale():
     model = model_of(segmented(camera_body_diameter=record("camera_body_diameter", 0.0, "cm")))
     theta = math.radians(1.0)

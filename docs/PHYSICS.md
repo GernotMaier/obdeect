@@ -89,7 +89,11 @@ keeping each with the probability of its weight gives a Poisson number of
 photons crossing the disk, as for the real source. Angular profiles are linear
 in 1 - cos(theta), as in the sim_telarray LightEmission tables; emission times
 follow the pulse table. simtools hands the photons reaching the camera to
-sim_telarray, which simulates the camera with its optics bypassed.
+sim_telarray, which simulates the camera with its optics bypassed
+(`Bypass_Optics=1` for single-mirror telescopes, where the hand-off turns the
+telescope frame by pi about x; `Bypass_Optics=2` for dual-mirror telescopes,
+in sim_telarray's camera frame, the telescope frame rotated by the camera
+rotation), with the photons on the plane through the focal-surface vertex.
 
 ## Known differences from sim_telarray
 
@@ -104,3 +108,13 @@ sim_telarray, which simulates the camera with its optics bypassed.
   light for a 2.55 cm focus offset at 16.5 m). `ff-1m` traces no structure.
 - Illuminators: `xyzls` refracts the light; over the 600 m to a telescope this
   bends it by about 4 arcsec, which obdeect neglects.
+- Reflectivity tables over wavelength and incidence angle (2-D; the SST
+  mirrors in simulation models 7.0.0): sim_telarray reads the reflectivity
+  before ray tracing as R(lambda, 0 deg) (`sim_absorb.c`, `rpolate(.., 0., -1)`
+  on a 2-D table interpolates at angle zero; the comment intends the upper
+  envelope) and, after each reflection, multiplies by R(lambda, theta) /
+  R_max(lambda) with the true envelope (`rpolate_1d(.., -1)`). Its
+  reflectivity is therefore R(lambda, 0) R(lambda, theta) / R_max(lambda)
+  instead of R(lambda, theta): for the SST at 400 nm 0.966 (primary) times
+  0.945 (secondary), at 300 nm 0.944 times 0.607. obdeect applies
+  R(lambda, theta).
