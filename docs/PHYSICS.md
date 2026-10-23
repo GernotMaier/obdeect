@@ -104,10 +104,13 @@ rotation), with the photons on the plane through the focal-surface vertex.
 - The camera front-face test on the dual-mirror leg is compiled out of
   sim_telarray; obdeect follows the compiled behaviour.
 - Flashers: the camera is where the optics put it, at `focal_length +
-  focus_offset`; simtools places it for `ff-1m` at `focal_length` (0.3% more
-  light for a 2.55 cm focus offset at 16.5 m). `ff-1m` traces no structure.
-- Illuminators: `xyzls` refracts the light; over the 600 m to a telescope this
-  bends it by about 4 arcsec, which obdeect neglects.
+  focus_offset` (simtools places `ff-1m` there as well). `ff-1m` traces no
+  structure.
+- Illuminators: obdeect sends the light on straight lines; refraction over the
+  few hundred metres to a telescope bends it by a few arcsec. `xyzls` applies
+  CORSIKA's refraction and delay model, made for light from above; for nearly
+  horizontal light (elevation below about 5 deg) its photon times are off by
+  ns to tens of ns and its image can move by about 1 arcmin.
 - Reflectivity tables over wavelength and incidence angle (2-D; the SST
   mirrors in simulation models 7.0.0): sim_telarray reads the reflectivity
   before ray tracing as R(lambda, 0 deg) (`sim_absorb.c`, `rpolate(.., 0., -1)`
