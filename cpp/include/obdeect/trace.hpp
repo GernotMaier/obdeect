@@ -69,17 +69,23 @@ inline std::optional<MirrorHit> intersect_mirror(const Mirror &mirror, const Ray
   failed = false;
   if (mirror.asphere) {
     const auto &a = *mirror.asphere;
+    const auto inside = [&](std::size_t i, const Vec3 &p) {
+      return mirror.segments[i].contains(mirror.segment_frames[i], p);
+    };
     const auto accept = [&](const Vec3 &p) {
-      return mirror.segments.empty() ||
-             std::any_of(mirror.segments.begin(), mirror.segments.end(),
-                         [&](const Segment &s) { return s.contains(a, p); });
+      if (mirror.segments.empty())
+        return true;
+      for (std::size_t i = 0; i < mirror.segments.size(); ++i)
+        if (inside(i, p))
+          return true;
+      return false;
     };
     auto hit = a.intersect(ray, kMinDistanceM, accept, failed);
     if (!hit)
       return std::nullopt;
-    for (const auto &s : mirror.segments) // Report the lowest segment id containing the point.
-      if (s.contains(a, hit->point) && (hit->id == a.id || s.id < hit->id))
-        hit->id = s.id;
+    for (std::size_t i = 0; i < mirror.segments.size(); ++i) // Lowest segment id at the point.
+      if ((hit->id == a.id || mirror.segments[i].id < hit->id) && inside(i, hit->point))
+        hit->id = mirror.segments[i].id;
     return MirrorHit{*hit, 0};
   }
   std::optional<MirrorHit> nearest;

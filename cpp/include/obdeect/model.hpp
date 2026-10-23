@@ -24,6 +24,7 @@ struct Mirror {
   FacetGrid grid;
   std::optional<Asphere> asphere; // ... a continuous asphere with optional segments.
   std::vector<Segment> segments;
+  std::vector<Segment::TangentFrame> segment_frames; // One per segment, from the asphere.
   std::optional<Response> reflectivity;
   std::optional<Scatter> scatter;
   // Relative reflectivity map, in facet map coordinates (Facet::map_u,

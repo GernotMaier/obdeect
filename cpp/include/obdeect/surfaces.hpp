@@ -355,7 +355,35 @@ struct Segment {
   bool gap_at_start{};
   std::vector<std::array<double, 2>> vertices; // Convex polygon.
 
+  // Tangent plane at the segment centre, in which hexagons, squares and circles
+  // keep their physical flat-to-flat width. It depends only on the mirror and
+  // the segment, so an optical model computes it once (Mirror::segment_frames).
+  // `reach2` bounds the squared x-y distance from the centre of a point on the
+  // mirror inside the segment: the tangent plane only shrinks in projection, and
+  // hexagon, square and circle stay within 1.5 half widths of their centre.
+  struct TangentFrame {
+    double cx{1.0}, sx{}, cosine{1.0}, sine{}, centre_z{}, cos_rotation{1.0}, sin_rotation{};
+    double reach2{std::numeric_limits<double>::infinity()};
+  };
+
+  [[nodiscard]] TangentFrame tangent_frame(const Asphere &mirror) const {
+    const double rc = std::hypot(centre_x, centre_y);
+    const double s = mirror.slope(rc), cosine = 1.0 / std::sqrt(1.0 + s * s);
+    return {rc > 0.0 ? centre_x / rc : 1.0,
+            rc > 0.0 ? centre_y / rc : 0.0,
+            cosine,
+            s * cosine,
+            mirror.sag(rc),
+            std::cos(rotation),
+            std::sin(rotation),
+            2.25 * half_width * half_width};
+  }
+
   [[nodiscard]] bool contains(const Asphere &mirror, const Vec3 &p) const {
+    return contains(tangent_frame(mirror), p);
+  }
+
+  [[nodiscard]] bool contains(const TangentFrame &f, const Vec3 &p) const {
     switch (shape) {
     case Shape::polygon: {
       double sign = 0.0;
@@ -379,17 +407,14 @@ struct Segment {
       return r >= inner_radius && r < outer_radius && angle < span && r >= gap && from_gap >= gap;
     }
     default: {
-      // Hexagons, squares and circles are tested in the tangent plane at the
-      // segment centre, preserving their physical flat-to-flat width.
-      const double rc = std::hypot(centre_x, centre_y);
-      const double cx = rc > 0.0 ? centre_x / rc : 1.0, sx = rc > 0.0 ? centre_y / rc : 0.0;
-      const double s = mirror.slope(rc), cosine = 1.0 / std::sqrt(1.0 + s * s), sine = s * cosine;
-      const double dx = p.x - centre_x, dy = p.y - centre_y, dz = p.z - mirror.sag(rc);
-      const double radial = (dx * cx + dy * sx) * cosine + dz * sine,
-                   azimuthal = -dx * sx + dy * cx;
-      const double x = radial * cx - azimuthal * sx, y = radial * sx + azimuthal * cx;
-      const double u = x * std::cos(rotation) + y * std::sin(rotation);
-      const double v = -x * std::sin(rotation) + y * std::cos(rotation);
+      const double dx = p.x - centre_x, dy = p.y - centre_y, dz = p.z - f.centre_z;
+      if (dx * dx + dy * dy > f.reach2)
+        return false;
+      const double radial = (dx * f.cx + dy * f.sx) * f.cosine + dz * f.sine,
+                   azimuthal = -dx * f.sx + dy * f.cx;
+      const double x = radial * f.cx - azimuthal * f.sx, y = radial * f.sx + azimuthal * f.cx;
+      const double u = x * f.cos_rotation + y * f.sin_rotation;
+      const double v = -x * f.sin_rotation + y * f.cos_rotation;
       if (shape == Shape::circle)
         return u * u + v * v <= half_width * half_width;
       if (shape == Shape::square)

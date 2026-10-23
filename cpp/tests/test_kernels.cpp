@@ -238,6 +238,17 @@ void segments() {
   triangle.vertices = {{0, 0}, {1, 0}, {0, 1}};
   CHECK(triangle.contains(flat, {0.2, 0.2, 0.0}));
   CHECK(!triangle.contains(flat, {0.8, 0.8, 0.0}));
+  // On a curved mirror the precomputed tangent frame gives the same footprint.
+  const Asphere curved{1, 0.0, 0.0, 5.0, 1.0, {0.0, 0.05, -0.001}};
+  hexagon.centre_y = 0.6;
+  hexagon.rotation = 0.3;
+  const auto frame = hexagon.tangent_frame(curved);
+  for (double x = 0.4; x < 1.6; x += 0.01)
+    for (double y = 0.0; y < 1.2; y += 0.01) {
+      const Vec3 p{x, y, curved.sag(std::hypot(x, y))};
+      CHECK(hexagon.contains(frame, p) == hexagon.contains(curved, p));
+    }
+  CHECK(hexagon.contains(frame, {1.0, 0.6, curved.sag(std::hypot(1.0, 0.6))}));
 }
 
 void obscurers() {
