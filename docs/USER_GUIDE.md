@@ -98,7 +98,8 @@ more photons than fit in memory at once. `trace_emitter` takes the same
 arguments as `emitter_photons` plus those of `trace`, makes and traces the
 photons `block_size` at a time, and keeps only those reaching the focal surface
 with a positive weight (`position_m`, `direction`, `time_ns`, `weight`,
-`wavelength_nm`). The result does not depend on `block_size`:
+`wavelength_nm`). `trace_emitter_blocks` yields them block by block, so that
+memory stays bounded by one block. The photons do not depend on `block_size`:
 
 ```python
 arrivals = model.trace_emitter(1e10, seed=3, position_m=(0.0, 0.0, 600.0),

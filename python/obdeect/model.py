@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import math
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
@@ -150,7 +150,16 @@ class OpticalModel:
         source = self._emitter(position_m, intensity, axis, pulse, wavelength_nm, disk)
         return source.sample(first_id, _emitter_count(source, emitted, seed, first_id), seed)
 
-    def trace_emitter(
+    def trace_emitter(self, emitted: float, **options: Any) -> dict[str, np.ndarray]:
+        """Make and trace the photons of a point emitter (see `trace_emitter_blocks`).
+
+        Returns the photons of all blocks reaching the focal surface with a
+        positive weight.
+        """
+        blocks = list(self.trace_emitter_blocks(emitted, **options))
+        return {name: np.concatenate([block[name] for block in blocks]) for name in blocks[0]}
+
+    def trace_emitter_blocks(
         self,
         emitted: float,
         *,
@@ -164,33 +173,28 @@ class OpticalModel:
         first_id: int = 0,
         direct: bool = False,
         threads: int = 0,
-        block_size: int = 1_000_000,
-    ) -> dict[str, np.ndarray]:
+        block_size: int = 250_000,
+    ) -> Iterator[dict[str, np.ndarray]]:
         """Make and trace the photons of a point emitter, `block_size` photons at a time.
 
         The photons are those of `emitter_photons`, traced as by `trace`;
-        memory is bounded by the photons kept. Returns the photons reaching
-        the focal surface with a positive weight: position_m, direction,
-        time_ns and weight of the trace, and wavelength_nm. The result does not
-        depend on `block_size`.
+        memory is bounded by one block. Yields, for each block (at least
+        one), the photons reaching the focal surface with a positive weight:
+        position_m, direction, time_ns and weight of the trace, and
+        wavelength_nm. The photons do not depend on `block_size`.
         """
         if block_size < 1:
             raise ValueError("block_size must be positive")
         source = self._emitter(position_m, intensity, axis, pulse, wavelength_nm, disk)
         count = _emitter_count(source, emitted, seed, first_id)
-        blocks = []
         for start in range(0, count, block_size) or [0]:
             photons = source.sample(first_id + start, min(block_size, count - start), seed)
             traced = self.trace(photons, seed=seed, direct=direct, threads=threads)
             kept = (traced["status"] == DETECTED) & (traced["weight"] > 0.0)
-            blocks.append(
-                {name: traced[name][kept] for name in ("position_m", "direction", "time_ns")}
-                | {
-                    "weight": traced["weight"][kept],
-                    "wavelength_nm": photons["wavelength_nm"][kept],
-                }
-            )
-        return {name: np.concatenate([block[name] for block in blocks]) for name in blocks[0]}
+            yield {name: traced[name][kept] for name in ("position_m", "direction", "time_ns")} | {
+                "weight": traced["weight"][kept],
+                "wavelength_nm": photons["wavelength_nm"][kept],
+            }
 
     def _emitter(self, position_m, intensity, axis, pulse, wavelength_nm, disk) -> _core.Emitter:
         if disk is None:

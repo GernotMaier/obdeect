@@ -177,9 +177,12 @@ def test_traced_emitter_light_does_not_depend_on_blocks():
     blocks = model.trace_emitter(2e6, block_size=997, **emitter)
     for name, values in whole.items():
         assert np.array_equal(blocks[name], values), name
+    pieces = list(model.trace_emitter_blocks(2e6, block_size=500_000, **emitter))
+    assert len(pieces) == math.ceil(len(photons["weight"]) / 500_000)
+    assert np.array_equal(np.concatenate([p["time_ns"] for p in pieces]), whole["time_ns"])
     assert len(model.trace_emitter(0.0, **emitter)["weight"]) == 0
     with pytest.raises(ValueError, match="block_size"):
-        model.trace_emitter(1.0, block_size=0, **emitter)
+        next(model.trace_emitter_blocks(1.0, block_size=0, **emitter))
 
 
 def test_off_axis_image_moves_by_the_plate_scale():
