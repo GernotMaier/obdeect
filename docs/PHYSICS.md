@@ -71,6 +71,30 @@ comes from a Philox-4x32-10 counter keyed by the seed, photon id and stream, so
 results do not depend on threads, blocks or photon order. Times use the group
 index stored in the model.
 
+## Calibration light
+
+A point emitter sends N photons into 4 pi with the relative intensity I(theta)
+per solid angle, theta measured from its axis. The photons crossing a target
+disk (unit normal n, radius R, distance h of the emitter from its plane) are
+sampled without waste: target points are uniform on the disk, and a photon to
+a point at distance r carries the weight
+
+```latex
+w = \frac{I(\theta)}{I_\mathrm{max}} \left(\frac{h}{r}\right)^3 \le 1,
+```
+
+its fluence relative to the largest possible. The number of candidates is
+Poisson with mean N I_max R^2 / (2 h^2 \int I \, d(1 - \cos\theta)), so
+keeping each with the probability of its weight gives a Poisson number of
+photons crossing the disk, as for the real source. Angular profiles are linear
+in 1 - cos(theta), as in the sim_telarray LightEmission tables; emission times
+follow the pulse table. simtools hands the photons reaching the camera to
+sim_telarray, which simulates the camera with its optics bypassed
+(`Bypass_Optics=1` for single-mirror telescopes, where the hand-off turns the
+telescope frame by pi about x; `Bypass_Optics=2` for dual-mirror telescopes,
+in sim_telarray's camera frame, the telescope frame rotated by the camera
+rotation), with the photons on the plane through the focal-surface vertex.
+
 ## Known differences from sim_telarray
 
 - sim_telarray (`sim_imaging.c`, two places) rotates the scattered direction
@@ -79,3 +103,21 @@ index stored in the model.
 - Telescope structure is traced only by obdeect.
 - The camera front-face test on the dual-mirror leg is compiled out of
   sim_telarray; obdeect follows the compiled behaviour.
+- Flashers: the camera is where the optics put it, at `focal_length +
+  focus_offset` (simtools places `ff-1m` there as well). `ff-1m` traces no
+  structure.
+- Illuminators: obdeect sends the light on straight lines; refraction over the
+  few hundred metres to a telescope bends it by a few arcsec. `xyzls` applies
+  CORSIKA's refraction and delay model, made for light from above; for nearly
+  horizontal light (elevation below about 5 deg) its photon times are off by
+  ns to tens of ns and its image can move by about 1 arcmin.
+- Reflectivity tables over wavelength and incidence angle (2-D; the SST
+  mirrors in simulation models 7.0.0): sim_telarray reads the reflectivity
+  before ray tracing as R(lambda, 0 deg) (`sim_absorb.c`, `rpolate(.., 0., -1)`
+  on a 2-D table interpolates at angle zero; the comment intends the upper
+  envelope) and, after each reflection, multiplies by R(lambda, theta) /
+  R_max(lambda) with the true envelope (`rpolate_1d(.., -1)`). Its
+  reflectivity is therefore R(lambda, 0) R(lambda, theta) / R_max(lambda)
+  instead of R(lambda, theta): for the SST at 400 nm 0.966 (primary) times
+  0.945 (secondary), at 300 nm 0.944 times 0.607. obdeect applies
+  R(lambda, theta).

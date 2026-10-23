@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import math
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
@@ -109,6 +109,117 @@ class OpticalModel:
         """Area of the disk star photons are sampled on (sim_telarray convention)."""
         return math.pi * self._document["sampling"]["disk_radius_m"] ** 2
 
+    @property
+    def focal_surface_z_m(self) -> float:
+        """Height of the focal plane, or of the focal-surface vertex, in the telescope frame."""
+        focal = self._document["optics"]["focal_surface"]
+        return focal["asphere"]["vertex_z_m"] if "asphere" in focal else focal["plane_z_m"]
+
+    @property
+    def propagation_group_index(self) -> float:
+        """Group index of air the photon times use."""
+        return self._document["optics"]["propagation_group_index"]
+
+    def emitter_photons(
+        self,
+        emitted: float,
+        *,
+        seed: int,
+        position_m: tuple[float, float, float],
+        intensity: tuple[np.ndarray, np.ndarray],
+        axis: tuple[float, float, float] = (0.0, 0.0, 1.0),
+        pulse: tuple[np.ndarray, np.ndarray] | None = None,
+        wavelength_nm: float = 400.0,
+        disk: tuple[tuple[float, float, float], tuple[float, float, float], float] | None = None,
+        first_id: int = 0,
+    ) -> dict[str, np.ndarray]:
+        """Photons of a point emitter (a calibration light source) that cross a disk.
+
+        The emitter at `position_m` (telescope frame) sends `emitted` photons
+        into 4 pi with the relative intensity per solid angle `intensity`
+        (angles from `axis` [deg], values; linear in 1 - cos(angle), zero
+        beyond the last angle) and emission times from the relative density
+        `pulse` (times [ns], values; None: all at 0). Photons are made only
+        on their way through `disk` (centre, unit normal, radius [m]; default
+        the star-light disk). Their weights are in [0, 1], and their number is
+        Poisson distributed, so keeping each photon with the probability of
+        its weight gives the photons crossing the disk; the sum of weights
+        estimates their mean number. Start positions are the emitter, times
+        are emission times.
+        """
+        source = self._emitter(position_m, intensity, axis, pulse, wavelength_nm, disk)
+        return source.sample(first_id, _emitter_count(source, emitted, seed, first_id), seed)
+
+    def trace_emitter(self, emitted: float, **options: Any) -> dict[str, np.ndarray]:
+        """Make and trace the photons of a point emitter (see `trace_emitter_blocks`).
+
+        Returns the photons of all blocks reaching the focal surface with a
+        positive weight.
+        """
+        blocks = list(self.trace_emitter_blocks(emitted, **options))
+        return {name: np.concatenate([block[name] for block in blocks]) for name in blocks[0]}
+
+    def trace_emitter_blocks(
+        self,
+        emitted: float,
+        *,
+        seed: int,
+        position_m: tuple[float, float, float],
+        intensity: tuple[np.ndarray, np.ndarray],
+        axis: tuple[float, float, float] = (0.0, 0.0, 1.0),
+        pulse: tuple[np.ndarray, np.ndarray] | None = None,
+        wavelength_nm: float = 400.0,
+        disk: tuple[tuple[float, float, float], tuple[float, float, float], float] | None = None,
+        first_id: int = 0,
+        direct: bool = False,
+        threads: int = 0,
+        block_size: int = 250_000,
+    ) -> Iterator[dict[str, np.ndarray]]:
+        """Make and trace the photons of a point emitter, `block_size` photons at a time.
+
+        The photons are those of `emitter_photons`, traced as by `trace`;
+        memory is bounded by one block. Yields, for each block (at least
+        one), the photons reaching the focal surface with a positive weight:
+        position_m, direction, time_ns and weight of the trace, and
+        wavelength_nm. The photons do not depend on `block_size`.
+        """
+        if block_size < 1:
+            raise ValueError("block_size must be positive")
+        source = self._emitter(position_m, intensity, axis, pulse, wavelength_nm, disk)
+        count = _emitter_count(source, emitted, seed, first_id)
+        for start in range(0, count, block_size) or [0]:
+            photons = source.sample(first_id + start, min(block_size, count - start), seed)
+            traced = self.trace(photons, seed=seed, direct=direct, threads=threads)
+            kept = (traced["status"] == DETECTED) & (traced["weight"] > 0.0)
+            yield {name: traced[name][kept] for name in ("position_m", "direction", "time_ns")} | {
+                "weight": traced["weight"][kept],
+                "wavelength_nm": photons["wavelength_nm"][kept],
+            }
+
+    def _emitter(self, position_m, intensity, axis, pulse, wavelength_nm, disk) -> _core.Emitter:
+        if disk is None:
+            sampling = self._document["sampling"]
+            disk = ((0.0, 0.0, sampling["disk_z_m"]), (0.0, 0.0, 1.0), sampling["disk_radius_m"])
+        angle_deg, values = (np.asarray(column, dtype=float) for column in intensity)
+        pulse_ns, pulse_values = (
+            (np.empty(0), np.empty(0))
+            if pulse is None
+            else (np.asarray(column, dtype=float) for column in pulse)
+        )
+        centre, normal, radius = disk
+        return _core.Emitter(
+            np.asarray(position_m, dtype=float),
+            np.asarray(axis, dtype=float),
+            1.0 - np.cos(np.radians(angle_deg)),
+            values,
+            pulse_ns,
+            pulse_values,
+            np.asarray(centre, dtype=float),
+            np.asarray(normal, dtype=float),
+            float(radius),
+            wavelength_nm,
+        )
+
     def star_photons(
         self,
         count: int,
@@ -147,12 +258,16 @@ class OpticalModel:
         seed: int,
         apply_responses: bool = True,
         threads: int = 0,
+        direct: bool = False,
     ) -> dict[str, np.ndarray]:
         """Trace photons; returns per-photon arrays (see docs/USER_GUIDE.md).
 
         `photons` holds position_m (n, 3), direction (n, 3), wavelength_nm,
         time_ns, weight and photon_id. With apply_responses False only geometry
-        acts (weights unchanged); `threads` 0 uses every core.
+        acts (weights unchanged); `threads` 0 uses every core. `direct`
+        photons start inside the telescope on their way to the focal surface
+        (e.g. from a flasher): mirrors and telescope transmission do not act,
+        the obscurers of that leg do.
         """
 
         def column(name: str, dtype: type) -> np.ndarray:
@@ -168,4 +283,12 @@ class OpticalModel:
             seed=seed,
             apply_responses=apply_responses,
             threads=threads,
+            direct=direct,
         )
+
+
+def _emitter_count(source: _core.Emitter, emitted: float, seed: int, first_id: int) -> int:
+    """Poisson number of candidate photons of an emitter (see ``OpticalModel.emitter_photons``)."""
+    return int(
+        np.random.default_rng([seed, first_id]).poisson(emitted * source.candidates_per_photon())
+    )

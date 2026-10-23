@@ -65,6 +65,47 @@ photon:
 | `secondary_point_m`, `secondary_surface`, `secondary_incidence_deg` | reflection on the secondary (NaN for single-mirror telescopes) |
 | `focal_incidence_deg` | angle to the focal-surface normal |
 
+## Calibration light
+
+`emitter_photons` makes the light of a point emitter, such as a flasher or an
+illuminator, that crosses a target disk. The emitter has an angular profile
+(relative intensity per solid angle against the angle to its axis) and a pulse
+shape (relative rate against time), both tables:
+
+```python
+camera = model.focal_surface_z_m
+photons = model.emitter_photons(
+    1e6,                                   # photons emitted into 4 pi
+    seed=3,
+    position_m=(0.2, 0.2, camera - 16.5),   # telescope frame
+    intensity=([0.0, 11.0, 11.0001], [1.0, 1.0, 0.0]),  # 11 deg filled cone
+    pulse=([-1.25, 1.25], [1.0, 1.0]),     # 2.5 ns flat pulse
+    wavelength_nm=385.0,
+    disk=((0.0, 0.0, camera), (0.0, 0.0, 1.0), 1.2),  # the camera
+)
+arrivals = model.trace(photons, seed=3, direct=True)
+```
+
+The number of photons is Poisson distributed and their weights are in [0, 1]:
+keeping each photon with the probability of its weight gives the photons that
+cross the disk (see [PHYSICS.md](PHYSICS.md)). Without `disk`, the target is the
+star-light disk in front of the telescope. `direct=True` traces light that
+starts inside the telescope straight to the focal surface: no mirror and no
+telescope transmission act, the obscurers of that leg do.
+
+A bright source (an illuminator emits about 10^10 photons per pulse) gives
+more photons than fit in memory at once. `trace_emitter` takes the same
+arguments as `emitter_photons` plus those of `trace`, makes and traces the
+photons `block_size` at a time, and keeps only those reaching the focal surface
+with a positive weight (`position_m`, `direction`, `time_ns`, `weight`,
+`wavelength_nm`). `trace_emitter_blocks` yields them block by block, so that
+memory stays bounded by one block. The photons do not depend on `block_size`:
+
+```python
+arrivals = model.trace_emitter(1e10, seed=3, position_m=(0.0, 0.0, 600.0),
+                               intensity=([0.0, 180.0], [1.0, 1.0]), axis=(0.0, 0.0, -1.0))
+```
+
 ## Frames and units
 
 All lengths are metres, angles in degrees unless named `_rad`. The telescope

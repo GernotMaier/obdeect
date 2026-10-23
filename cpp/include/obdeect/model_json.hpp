@@ -304,6 +304,7 @@ inline Mirror mirror(const Node &node, std::vector<std::uint32_t> &ids) {
     if (node.has("segments"))
       for (const auto &s : node["segments"].array()) {
         m.segments.push_back(segment(s));
+        m.segment_frames.push_back(m.segments.back().tangent_frame(*m.asphere));
         ids.push_back(m.segments.back().id);
       }
   }

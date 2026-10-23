@@ -133,6 +133,45 @@ void obscurer_legs() {
   CHECK(shoot(m, {0.0, -0.4, 30.0}, {0, 0, -1}).status == Status::detected);
 }
 
+// Photons from inside the telescope (a flasher) go straight to the focal
+// surface: no mirror and no telescope transmission, only the obscurers of
+// the leg to the focal surface.
+void direct_photons() {
+  auto m = single_facet(10.0, 0.5);
+  m.telescope_transmission = TelescopeTransmission{0.5, 0.0, 1.0, 2.0, 1.0};
+  m.primary.reflectivity = Response{300.0, 100.0, 3, {0.0}, {0.9, 0.8, 0.7}};
+  const auto flash = [&m](double y) {
+    return trace_photon(m, {{0.0, y, 0.5}, {0.0, 0.0, 1.0}}, 400.0, 1.0, 1.0, 0, 1, true, true);
+  };
+  auto r = flash(0.1);
+  CHECK(r.status == Status::detected);
+  CHECK_NEAR(r.position.z, 10.0, 1e-12);
+  CHECK_NEAR(r.path_length_m, 9.5, 1e-12);
+  CHECK_NEAR(r.weight, 1.0, 0.0);
+  CHECK(r.primary_surface == kNoSurface);
+  Obscurer rod;
+  rod.kind = Obscurer::Kind::cylinder;
+  rod.id = 9;
+  rod.a = {-1, 0.1, 5};
+  rod.b = {1, 0.1, 5};
+  rod.radius_a = 0.05;
+  rod.bound_a = rod.a;
+  rod.bound_b = rod.b;
+  rod.bound_radius = rod.radius_a;
+  rod.legs = Leg::after_primary;
+  m.obscurers = Obscurers({rod}, {});
+  CHECK(flash(0.1).status == Status::blocked);
+  CHECK(flash(0.3).status == Status::detected);
+  rod.legs = Leg::incoming;
+  m.obscurers = Obscurers({rod}, {});
+  CHECK(flash(0.1).status == Status::detected);
+  // Dual mirror: from between the mirrors down to the focal surface at z = 0.
+  r = trace_photon(folded_paraboloid(), {{0.1, 0.0, 2.0}, {0.0, 0.0, -1.0}}, 400.0, 0.0, 1.0, 0, 1,
+                   true, true);
+  CHECK(r.status == Status::detected && r.terminal_surface == 3);
+  CHECK_NEAR(r.position.z, 0.0, 1e-9);
+}
+
 void responses_and_timing() {
   auto m = single_facet(10.0, 0.5);
   m.primary.reflectivity = Response{300.0, 100.0, 3, {0.0}, {0.9, 0.8, 0.7}};
@@ -254,6 +293,7 @@ void all_tests() {
   spherical_mirror();
   folded_dual_mirror();
   obscurer_legs();
+  direct_photons();
   responses_and_timing();
   scatter_widths();
   block_invariance();
