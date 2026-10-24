@@ -4,9 +4,14 @@
 
 #include <nanobind/nanobind.h>
 #include <nanobind/ndarray.h>
+#include <nanobind/stl/optional.h>
 #include <nanobind/stl/string.h>
+#include <nanobind/stl/vector.h>
 
+#include <algorithm>
+#include <iterator>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -49,32 +54,80 @@ public:
     }
   }
 
+  // Output columns of trace(): name, element type and values per row.
+  static constexpr const char *kColumns[] = {"status",
+                                             "terminal_surface",
+                                             "position_m",
+                                             "direction",
+                                             "path_length_m",
+                                             "time_ns",
+                                             "weight",
+                                             "primary_point_m",
+                                             "primary_surface",
+                                             "primary_incidence_deg",
+                                             "secondary_point_m",
+                                             "secondary_surface",
+                                             "secondary_incidence_deg",
+                                             "focal_incidence_deg"};
+
   nb::dict trace(In3 position, In3 direction, In1<double> wavelength_nm, In1<double> time_ns,
                  In1<double> weight, In1<std::uint64_t> photon_id, std::uint64_t seed,
-                 bool apply_responses, unsigned threads, bool direct) const {
+                 bool apply_responses, unsigned threads, bool direct,
+                 std::optional<std::vector<std::string>> outputs, bool detected_only) const {
     const std::size_t n = position.shape(0);
     if (direction.shape(0) != n || wavelength_nm.shape(0) != n || time_ns.shape(0) != n ||
         weight.shape(0) != n || photon_id.shape(0) != n)
       throw nb::value_error("photon arrays must have the same length");
-    nb::dict result;
-    const auto add = [&](const char *name, nb::object array) {
-      result[name] = array;
-      return array;
+    std::vector<std::string> valid(std::begin(kColumns), std::end(kColumns));
+    valid.emplace_back("index");
+    std::vector<std::string> requested;
+    if (outputs) {
+      requested = *outputs;
+    } else {
+      requested.assign(std::begin(kColumns), std::end(kColumns));
+    }
+    for (const auto &name : requested) {
+      if (std::find(valid.begin(), valid.end(), name) == valid.end()) {
+        std::string message = "unknown output column '" + name + "'; valid columns are:";
+        for (const auto &v : valid)
+          message += " " + v;
+        throw nb::value_error(message.c_str());
+      }
+      if (name == "index" && !detected_only)
+        throw nb::value_error("the output column 'index' needs detected_only=True");
+    }
+    const auto wants = [&](const char *name) {
+      return std::find(requested.begin(), requested.end(), name) != requested.end();
     };
-    const auto status = add("status", owned_array<std::uint8_t>(n));
-    const auto surface = add("terminal_surface", owned_array<std::uint32_t>(n));
-    const auto pos = add("position_m", owned_array<double>(n, 3));
-    const auto dir = add("direction", owned_array<double>(n, 3));
-    const auto path = add("path_length_m", owned_array<double>(n));
-    const auto time = add("time_ns", owned_array<double>(n));
-    const auto w = add("weight", owned_array<double>(n));
-    const auto m1 = add("primary_point_m", owned_array<double>(n, 3));
-    const auto m1_id = add("primary_surface", owned_array<std::uint32_t>(n));
-    const auto m1_angle = add("primary_incidence_deg", owned_array<double>(n));
-    const auto m2 = add("secondary_point_m", owned_array<double>(n, 3));
-    const auto m2_id = add("secondary_surface", owned_array<std::uint32_t>(n));
-    const auto m2_angle = add("secondary_incidence_deg", owned_array<double>(n));
-    const auto focal_angle = add("focal_incidence_deg", owned_array<double>(n));
+    nb::dict result;
+    // The requested columns are allocated; the others stay null (not computed).
+    const auto make = [&](const char *name, auto *null, std::size_t columns = 0) {
+      using T = std::remove_pointer_t<decltype(null)>;
+      if (!wants(name))
+        return static_cast<T *>(nullptr);
+      nb::object array = owned_array<T>(n, columns);
+      result[name] = array;
+      return data_of<T>(array);
+    };
+    constexpr std::uint8_t *u8 = nullptr;
+    constexpr std::uint32_t *u32 = nullptr;
+    constexpr std::uint64_t *u64 = nullptr;
+    constexpr double *f64 = nullptr;
+    const auto status = make("status", u8);
+    const auto surface = make("terminal_surface", u32);
+    const auto pos = make("position_m", f64, 3);
+    const auto dir = make("direction", f64, 3);
+    const auto path = make("path_length_m", f64);
+    const auto time = make("time_ns", f64);
+    const auto w = make("weight", f64);
+    const auto m1 = make("primary_point_m", f64, 3);
+    const auto m1_id = make("primary_surface", u32);
+    const auto m1_angle = make("primary_incidence_deg", f64);
+    const auto m2 = make("secondary_point_m", f64, 3);
+    const auto m2_id = make("secondary_surface", u32);
+    const auto m2_angle = make("secondary_incidence_deg", f64);
+    const auto focal_angle = make("focal_incidence_deg", f64);
+    const auto index = make("index", u64);
     const obdeect::PhotonBlock in{position.data(),
                                   direction.data(),
                                   wavelength_nm.data(),
@@ -82,24 +135,21 @@ public:
                                   weight.data(),
                                   photon_id.data(),
                                   n};
-    const obdeect::ResultBlock out{data_of<std::uint8_t>(status),
-                                   data_of<std::uint32_t>(surface),
-                                   data_of<std::uint32_t>(m1_id),
-                                   data_of<std::uint32_t>(m2_id),
-                                   data_of<double>(pos),
-                                   data_of<double>(dir),
-                                   data_of<double>(path),
-                                   data_of<double>(time),
-                                   data_of<double>(w),
-                                   data_of<double>(m1),
-                                   data_of<double>(m2),
-                                   data_of<double>(m1_angle),
-                                   data_of<double>(m2_angle),
-                                   data_of<double>(focal_angle)};
+    const obdeect::ResultBlock out{status, surface,  m1_id,    m2_id,       pos,
+                                   dir,    path,     time,     w,           m1,
+                                   m2,     m1_angle, m2_angle, focal_angle, index};
+    std::size_t count = 0;
     {
       nb::gil_scoped_release release;
-      obdeect::trace_block(model_, in, out, seed, apply_responses, thread_count(threads), direct);
+      count = obdeect::trace_block(model_, in, out, seed, apply_responses, thread_count(threads),
+                                   direct, detected_only);
     }
+    if (detected_only) // Views of the first `count` rows.
+      for (const auto &name : requested) {
+        const nb::object array = result[name.c_str()];
+        result[name.c_str()] = array[nb::slice(
+            std::ptrdiff_t{0}, static_cast<std::ptrdiff_t>(count), std::ptrdiff_t{1})];
+      }
     return result;
   }
 
@@ -231,7 +281,8 @@ NB_MODULE(_core, module) {
       .def(nb::init<const std::string &>(), "json"_a)
       .def("trace", &Model::trace, "position_m"_a, "direction"_a, "wavelength_nm"_a, "time_ns"_a,
            "weight"_a, "photon_id"_a, nb::kw_only(), "seed"_a, "apply_responses"_a = true,
-           "threads"_a = 0U, "direct"_a = false);
+           "threads"_a = 0U, "direct"_a = false, "outputs"_a = nb::none(),
+           "detected_only"_a = false);
   nb::class_<Emitter>(module, "Emitter")
       .def(nb::init<In1<double>, In1<double>, In1<double>, In1<double>, In1<double>, In1<double>,
                     In1<double>, In1<double>, double, double>(),

@@ -5,6 +5,7 @@
 #include "obdeect/random.hpp"
 #include "obdeect/source.hpp"
 
+#include <optional>
 #include <stdexcept>
 #include <vector>
 
@@ -216,6 +217,195 @@ void aspheres() {
   }
 }
 
+// An SST-like asphere with a central hole and hexagonal segments separated by
+// gaps (pitch 0.45 m, diameter 0.4 m).
+struct SegmentedAsphere {
+  Asphere asphere;
+  std::vector<Segment> segments;
+  std::vector<Segment::TangentFrame> frames;
+  SegmentGrid grid;
+
+  [[nodiscard]] bool accept(const Vec3 &p) const {
+    for (std::size_t i = 0; i < segments.size(); ++i)
+      if (segments[i].contains(frames[i], p))
+        return true;
+    return false;
+  }
+
+  // The lowest id of the segments containing p (a brute-force loop).
+  [[nodiscard]] std::optional<std::uint32_t> lowest_id(const Vec3 &p) const {
+    std::optional<std::uint32_t> id;
+    for (std::size_t i = 0; i < segments.size(); ++i)
+      if (segments[i].contains(frames[i], p) && (!id || segments[i].id < *id))
+        id = segments[i].id;
+    return id;
+  }
+};
+
+SegmentedAsphere sst_like_segmented() {
+  std::vector<double> sst_cm{0.0,          0.000608051,  -7.36248e-10, 5.82125e-15,
+                             -6.76447e-20, -3.89542e-24, -5.28036e-29, 2.99107e-34,
+                             4.39153e-38,  6.17433e-43,  -2.73586e-47};
+  SegmentedAsphere m;
+  m.asphere = Asphere{2, 0.0, 0.2, 2.12, 1.0, {}};
+  for (std::size_t i = 0; i < sst_cm.size(); ++i)
+    m.asphere.coefficients.push_back(sst_cm[i] *
+                                     std::pow(0.01, 1.0 - 2.0 * static_cast<double>(i)));
+  m.asphere.prepare();
+  std::uint32_t id = 3;
+  for (int row = -4; row <= 4; ++row)
+    for (int column = -4; column <= 4; ++column) {
+      const double x = 0.45 * (column + 0.5 * (row & 1)), y = 0.45 * 0.866 * row;
+      if (std::hypot(x, y) < 0.3 || std::hypot(x, y) > 1.9)
+        continue;
+      Segment s;
+      s.id = id++;
+      s.shape = Segment::Shape::hexagon;
+      s.centre_x = x;
+      s.centre_y = y;
+      s.half_width = 0.2;
+      m.segments.push_back(s);
+      m.frames.push_back(s.tangent_frame(m.asphere));
+    }
+  m.grid = SegmentGrid(m.segments, m.frames, m.asphere.outer_radius);
+  return m;
+}
+
+void slope_bound() {
+  const auto m = sst_like_segmented();
+  CHECK(std::isfinite(m.asphere.max_slope) && m.asphere.max_slope > 0.0);
+  std::vector<double> sct;
+  for (const double c : {1.5, 0.416667, 0.145816, -0.712012, 4.17685, -23.1617, 118.844, -520.501,
+                         1802.98, -4605.3, 8019.1, -8422.9, 4004.61})
+    sct.push_back(c * 5.5863);
+  const Asphere sct_like{3, 0.0, 0.0, 2.7, 5.5863, sct};
+  for (const Asphere *surface : {&m.asphere, &sct_like}) {
+    const double bound = surface->slope_bound();
+    double largest = 0.0;
+    for (int k = 0; k <= 1000; ++k) {
+      const double slope = std::abs(surface->slope(surface->outer_radius * k / 1000.0));
+      CHECK(slope <= bound);
+      largest = std::max(largest, slope);
+    }
+    CHECK(bound >= largest);
+    CHECK(bound <= 1e4 * std::max(largest, 1e-3));
+  }
+  CHECK(Asphere{}.max_slope == std::numeric_limits<double>::infinity());
+}
+
+// The single-root shortcut must give exactly the hits and misses of the
+// search without it.
+void single_root_shortcut() {
+  const auto m = sst_like_segmented();
+  Asphere reference = m.asphere;
+  reference.max_slope = std::numeric_limits<double>::infinity();
+  const auto accept = [&](const Vec3 &p) { return m.accept(p); };
+  std::size_t hits = 0, misses = 0, shortcut_rays = 0;
+  for (std::uint64_t k = 0; k < 200000; ++k) {
+    const auto u = uniform4(21, k, Stream::source);
+    // Mostly steep rays from far above, some tilted by up to 60 degrees.
+    const double tilt = (k % 5 == 0 ? 1.05 : 0.15) * u[2];
+    const double azimuth = 6.283185307179586 * u[3];
+    const Vec3 d{std::sin(tilt) * std::cos(azimuth), std::sin(tilt) * std::sin(azimuth),
+                 -std::cos(tilt)};
+    const double radius = 2.3 * std::sqrt(u[0]), phi = 6.283185307179586 * u[1];
+    const Vec3 target{radius * std::cos(phi), radius * std::sin(phi), 0.0};
+    const Ray ray{target - d * (k % 2 ? 3.0 : 1e4), d};
+    bool failed = false, failed_reference = false;
+    const auto a = m.asphere.intersect(ray, kMinDistanceM, accept, failed);
+    const auto b = reference.intersect(ray, kMinDistanceM, accept, failed_reference);
+    CHECK(failed == failed_reference);
+    CHECK(a.has_value() == b.has_value());
+    if (a && b) {
+      CHECK(a->t == b->t);
+      CHECK(a->point.x == b->point.x && a->point.y == b->point.y && a->point.z == b->point.z);
+      ++hits;
+    } else {
+      ++misses;
+    }
+    shortcut_rays += std::abs(d.z) > m.asphere.max_slope * std::hypot(d.x, d.y);
+  }
+  CHECK(hits > 20000 && misses > 20000 && shortcut_rays > 20000);
+}
+
+// The grid lookup finds the lowest-id segment that the brute-force loop finds,
+// for every segment shape.
+void segment_grid() {
+  auto m = sst_like_segmented();
+  // Mixed shapes with ids out of order: sectors (one wrapping past 2 pi), a
+  // polygon, a square, a circle and a rotated hexagon.
+  m.segments.clear();
+  m.frames.clear();
+  const auto add = [&](Segment s, std::uint32_t id) {
+    s.id = id;
+    m.segments.push_back(s);
+    m.frames.push_back(s.tangent_frame(m.asphere));
+  };
+  Segment sector;
+  sector.shape = Segment::Shape::annular_sector;
+  sector.inner_radius = 0.3;
+  sector.outer_radius = 1.9;
+  sector.start = 5.5;
+  sector.span = 1.5;
+  sector.gap = 0.02;
+  add(sector, 40);
+  sector.start = 0.4;
+  sector.span = 2.5;
+  sector.inner_radius = 0.9;
+  sector.gap_at_start = true;
+  add(sector, 12);
+  sector.start = 3.0;
+  sector.span = 0.5;
+  sector.inner_radius = 0.2;
+  add(sector, 9);
+  Segment polygon;
+  polygon.shape = Segment::Shape::polygon;
+  polygon.vertices = {{-1.0, -0.2}, {0.3, -1.5}, {0.9, -0.4}, {-0.2, 0.3}};
+  add(polygon, 30);
+  Segment other;
+  other.shape = Segment::Shape::square;
+  other.centre_x = 1.2;
+  other.centre_y = 0.9;
+  other.half_width = 0.35;
+  other.rotation = 0.4;
+  add(other, 5);
+  other.shape = Segment::Shape::circle;
+  other.centre_x = -1.3;
+  other.centre_y = 1.0;
+  add(other, 7);
+  other.shape = Segment::Shape::hexagon;
+  other.centre_x = 0.1;
+  other.centre_y = 1.4;
+  other.half_width = 0.3;
+  add(other, 2);
+  // Overlapping footprints: the lowest id must win.
+  other.centre_x = 0.2;
+  add(other, 1);
+  m.grid = SegmentGrid(m.segments, m.frames, m.asphere.outer_radius);
+  std::size_t found = 0, overlapping = 0;
+  for (std::uint64_t k = 0; k < 300000; ++k) {
+    const auto u = uniform4(31, k, Stream::source);
+    const double outer = m.asphere.outer_radius;
+    const double x = outer * (2.0 * u[0] - 1.0), y = outer * (2.0 * u[1] - 1.0);
+    const Vec3 p{x, y, m.asphere.sag(std::hypot(x, y))};
+    const auto expected = m.lowest_id(p);
+    const auto actual = m.grid.find(m.segments, m.frames, p);
+    CHECK(actual == expected);
+    found += expected.has_value();
+    overlapping += expected && *expected == 1;
+  }
+  CHECK(found > 30000 && overlapping > 100);
+  CHECK(!m.grid.find(m.segments, m.frames, {5.0, 0.0, 0.0}).has_value());
+  // The hexagonal mirror, on points near its segment edges as well.
+  const auto hexagons = sst_like_segmented();
+  for (std::uint64_t k = 0; k < 300000; ++k) {
+    const auto u = uniform4(32, k, Stream::source);
+    const double x = 2.12 * (2.0 * u[0] - 1.0), y = 2.12 * (2.0 * u[1] - 1.0);
+    const Vec3 p{x, y, hexagons.asphere.sag(std::hypot(x, y))};
+    CHECK(hexagons.grid.find(hexagons.segments, hexagons.frames, p) == hexagons.lowest_id(p));
+  }
+}
+
 void segments() {
   const Asphere flat{1, 0.0, 0.0, 5.0, 1.0, {0.0}};
   Segment hexagon;
@@ -359,6 +549,151 @@ void obscurer_hierarchy() {
   CHECK(!Obscurers().nearest({{0, 0, 1}, {0, 0, -1}}, Leg::incoming, 10.0));
 }
 
+// Random slender beams (polyhedra with a vertex box) and rods: the grid for steep
+// incoming rays, the hierarchy for every leg and a brute-force loop give the
+// same nearest hit.
+void obscurer_grid() {
+  std::vector<Obscurer> items;
+  std::vector<Plane> planes;
+  for (std::uint32_t i = 0; i < 150; ++i) {
+    const auto u = uniform4(41, i, Stream::source), w = uniform4(42, i, Stream::source);
+    Obscurer o;
+    o.id = 5000 - i;
+    o.legs = static_cast<std::uint8_t>(1 + i % 7);
+    if (i % 2) {
+      o.kind = Obscurer::Kind::cylinder;
+      o.a = {16 * u[0] - 8, 16 * u[1] - 8, 12 * u[2]};
+      o.b = o.a + Vec3{4 * w[0] - 2, 4 * w[1] - 2, 4 * w[2] - 2};
+      o.radius_a = 0.03 + 0.1 * u[3];
+      o.bound_a = o.a;
+      o.bound_b = o.b;
+      o.bound_radius = o.radius_a;
+    } else {
+      // An oriented box: axes from two random directions.
+      const Vec3 e1 = normalized({w[0] - 0.5, w[1] - 0.5, w[2] - 0.5});
+      const Vec3 e2 = normalized(cross(e1, {0.3, 0.5 + u[3], 0.1}));
+      const Vec3 e3 = cross(e1, e2);
+      const Vec3 centre{16 * u[0] - 8, 16 * u[1] - 8, 12 * u[2]};
+      const double h1 = 0.5 + 1.5 * u[2], h2 = 0.02 + 0.08 * w[3], h3 = 0.02 + 0.08 * u[3];
+      std::vector<Vec3> corners;
+      for (int a : {-1, 1})
+        for (int b : {-1, 1})
+          for (int c : {-1, 1})
+            corners.push_back(centre + e1 * (a * h1) + e2 * (b * h2) + e3 * (c * h3));
+      o.kind = Obscurer::Kind::polyhedron;
+      o.plane_begin = static_cast<std::uint32_t>(planes.size());
+      for (const auto &[axis, h] : {std::pair{e1, h1}, std::pair{e2, h2}, std::pair{e3, h3}})
+        for (const double sign : {-1.0, 1.0})
+          planes.push_back({axis * sign, dot(axis * sign, centre) + h});
+      o.plane_end = static_cast<std::uint32_t>(planes.size());
+      bound_vertices(o, corners);
+    }
+    items.push_back(o);
+  }
+  const Obscurers set(items, planes);
+  std::size_t hits = 0, steep = 0;
+  for (std::uint64_t k = 0; k < 60000; ++k) {
+    const auto u = uniform4(43, k, Stream::source), w = uniform4(44, k, Stream::source);
+    // Mostly steep rays, some shallow ones.
+    const double tilt = k % 4 == 0 ? 1.5 : 0.8;
+    const Ray ray{{20 * u[0] - 10, 20 * u[1] - 10, 20.0},
+                  normalized({tilt * (w[0] - 0.5), tilt * (w[1] - 0.5), -1.0})};
+    const double t_max = 8.0 + 20.0 * w[2];
+    const Leg leg = k % 3 == 0   ? Leg::incoming
+                    : k % 3 == 1 ? Leg::after_primary
+                                 : Leg::after_secondary;
+    std::optional<Obscurers::Hit> expected;
+    for (const auto &item : items)
+      if (item.legs & leg)
+        if (const auto t = item.intersect(ray, planes, kMinDistanceM))
+          if (*t < t_max &&
+              (!expected || *t < expected->t || (*t == expected->t && item.id < expected->id)))
+            expected = Obscurers::Hit{*t, item.id};
+    for (const auto &found :
+         {set.nearest(ray, leg, t_max), set.nearest_in_hierarchy(ray, leg, t_max)}) {
+      CHECK(found.has_value() == expected.has_value());
+      if (found && expected) {
+        CHECK(found->id == expected->id);
+        CHECK(found->t == expected->t);
+      }
+    }
+    hits += expected.has_value();
+    steep += leg == Leg::incoming && std::abs(ray.direction.z) >= 0.5;
+  }
+  CHECK(hits > 1500 && steep > 10000);
+}
+
+// The plane pre-test rejects only rays that the sphere test also rejects, and
+// the tighter grid cells lose no facet.
+void facet_prefilter() {
+  std::size_t hits = 0;
+  for (const Aperture shape :
+       {Aperture::circle, Aperture::hexagon_flat_x, Aperture::square, Aperture::hexagon_flat_y})
+    for (const double radius : {0.0, 40.0, 3.0}) { // Flat, gently and strongly curved.
+      Facet facet;
+      facet.id = 7;
+      facet.centre = {0.3, -0.2, 1.0};
+      facet.normal = normalized({0.2, 0.1, 1.0});
+      facet.u = normalized(cross(facet.normal, {0.0, 1.0, 0.0}));
+      facet.v = cross(facet.normal, facet.u);
+      facet.shape = shape;
+      facet.half_width = 0.5;
+      facet.radius = radius;
+      Facet checked = facet;
+      checked.prepare();
+      CHECK(checked.reach > 0.0 && (radius > 0.0 ? checked.sag > 0.0 : checked.sag == 0.0));
+      for (std::uint64_t k = 0; k < 40000; ++k) {
+        const auto u = uniform4(51 + k % 3, k, Stream::source);
+        // Rays aimed near the facet from various directions, including shallow ones.
+        const Vec3 target = facet.centre + facet.u * (1.6 * (u[0] - 0.5)) +
+                            facet.v * (1.6 * (u[1] - 0.5)) + facet.normal * (0.1 * (u[2] - 0.5));
+        const Vec3 d = normalized({1.4 * (u[3] - 0.5) + 0.1, 1.4 * (u[2] - 0.5), -1.0});
+        const double distance = k % 2 ? 50.0 : 1e4;
+        const Ray ray{target - d * distance, d};
+        const auto a = checked.intersect(ray, kMinDistanceM),
+                   b = facet.intersect(ray, kMinDistanceM);
+        CHECK(a.has_value() == b.has_value());
+        if (a && b) {
+          CHECK(a->t == b->t && a->id == b->id);
+          ++hits;
+        }
+      }
+    }
+  CHECK(hits > 20000);
+  // Tighter cells: the grid still offers every facet that a ray hits.
+  std::vector<Facet> facets;
+  for (int row = -6; row <= 6; ++row)
+    for (int column = -6; column <= 6; ++column) {
+      Facet f;
+      f.id = static_cast<std::uint32_t>(facets.size());
+      f.centre = {0.9 * (column + 0.5 * (row & 1)), 0.78 * row,
+                  0.001 * (row * row + column * column)};
+      f.normal = normalized({-0.02 * f.centre.x, -0.02 * f.centre.y, 1.0});
+      f.u = normalized(cross(f.normal, {0.0, 1.0, 0.0}));
+      f.v = cross(f.normal, f.u);
+      f.shape = Aperture::hexagon_flat_x;
+      f.half_width = 0.45;
+      f.radius = 30.0;
+      f.prepare();
+      facets.push_back(f);
+    }
+  const FacetGrid grid(facets);
+  std::size_t found = 0;
+  for (std::uint64_t k = 0; k < 40000; ++k) {
+    const auto u = uniform4(61, k, Stream::source);
+    const Vec3 d = normalized({0.6 * (u[2] - 0.5), 0.6 * (u[3] - 0.5), -1.0});
+    const Ray ray{{12.0 * (u[0] - 0.5) - d.x * 20.0, 10.0 * (u[1] - 0.5) - d.y * 20.0, 20.0}, d};
+    std::vector<char> offered(facets.size(), 0);
+    grid.candidates(ray, facets.size(), [&](std::size_t i) { offered[i] = 1; });
+    for (std::size_t i = 0; i < facets.size(); ++i)
+      if (facets[i].intersect(ray, kMinDistanceM)) {
+        CHECK(offered[i]);
+        ++found;
+      }
+  }
+  CHECK(found > 10000);
+}
+
 void sources() {
   // A plane wave fills the disk uniformly and starts on the start plane.
   PointSource star{
@@ -460,10 +795,15 @@ void all_tests() {
   tables();
   apertures();
   facets();
+  facet_prefilter();
   aspheres();
+  slope_bound();
+  single_root_shortcut();
+  segment_grid();
   segments();
   obscurers();
   obscurer_hierarchy();
+  obscurer_grid();
   sources();
   densities();
   emitters();

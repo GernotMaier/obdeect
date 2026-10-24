@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import math
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
@@ -259,6 +259,8 @@ class OpticalModel:
         apply_responses: bool = True,
         threads: int = 0,
         direct: bool = False,
+        outputs: Sequence[str] | None = None,
+        detected_only: bool = False,
     ) -> dict[str, np.ndarray]:
         """Trace photons; returns per-photon arrays (see docs/USER_GUIDE.md).
 
@@ -268,6 +270,12 @@ class OpticalModel:
         photons start inside the telescope on their way to the focal surface
         (e.g. from a flasher): mirrors and telescope transmission do not act,
         the obscurers of that leg do.
+
+        `outputs` lists the columns to return (None: all of them); asking only
+        for what is used saves memory traffic. With `detected_only` just the
+        photons with status ``detected`` are returned, in input order, and the
+        extra column ``index`` (their row in the input) becomes available.
+        An unknown column raises ``ValueError``.
         """
 
         def column(name: str, dtype: type) -> np.ndarray:
@@ -284,6 +292,8 @@ class OpticalModel:
             apply_responses=apply_responses,
             threads=threads,
             direct=direct,
+            outputs=None if outputs is None else list(outputs),
+            detected_only=detected_only,
         )
 
 

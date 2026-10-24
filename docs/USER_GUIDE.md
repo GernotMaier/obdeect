@@ -65,6 +65,23 @@ photon:
 | `secondary_point_m`, `secondary_surface`, `secondary_incidence_deg` | reflection on the secondary (NaN for single-mirror telescopes) |
 | `focal_incidence_deg` | angle to the focal-surface normal |
 
+By default `trace` returns every array above for every photon. Writing 14
+arrays costs memory bandwidth, so ask for what you use:
+
+```python
+detected = model.trace(
+    photons, seed=2,
+    outputs=("position_m", "direction", "time_ns", "weight", "index"),
+    detected_only=True,
+)
+```
+
+`outputs` lists the arrays to compute and return (an unknown name raises
+`ValueError` and lists the valid ones). With `detected_only=True` only photons
+with status `detected` are returned, in input order; the additional array
+`index` (valid only with `detected_only`) gives the row of each in the input.
+The values are those of the full trace, for any `threads`.
+
 ## Calibration light
 
 `emitter_photons` makes the light of a point emitter, such as a flasher or an

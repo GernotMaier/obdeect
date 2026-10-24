@@ -263,3 +263,50 @@ def test_patch_production_overlays_its_history(tmp_path):
     assert read_telescope(root, "TEST-design", "9.9.9").records["focal_length"]["value"] == 800.0
     with pytest.raises(ModelError, match="no production table MISSING in 9.9.10"):
         read_telescope(root, "MISSING", "9.9.10")
+
+
+def _photons_and_full_trace(count=30_000):
+    model = model_of(segmented())
+    photons = model.star_photons(count, seed=5)
+    return model, photons, model.trace(photons, seed=6, threads=1)
+
+
+def test_selected_output_columns_equal_the_full_trace():
+    model, photons, full = _photons_and_full_trace()
+    names = ["position_m", "weight", "status"]
+    selected = model.trace(photons, seed=6, threads=1, outputs=names)
+    assert set(selected) == set(names)
+    for name in names:
+        assert np.array_equal(selected[name], full[name], equal_nan=True)
+
+
+def test_detected_only_equals_the_masked_full_trace():
+    model, photons, full = _photons_and_full_trace()
+    keep = full["status"] == DETECTED
+    assert 0 < np.count_nonzero(keep) < len(keep)
+    detected = model.trace(photons, seed=6, threads=1, detected_only=True)
+    assert set(detected) == set(full)
+    for name, values in full.items():
+        assert np.array_equal(detected[name], values[keep], equal_nan=True), name
+    detected = model.trace(
+        photons, seed=6, threads=1, detected_only=True, outputs=["index", "position_m"]
+    )
+    assert np.array_equal(detected["index"], np.flatnonzero(keep))
+    assert np.array_equal(detected["position_m"], full["position_m"][keep])
+
+
+def test_output_selection_is_independent_of_the_thread_count():
+    model, photons, _ = _photons_and_full_trace(60_000)
+    options = {"outputs": ["index", "position_m", "time_ns"], "detected_only": True}
+    one = model.trace(photons, seed=6, threads=1, **options)
+    four = model.trace(photons, seed=6, threads=4, **options)
+    for name in one:
+        assert np.array_equal(one[name], four[name], equal_nan=True)
+
+
+def test_unknown_output_columns_are_rejected():
+    model, photons, _ = _photons_and_full_trace(100)
+    with pytest.raises(ValueError, match="valid columns are:.*position_m"):
+        model.trace(photons, seed=6, outputs=["position_m", "nonsense"])
+    with pytest.raises(ValueError, match="detected_only"):
+        model.trace(photons, seed=6, outputs=["index"])
