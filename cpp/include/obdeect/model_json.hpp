@@ -223,6 +223,7 @@ inline Asphere asphere(const Node &node, std::uint32_t id) {
   a.coefficients = node["coefficients_m"].numbers();
   if (a.inner_radius >= a.outer_radius)
     node.fail("inner radius must be smaller than the outer radius");
+  a.prepare();
   return a;
 }
 
@@ -292,6 +293,7 @@ inline Mirror mirror(const Node &node, std::vector<std::uint32_t> &ids) {
       facet.shape = aperture(f["shape"]);
       facet.half_width = 0.5 * f["diameter_m"].positive();
       facet.radius = f["radius_of_curvature_m"].non_negative();
+      facet.prepare();
       ids.push_back(facet.id);
       m.facets.push_back(facet);
     }
@@ -307,6 +309,7 @@ inline Mirror mirror(const Node &node, std::vector<std::uint32_t> &ids) {
         m.segment_frames.push_back(m.segments.back().tangent_frame(*m.asphere));
         ids.push_back(m.segments.back().id);
       }
+    m.segment_grid = SegmentGrid(m.segments, m.segment_frames, m.asphere->outer_radius);
   }
   if (node.has("reflectivity"))
     m.reflectivity = response(node["reflectivity"]);
@@ -349,6 +352,16 @@ inline Obscurer obscurer(const Node &node, std::vector<Plane> &planes) {
     o.bound_a = o.a;
     o.bound_b = o.b;
     o.bound_radius = o.radius_a;
+    // The box of a closed cylinder: the end points widened by r sqrt(1 - n_i^2).
+    const Vec3 n = normalized(o.b - o.a);
+    const Vec3 e{o.radius_a * std::sqrt(std::max(0.0, 1.0 - n.x * n.x)),
+                 o.radius_a * std::sqrt(std::max(0.0, 1.0 - n.y * n.y)),
+                 o.radius_a * std::sqrt(std::max(0.0, 1.0 - n.z * n.z))};
+    o.box_low = {std::min(o.a.x, o.b.x) - e.x, std::min(o.a.y, o.b.y) - e.y,
+                 std::min(o.a.z, o.b.z) - e.z};
+    o.box_high = {std::max(o.a.x, o.b.x) + e.x, std::max(o.a.y, o.b.y) + e.y,
+                  std::max(o.a.z, o.b.z) + e.z};
+    o.has_box = true;
   } else if (shape == "polyhedron") {
     (void)node.object({"id", "name", "group", "legs", "shape", "vertices_m", "planes"});
     o.kind = Obscurer::Kind::polyhedron;

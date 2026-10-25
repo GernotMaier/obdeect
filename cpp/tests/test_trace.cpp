@@ -4,6 +4,7 @@
 #include "obdeect/source.hpp"
 #include "obdeect/trace.hpp"
 
+#include <cstring>
 #include <numeric>
 #include <vector>
 
@@ -225,7 +226,7 @@ void scatter_widths() {
 void block_invariance() {
   auto m = single_facet(10.0, 0.5);
   m.primary.scatter = Scatter{0.001, 0.3, 0.004, false};
-  const std::size_t n = 20000;
+  const std::size_t n = 50000;
   std::vector<double> position(3 * n), direction(3 * n), wavelength(n, 400.0), time(n, 0.0),
       weight(n, 1.0);
   std::vector<std::uint64_t> id(n);
@@ -260,10 +261,60 @@ void block_invariance() {
                        weight.data(),
                        id.data(),
                        n};
-  Out one(n), many(n);
+  Out one(n);
   trace_block(m, in, one.block(), 4, true, 1);
-  trace_block(m, in, many.block(), 4, true, 4);
-  CHECK(one.pos == many.pos && one.dir == many.dir && one.status == many.status);
+  // Threads take chunks dynamically; every field must still agree bit for bit.
+  for (const unsigned threads : {3U, 4U, 8U}) {
+    Out many(n);
+    trace_block(m, in, many.block(), 4, true, threads);
+    const auto same_bits = [](const auto &x, const auto &y) {
+      return x.size() == y.size() &&
+             std::memcmp(x.data(), y.data(), x.size() * sizeof(x[0])) == 0; // NaN-safe.
+    };
+    CHECK(same_bits(one.status, many.status) && same_bits(one.terminal, many.terminal) &&
+          same_bits(one.m1, many.m1) && same_bits(one.m2, many.m2) &&
+          same_bits(one.pos, many.pos) && same_bits(one.dir, many.dir) &&
+          same_bits(one.path, many.path) && same_bits(one.t, many.t) && same_bits(one.w, many.w) &&
+          same_bits(one.p1, many.p1) && same_bits(one.p2, many.p2) && same_bits(one.a1, many.a1) &&
+          same_bits(one.a2, many.a2) && same_bits(one.af, many.af));
+  }
+  // Detected-only output with a few columns: the detected rows of the full trace, in order.
+  std::size_t expected = 0;
+  for (std::size_t i = 0; i < n; ++i)
+    expected += one.status[i] == static_cast<std::uint8_t>(Status::detected);
+  CHECK(expected > 100 && expected < n);
+  for (const unsigned threads : {1U, 3U, 8U}) {
+    std::vector<std::uint8_t> status(n);
+    std::vector<double> pos(3 * n);
+    std::vector<std::uint64_t> index(n);
+    ResultBlock partial;
+    partial.status = status.data();
+    partial.position = pos.data();
+    partial.index = index.data();
+    CHECK(trace_block(m, in, partial, 4, true, threads, false, true) == expected);
+    std::size_t row = 0;
+    bool same_rows = true;
+    for (std::size_t i = 0; i < n; ++i)
+      if (one.status[i] == static_cast<std::uint8_t>(Status::detected)) {
+        same_rows = same_rows && index[row] == i && status[row] == one.status[i] &&
+                    std::memcmp(&pos[3 * row], &one.pos[3 * i], 3 * sizeof(double)) == 0;
+        ++row;
+      }
+    CHECK(same_rows);
+  }
+  // Without incidence-angle outputs the angles are not computed, yet an angle-dependent
+  // reflectivity still sees them: the weights are the same.
+  auto angular = m;
+  angular.primary.reflectivity =
+      Response{300.0, 100.0, 3, {0.0, 60.0}, {0.9, 0.5, 0.8, 0.4, 0.7, 0.3}};
+  Out with_angles(n);
+  trace_block(angular, in, with_angles.block(), 4, true, 2);
+  std::vector<double> only_weight(n);
+  ResultBlock weight_only;
+  weight_only.weight = only_weight.data();
+  trace_block(angular, in, weight_only, 4, true, 2);
+  CHECK(only_weight == with_angles.w);
+  CHECK(with_angles.w != one.w);
   // Reversed order gives the same result per photon id.
   std::vector<std::size_t> order(n);
   std::iota(order.rbegin(), order.rend(), std::size_t{0});

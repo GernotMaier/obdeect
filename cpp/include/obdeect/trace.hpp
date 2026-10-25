@@ -4,9 +4,11 @@
 #include "obdeect/random.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <limits>
 #include <optional>
 #include <string_view>
@@ -69,23 +71,21 @@ inline std::optional<MirrorHit> intersect_mirror(const Mirror &mirror, const Ray
   failed = false;
   if (mirror.asphere) {
     const auto &a = *mirror.asphere;
-    const auto inside = [&](std::size_t i, const Vec3 &p) {
-      return mirror.segments[i].contains(mirror.segment_frames[i], p);
-    };
+    // The lowest segment id at the accepted point: accept() is the last call
+    // that returned true when intersect() returns, and it saw the hit point.
+    std::uint32_t segment_id = a.id;
     const auto accept = [&](const Vec3 &p) {
       if (mirror.segments.empty())
         return true;
-      for (std::size_t i = 0; i < mirror.segments.size(); ++i)
-        if (inside(i, p))
-          return true;
-      return false;
+      const auto id = mirror.segment_grid.find(mirror.segments, mirror.segment_frames, p);
+      if (id)
+        segment_id = *id;
+      return id.has_value();
     };
     auto hit = a.intersect(ray, kMinDistanceM, accept, failed);
     if (!hit)
       return std::nullopt;
-    for (std::size_t i = 0; i < mirror.segments.size(); ++i) // Lowest segment id at the point.
-      if ((hit->id == a.id || mirror.segments[i].id < hit->id) && inside(i, hit->point))
-        hit->id = mirror.segments[i].id;
+    hit->id = segment_id;
     return MirrorHit{*hit, 0};
   }
   std::optional<MirrorHit> nearest;
@@ -133,6 +133,11 @@ inline Vec3 reflect_at(const Mirror &mirror, const MirrorHit &mh, const Vec3 &di
   return normalized(rotate(rotate(reflect(direction, n), e2, a1), e1, a2));
 }
 
+// Does the mirror's reflectivity depend on the incidence angle?
+inline bool angle_matters(const Mirror &mirror) {
+  return mirror.reflectivity && mirror.reflectivity->incidence_deg.size() > 1;
+}
+
 inline double mirror_response(const Mirror &mirror, const MirrorHit &mh, double wavelength_nm,
                               double incidence) {
   double r = mirror.reflectivity ? mirror.reflectivity->at(wavelength_nm, incidence) : 1.0;
@@ -154,11 +159,14 @@ inline double mirror_response(const Mirror &mirror, const MirrorHit &mh, double 
 // the weight stays at its input value (geometry-only transport). A `direct`
 // photon starts inside the telescope on the leg to the focal surface (after
 // the last mirror), e.g. from a flasher: no mirror and no telescope
-// transmission act, only the obscurers of that leg.
+// transmission act, only the obscurers of that leg. With `incidence_angles`
+// false the incidence angles stay NaN (saving an arccosine each) except
+// where a response table depends on them.
 [[nodiscard]] inline TraceResult trace_photon(const OpticalModel &model, Ray ray,
                                               double wavelength_nm, double time_ns, double weight,
                                               std::uint64_t photon_id, std::uint64_t seed,
-                                              bool apply_responses = true, bool direct = false) {
+                                              bool apply_responses = true, bool direct = false,
+                                              bool incidence_angles = true) {
   using namespace detail;
   TraceResult out;
   out.position = ray.origin;
@@ -220,9 +228,12 @@ inline double mirror_response(const Mirror &mirror, const MirrorHit &mh, double 
     path += m1->hit.t;
     out.primary_point = m1->hit.point;
     out.primary_surface = m1->hit.id;
-    out.primary_incidence_deg = incidence_deg(ray.direction, m1->hit.normal);
+    if (incidence_angles || angle_matters(model.primary))
+      out.primary_incidence_deg = incidence_deg(ray.direction, m1->hit.normal);
     if (apply_responses)
-      out.weight *= mirror_response(model.primary, *m1, wavelength_nm, out.primary_incidence_deg);
+      out.weight *=
+          mirror_response(model.primary, *m1, wavelength_nm,
+                          std::isnan(out.primary_incidence_deg) ? 0.0 : out.primary_incidence_deg);
     ray = {m1->hit.point,
            reflect_at(model.primary, *m1, ray.direction, photon_id, seed, Stream::primary_scatter)};
 
@@ -238,10 +249,12 @@ inline double mirror_response(const Mirror &mirror, const MirrorHit &mh, double 
       path += m2->hit.t;
       out.secondary_point = m2->hit.point;
       out.secondary_surface = m2->hit.id;
-      out.secondary_incidence_deg = incidence_deg(ray.direction, m2->hit.normal);
+      if (incidence_angles || angle_matters(*model.secondary))
+        out.secondary_incidence_deg = incidence_deg(ray.direction, m2->hit.normal);
       if (apply_responses)
-        out.weight *=
-            mirror_response(*model.secondary, *m2, wavelength_nm, out.secondary_incidence_deg);
+        out.weight *= mirror_response(
+            *model.secondary, *m2, wavelength_nm,
+            std::isnan(out.secondary_incidence_deg) ? 0.0 : out.secondary_incidence_deg);
       ray = {m2->hit.point, reflect_at(*model.secondary, *m2, ray.direction, photon_id, seed,
                                        Stream::secondary_scatter)};
     }
@@ -265,7 +278,8 @@ inline double mirror_response(const Mirror &mirror, const MirrorHit &mh, double 
   if (!focal)
     return finish(Status::missed_focal_surface, ray.origin, kNoSurface);
   path += focal->t;
-  out.focal_incidence_deg = incidence_deg(ray.direction, focal->normal);
+  if (incidence_angles)
+    out.focal_incidence_deg = incidence_deg(ray.direction, focal->normal);
   return finish(Status::detected, focal->point, fs.id);
 }
 
@@ -276,65 +290,148 @@ struct PhotonBlock {
   std::size_t size{};
 };
 
+// Output columns. A null pointer means "not requested": nothing is written.
+// Vectors are (n, 3) row-major. `index` receives the input row of each output
+// row (useful with detected_only).
 struct ResultBlock {
   std::uint8_t *status{};
   std::uint32_t *terminal_surface{}, *primary_surface{}, *secondary_surface{};
   double *position{}, *direction{}, *path_length_m{}, *time_ns{}, *weight{};
   double *primary_point{}, *secondary_point{};
   double *primary_incidence_deg{}, *secondary_incidence_deg{}, *focal_incidence_deg{};
+  std::uint64_t *index{};
 };
 
-// Run body(begin, end) over [0, n) in contiguous chunks on up to `threads`
-// threads (at least 4096 items each).
+// Chunk size of parallel_for: photons cost very different amounts, so threads
+// take fixed chunks from a shared counter instead of one static share each.
+inline constexpr std::size_t kChunkSize = 4096;
+
+// Run body(begin, end) over [0, n) in chunks of kChunkSize items (the last one
+// shorter) on up to `threads` threads. Each worker takes the next free chunk
+// until none is left; the body must write only the items of its range.
 template <class Body> void parallel_for(std::size_t n, unsigned threads, const Body &body) {
-  constexpr std::size_t kMinimumPerThread = 4096;
-  const std::size_t workers = std::max<std::size_t>(
-      1, std::min<std::size_t>(threads, (n + kMinimumPerThread - 1) / kMinimumPerThread));
+  const std::size_t chunks = (n + kChunkSize - 1) / kChunkSize;
+  const std::size_t workers = std::max<std::size_t>(1, std::min<std::size_t>(threads, chunks));
   if (workers == 1) {
     body(std::size_t{0}, n);
     return;
   }
+  std::atomic<std::size_t> next{0};
+  const auto work = [&] {
+    for (std::size_t c = next.fetch_add(1, std::memory_order_relaxed); c < chunks;
+         c = next.fetch_add(1, std::memory_order_relaxed))
+      body(c * kChunkSize, std::min(n, (c + 1) * kChunkSize));
+  };
   std::vector<std::thread> pool;
-  const std::size_t chunk = (n + workers - 1) / workers;
-  for (std::size_t w = 0; w < workers; ++w)
-    pool.emplace_back(body, w * chunk, std::min(n, (w + 1) * chunk));
+  for (std::size_t w = 1; w < workers; ++w)
+    pool.emplace_back(work);
+  work(); // The calling thread works too.
   for (auto &t : pool)
     t.join();
 }
 
 // Trace a block on `threads` threads. Every photon writes only its own row,
 // and its random numbers depend only on (seed, photon_id), so results do not
-// depend on the thread count or the order of photons.
-inline void trace_block(const OpticalModel &model, const PhotonBlock &in, const ResultBlock &out,
-                        std::uint64_t seed, bool apply_responses, unsigned threads,
-                        bool direct = false) {
+// depend on the thread count or the order of photons. Returns the number of
+// rows written: in.size, or with `detected_only` the number of detected
+// photons, whose rows come first, in input order (the rest of the output is
+// left unwritten).
+inline std::size_t trace_block(const OpticalModel &model, const PhotonBlock &in,
+                               const ResultBlock &out, std::uint64_t seed, bool apply_responses,
+                               unsigned threads, bool direct = false, bool detected_only = false) {
+  const auto write_row = [&out](std::size_t row, std::size_t input, const TraceResult &r) {
+    const auto put = [row](double *target, const Vec3 &v) {
+      if (!target)
+        return;
+      target[3 * row] = v.x;
+      target[3 * row + 1] = v.y;
+      target[3 * row + 2] = v.z;
+    };
+    const auto set = [row](auto *target, auto value) {
+      if (target)
+        target[row] = value;
+    };
+    set(out.status, static_cast<std::uint8_t>(r.status));
+    set(out.terminal_surface, r.terminal_surface);
+    set(out.primary_surface, r.primary_surface);
+    set(out.secondary_surface, r.secondary_surface);
+    put(out.position, r.position);
+    put(out.direction, r.direction);
+    put(out.primary_point, r.primary_point);
+    put(out.secondary_point, r.secondary_point);
+    set(out.path_length_m, r.path_length_m);
+    set(out.time_ns, r.time_ns);
+    set(out.weight, r.weight);
+    set(out.primary_incidence_deg, r.primary_incidence_deg);
+    set(out.secondary_incidence_deg, r.secondary_incidence_deg);
+    set(out.focal_incidence_deg, r.focal_incidence_deg);
+    set(out.index, static_cast<std::uint64_t>(input));
+  };
+  const bool wants_angles =
+      out.primary_incidence_deg || out.secondary_incidence_deg || out.focal_incidence_deg;
+  const auto trace_one = [&](std::size_t i) {
+    const Ray ray{{in.position[3 * i], in.position[3 * i + 1], in.position[3 * i + 2]},
+                  {in.direction[3 * i], in.direction[3 * i + 1], in.direction[3 * i + 2]}};
+    return trace_photon(model, ray, in.wavelength_nm[i], in.time_ns[i], in.weight[i],
+                        in.photon_id[i], seed, apply_responses, direct, wants_angles);
+  };
+  if (!detected_only) {
+    parallel_for(in.size, threads, [&](std::size_t begin, std::size_t end) {
+      for (std::size_t i = begin; i < end; ++i)
+        write_row(i, i, trace_one(i));
+    });
+    return in.size;
+  }
+  // Each chunk writes its detected rows, in input order, from the chunk's first
+  // row on and records their number; afterwards the chunks are moved down.
+  std::vector<std::size_t> found((in.size + kChunkSize - 1) / kChunkSize, 0);
   parallel_for(in.size, threads, [&](std::size_t begin, std::size_t end) {
-    for (std::size_t i = begin; i < end; ++i) {
-      const Ray ray{{in.position[3 * i], in.position[3 * i + 1], in.position[3 * i + 2]},
-                    {in.direction[3 * i], in.direction[3 * i + 1], in.direction[3 * i + 2]}};
-      const auto r = trace_photon(model, ray, in.wavelength_nm[i], in.time_ns[i], in.weight[i],
-                                  in.photon_id[i], seed, apply_responses, direct);
-      const auto put = [i](double *target, const Vec3 &v) {
-        target[3 * i] = v.x;
-        target[3 * i + 1] = v.y;
-        target[3 * i + 2] = v.z;
-      };
-      out.status[i] = static_cast<std::uint8_t>(r.status);
-      out.terminal_surface[i] = r.terminal_surface;
-      out.primary_surface[i] = r.primary_surface;
-      out.secondary_surface[i] = r.secondary_surface;
-      put(out.position, r.position);
-      put(out.direction, r.direction);
-      put(out.primary_point, r.primary_point);
-      put(out.secondary_point, r.secondary_point);
-      out.path_length_m[i] = r.path_length_m;
-      out.time_ns[i] = r.time_ns;
-      out.weight[i] = r.weight;
-      out.primary_incidence_deg[i] = r.primary_incidence_deg;
-      out.secondary_incidence_deg[i] = r.secondary_incidence_deg;
-      out.focal_incidence_deg[i] = r.focal_incidence_deg;
+    for (std::size_t first = begin; first < end; first += kChunkSize) {
+      std::size_t row = first;
+      for (std::size_t i = first; i < std::min(end, first + kChunkSize); ++i) {
+        const auto r = trace_one(i);
+        if (r.status == Status::detected)
+          write_row(row++, i, r);
+      }
+      found[first / kChunkSize] = row - first;
     }
   });
+  struct Column {
+    void *data;
+    std::size_t bytes; // Per row.
+  };
+  std::vector<Column> columns;
+  const auto add = [&columns](auto *pointer, std::size_t per_row) {
+    if (pointer)
+      columns.push_back({pointer, per_row * sizeof(*pointer)});
+  };
+  add(out.status, 1);
+  add(out.terminal_surface, 1);
+  add(out.primary_surface, 1);
+  add(out.secondary_surface, 1);
+  add(out.position, 3);
+  add(out.direction, 3);
+  add(out.path_length_m, 1);
+  add(out.time_ns, 1);
+  add(out.weight, 1);
+  add(out.primary_point, 3);
+  add(out.secondary_point, 3);
+  add(out.primary_incidence_deg, 1);
+  add(out.secondary_incidence_deg, 1);
+  add(out.focal_incidence_deg, 1);
+  add(out.index, 1);
+  // Moving chunks down in order never overwrites rows not yet moved.
+  std::size_t total = 0;
+  for (std::size_t c = 0; c < found.size(); ++c) {
+    if (total != c * kChunkSize)
+      for (const Column &column : columns) {
+        auto *bytes = static_cast<char *>(column.data);
+        std::memmove(bytes + total * column.bytes, bytes + c * kChunkSize * column.bytes,
+                     found[c] * column.bytes);
+      }
+    total += found[c];
+  }
+  return total;
 }
 
 } // namespace obdeect

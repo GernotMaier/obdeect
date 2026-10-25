@@ -197,25 +197,27 @@ entrance disk), microseconds per photon:
 
 | Telescope | sim_telarray as simtools runs it (imaging list) | sim_telarray, no imaging list | obdeect sampling + tracing | obdeect tracing only |
 | --- | --- | --- | --- | --- |
-| LSTN-01 | 1.81 | 0.31 | 0.40 | 0.33 |
-| MSTN-07 | 1.56 | 0.30 | 0.37 | 0.30 |
-| MSTS-04 (with `telescope_structure`) | 1.59 | 0.30 | 0.87 | 0.79 |
-| SSTS-17 | 1.23 | 0.30 | 1.35 | 1.28 |
+| LSTN-01 | 1.82 | 0.32 | 0.32 | 0.25 |
+| MSTN-07 | 1.58 | 0.30 | 0.30 | 0.23 |
+| MSTS-04 (with `telescope_structure`) | 1.60 | 0.30 | 0.46 | 0.39 |
+| SSTS-17 | 1.20 | 0.29 | 0.68 | 0.61 |
 
-- Per core, obdeect traces single-mirror telescopes about as fast as
-  sim_telarray (within 25%); the applications gain from writing no photon
-  lists (sim_telarray spends 80% of its time on them) and from using every core.
-  The earlier factors of 6-18 (Phase 1, whole applications, wall time) combine
-  both, they are not per-core speed.
-- The telescope structure (203 elements, tested one by one) doubles obdeect's
-  cost; sim_telarray traces none. A spatial index of the obscurers is the
-  obvious next step.
-- Dual mirror: segment footprints are now computed once per optical model
-  (2.22 to 1.27 us, bit-identical results). The rest of the gap to
-  sim_telarray comes mostly from photons hitting the gaps between the 18
-  primary segments: obdeect then scans the aperture for another intersection
-  (64 samples and a bisection), where sim_telarray loses the photon. Ending
-  the search there, as sim_telarray does, is the next step.
+- Per core, obdeect samples and traces single-mirror telescopes as fast as
+  sim_telarray without its imaging list; the applications gain from writing no
+  photon lists (sim_telarray spends 80% of its time on them) and from using
+  every core. The earlier factors of 6-18 (Phase 1, whole applications, wall
+  time) combine both, they are not per-core speed. The dual-mirror and
+  structure cases are still slower per core than sim_telarray, which traces
+  no structure and loses a photon that meets a gap between segments.
+- The telescope structure (203 elements) is searched through a grid of the
+  structure in the horizontal plane for steep rays and a bounding-box
+  hierarchy for the others; its cost fell from 0.79 to 0.39 us per photon.
+- Aspheres (SST, SCT): a ray that crosses the surface at most once ends its
+  search at the first root or when the surface is missed, the segment under a
+  hit point is found from a grid, and a Newton step evaluates the surface once
+  (SSTS-17: 1.28 to 0.61 us per photon). Facet mirrors use tighter grid cells
+  and a plane test before the sphere test (LSTN-01: 0.33 to 0.25 us). All
+  results are bit-identical to the earlier ones.
 
 Calibration light, the stage before sim_telarray's camera simulation (which is
 the same for both):
