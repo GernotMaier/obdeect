@@ -18,6 +18,8 @@ from obdeect.repository import read_telescope
 
 STATUS_NAMES: tuple[str, ...] = _core.STATUS_NAMES
 DETECTED = STATUS_NAMES.index("detected")
+# Path segments of obscurers (obdeect::Leg bits).
+_LEGS = {"incoming": 1, "after_primary": 2, "after_secondary": 4}
 ThreadPool = _core.ThreadPool
 
 
@@ -304,6 +306,75 @@ class OpticalModel:
             classify_losses=classify_losses,
             pool=pool,
         )
+
+    def obscurer_hits(
+        self, photons: Mapping[str, np.ndarray], *, seed: int, threads: int = 0
+    ) -> dict[str, Any]:
+        """Which obscurers shade the light: a diagnostic, slower than `trace`.
+
+        The photons are traced without obscurers (geometry only, mirror
+        scattering from `seed` as in `trace`); along the path of each one that
+        then reaches the focal surface, every obscurer it meets is listed. Per
+        obscurer, in model order, the result holds ``id``, ``name``, ``group``
+        and the summed input weights of the photons whose path ``crossed`` it,
+        that it absorbs (``first``: the first obscurer on the path) and that
+        only it meets (``sole``: without it they would be detected).
+        ``unobscured`` and ``detected`` are the summed weights of the photons
+        reaching the focal surface without and with the obscurers.
+        """
+        free_document = self.document
+        obscurers = free_document["optics"]["obscurers"]
+        free_document["optics"]["obscurers"] = []
+        free_document["sha256"] = model_hash(free_document)
+        free = OpticalModel(free_document).trace(
+            photons,
+            seed=seed,
+            apply_responses=False,
+            threads=threads,
+            outputs=["primary_point_m", "secondary_point_m", "position_m", "index"],
+            detected_only=True,
+        )
+        full = self.trace(
+            photons, seed=seed, apply_responses=False, threads=threads, outputs=["terminal_surface"]
+        )
+        index = free["index"]
+        weight = np.asarray(photons["weight"], dtype=float)[index]
+        start = np.asarray(photons["position_m"], dtype=float)[index]
+        points = [start, free["primary_point_m"]]
+        legs = [_LEGS["incoming"], _LEGS["after_primary"]]
+        if free_document["optics"].get("secondary"):
+            points.append(free["secondary_point_m"])
+            legs.append(_LEGS["after_secondary"])
+        points.append(free["position_m"])
+        n = len(index)
+        rows, ids = self._native.obscurer_crossings(
+            np.concatenate(points[:-1]),
+            np.concatenate(points[1:]),
+            np.repeat(np.array(legs, dtype=np.uint8), n),
+        )
+        photon = (rows % n if n else rows).astype(np.int64)
+
+        id_list = [o["id"] for o in obscurers]
+        position = {obscurer_id: k for k, obscurer_id in enumerate(id_list)}
+        k = np.array([position[i] for i in ids], dtype=np.int64)
+        # One entry per photon and obscurer, also if the path meets it twice.
+        pairs = np.unique(np.column_stack([photon, k]), axis=0) if len(k) else np.empty((0, 2), int)
+        crossings_per_photon = np.bincount(pairs[:, 0], minlength=n)
+        sole = pairs[crossings_per_photon[pairs[:, 0]] == 1]
+        terminal = full["terminal_surface"][index]
+        absorbed = np.isin(terminal, id_list)
+        first = np.array([position[i] for i in terminal[absorbed]], dtype=np.int64)
+        size = len(obscurers)
+        return {
+            "id": np.array(id_list, dtype=np.uint32),
+            "name": np.array([o["name"] for o in obscurers]),
+            "group": np.array([o.get("group", "") for o in obscurers]),
+            "crossed": np.bincount(pairs[:, 1], weights=weight[pairs[:, 0]], minlength=size),
+            "first": np.bincount(first, weights=weight[absorbed], minlength=size),
+            "sole": np.bincount(sole[:, 1], weights=weight[sole[:, 0]], minlength=size),
+            "unobscured": float(weight.sum()),
+            "detected": float(weight[~absorbed].sum()),
+        }
 
     def trace_bunches(
         self,

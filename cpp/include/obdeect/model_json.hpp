@@ -304,7 +304,7 @@ inline Mirror mirror(const Node &node, std::vector<std::uint32_t> &ids) {
         m.segment_frames.push_back(m.segments.back().tangent_frame(*m.asphere));
         ids.push_back(m.segments.back().id);
       }
-    m.segment_grid = SegmentGrid(m.segments, m.segment_frames, m.asphere->outer_radius);
+    m.segment_grid = SegmentGrid(m.segments, m.segment_frames, *m.asphere);
   }
   if (node.has("reflectivity"))
     m.reflectivity = response(node["reflectivity"]);

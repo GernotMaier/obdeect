@@ -61,3 +61,14 @@ BSD-3-Clause license. Citation metadata is in [CITATION.cff](CITATION.cff).
 ## Generative AI disclosure
 
 Generative AI tools (mostly ChatGPT 5.6, Opus 5.5) were used to write the entire code of this project. All AI-assisted outputs were reviewed, validated, and, where necessary, modified by the authors to ensure accuracy and reliability.
+
+## Documentation
+
+Build the documentation locally (in the virtual environment) with:
+
+```sh
+python -m pip install -e '.[docs]'
+sphinx-build -W --keep-going -b html docs docs/_build/html
+```
+
+Open `docs/_build/html/index.html` in a browser. The figures in `docs/_static/figures/` are part of the repository; regenerate them from new validation results with `python docs/figures/make_figures.py`.

@@ -152,6 +152,24 @@ def test_dual_mirror_telescope():
     assert same["primary"] == optics["primary"]
 
 
+def test_secondary_baffle_wall_thickness_or_outer_radius():
+    def baffle(values):
+        optics = build(
+            dual(secondary_mirror_baffle=record("secondary_mirror_baffle", values, "cm"))
+        )
+        return optics["optics"]["obscurers"][-1]
+
+    wall = baffle([294.8, 273.6, 97.0, 10.0, 0.0])
+    assert wall["thickness_m"] == pytest.approx(0.10)
+    assert wall["start_radius_m"] == wall["end_radius_m"] == pytest.approx(0.97)
+    # A fourth value not below R1 is the outer radius (sim_config.c).
+    assert baffle([294.8, 273.6, 97.0, 107.0, 0.0])["thickness_m"] == pytest.approx(0.10)
+    cone = baffle([294.8, 273.6, 97.0, 5.0, 90.0])
+    assert cone["end_radius_m"] == pytest.approx(0.90) and cone["thickness_m"] == pytest.approx(
+        0.05
+    )
+
+
 def test_secondary_reflects_like_the_primary_without_its_own_table():
     table = "wavelength reflectivity\n300 0.8\n500 0.9\n"
     reflectivity = record("mirror_reflectivity", "ref.dat", file=True)

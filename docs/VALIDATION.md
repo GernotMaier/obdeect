@@ -33,22 +33,38 @@ limit the agreement; repeating with other seeds shows the spread.
 
 ## Results (simulation models 6.0.2, zenith 20 deg, star at 10 km, 0-4 deg)
 
-Largest deviation of obdeect from sim_telarray over nine offsets:
+obdeect at commit 7394e73 (after the performance rounds), simtools at commit
+fcd73f6033 (`--instrument_seed 11 --simulation_seed 11`). Largest deviation
+of obdeect from sim_telarray over nine offsets:
 
 | Telescope | D80 | Effective area | Effective focal length |
 | --- | --- | --- | --- |
-| LSTN-01 | 0.3% | 0.25% | 0.02% |
-| MSTN-01 (NectarCam) | 0.9% | 0.25% | 0.1% (realisation spread) |
-| MSTS-01 (FlashCam) | 0.5% | 0.3% | 0.06% (realisation spread) |
-| SSTS-01 | 0.15% | 0.3% | < 0.01% |
-| SCTS-01 (one-pixel camera) | 0.15% | 0.13% | < 0.01% |
-| LSTS-01 | 0.4% | 0.11% | 0.01% |
-| LSTN-design | 0.5% | 0.15% | 0.01% |
-| LSTS-design | 0.4% | 0.10% | 0.01% |
-| MSTx-FlashCam | 1.1% | 0.24% | 0.1% (realisation spread) |
-| MSTx-NectarCam | 0.5% | 0.23% | 0.04% |
-| SSTS-design | 0.12% | 0.45% | 0.01% |
-| SCTS-design (one-pixel camera) | 0.10% | 0.22% | < 0.01% |
+| LSTN-01 | 0.6% | 0.10% | 0.01% |
+| MSTN-01 (NectarCam) | 1.6% | 0.07% | 0.05% (realisation spread) |
+| MSTS-01 (FlashCam) | 1.6% | 0.07% | 0.05% (realisation spread) |
+| SSTS-01 | 0.14% | 0.28% | < 0.01% |
+| SCTS-01 (one-pixel camera) | 0.15% | 0.29% | < 0.01% |
+| LSTS-01 | 0.6% | 0.10% | 0.01% |
+| LSTN-design | 0.5% | 0.10% | 0.01% |
+| LSTS-design | 0.6% | 0.10% | 0.01% |
+| MSTx-FlashCam | 1.6% | 0.07% | 0.05% (realisation spread) |
+| MSTx-NectarCam | 1.6% | 0.07% | 0.05% (realisation spread) |
+| SSTS-design | 0.14% | 0.28% | < 0.01% |
+| SCTS-design (one-pixel camera) | 0.12% | 0.22% | < 0.01% |
+
+- The D80 deviations of the single-mirror telescopes come from the random
+  mirror errors: each backend draws its own realisations. An earlier run with
+  other seeds (simtools option `--obdeect_seed`) gave 0.3-1.1%;
+  between the two seed sets sim_telarray's own D80 changes by up to 1.3%
+  (MSTN-01) and obdeect's by up to 1.0%. The telescopes of one type share the
+  optics and the seeds, hence the same largest deviations.
+- obdeect 0.3.0 and 7394e73, same simtools and seeds: LSTN-01 and MSTS-01
+  identical (D80 and focal length to 1e-15, the rounding of simtools' analysis);
+  SSTS-01 and SCTS-design within 3e-9 (D80) and 8e-11 (focal length), the
+  rounding-level changes below; effective areas identical.
+- The SCT rows compare with sim_telarray photon lists of a one-pixel camera
+  (the container's sim_telarray build allows at most 2368 pixels; scripts
+  `val/sct_simtel.sh`, `val/sct_design_simtel.sh`).
 
 - Star at 10,000 km (LSTN-01, 0-2 deg): D80 within 0.15%, area within 0.13%.
 - Per mirror (MSTN-01, on axis, 86 mirrors): the fractions of photons
@@ -68,11 +84,13 @@ resources:
 
 | Application | sim_telarray | obdeect |
 | --- | --- | --- |
-| `validate-cumulative-psf` (6.0.2, 20 deg) | D80 3.051 cm, area 365.8 m², 31 s | D80 3.059 cm, area 365.4 m², 3 s |
+| `validate-cumulative-psf` (6.0.2, 20 deg, 7394e73) | D80 3.052 cm, area 365.7 m², 46 s | D80 3.050 cm, area 365.8 m², 3 s |
 | `derive-psf-parameters` (6.0.2, 20 deg) | RMSD 0.0131, D80 3.053 cm | RMSD 0.0127, D80 3.059 cm |
 | `derive-mirror-rnda` (7.0.0, test mode, 5 mirrors) | fitted D80 within 0.9-3.8% of measured, 117 s | within 0.8-4.9%, 19 s |
 | `derive-mirror-rnda` (7.0.0, full statistics) | first 20 mirrors: within 4.2% (median 1.7%), 848 s | all 198 mirrors: within 5% (median 2.4%), 241 s |
 
+The `derive-psf-parameters` and `derive-mirror-rnda` rows are from an earlier
+obdeect version and were not rerun; the PSF they use is checked above.
 Both backends start `derive-psf-parameters` below its RMSD threshold, so the
 optimisation stops at once. Its final D80-versus-offset plot (46 offsets in four
 directions, 2 million photons each) needed more than 2 GB of memory with either
@@ -112,6 +130,33 @@ agrees in effective area within 0.4% on axis and 1.2% up to 4 deg; obdeect
 shows the azimuthal dependence (up to 2% between N and E) that the radial
 parameterisation cannot. The structure also widens D80 by 1.4% on axis (same
 photons with and without structure), since it shades the dish unevenly.
+
+## Secondary baffles
+
+`simtools-validate-optics` (simulation models 7.0.0, zenith 20 deg, star at
+10 km, offsets towards N, seeds 11) with both backends, once as modelled and
+once with the baffle removed (`secondary_mirror_baffle` R1 = 0; sim_telarray
+keyword `secondary_baffle`). The container's sim_telarray build allows at most
+2368 pixels, so its SCT runs use a one-pixel camera. Scripts:
+`val/baffle/run_baffle.sh` and `with_changes.py` (obdeect-validation).
+
+![Effective area with and without the baffle](_static/figures/baffle_area.png)
+
+Effective area with the baffle divided by that without it:
+
+| Off axis | SSTS-design sim_telarray | obdeect | SCTS-design sim_telarray | obdeect |
+| --- | --- | --- | --- | --- |
+| 0 deg | 0.9983 | 0.9982 | 0.9898 | 0.9903 |
+| 1 deg | 0.9974 | 0.9974 | 0.9807 | 0.9808 |
+| 2 deg | 0.9970 | 0.9969 | 0.9553 | 0.9567 |
+| 3 deg | 0.9968 | 0.9967 | 0.9465 | 0.9471 |
+| 4 deg | 0.9965 | 0.9966 | 0.9450 | 0.9447 |
+
+Both codes lose the same light on the baffles: within 0.01% for the SST and
+0.14% for the SCT, where the baffle costs up to 5.5%. The SST baffle costs
+little because most light meeting it would also meet the secondary shadow
+plate (see [shadowing](shadowing.md)). The effective areas themselves agree
+within 0.36% (obdeect higher, with and without baffle).
 
 ## Calibration light (Phase 2)
 
@@ -190,17 +235,19 @@ Both codes pinned to one core of the validation container (aarch64 Linux VM,
 Apple silicon host; obdeect Release build), simulation models 7.0.0, the same
 telescope models and photon numbers. Per-photon costs are the slope between
 2*10^5 and 2*10^6 photons (best of three runs), which removes start-up:
-sim_telarray 0.03-0.06 s, obdeect model compilation 0.15-0.24 s.
+sim_telarray 0.01-0.09 s, obdeect model compilation 0.17-0.28 s. obdeect at
+commit 7394e73; best of two such runs (LSTN-01: four) on a host that was
+partly busy, which also slowed sim_telarray by up to 7% against earlier runs.
 
 Star light (zenith 20 deg, star on axis at 10 km, photons sampled on the
 entrance disk), microseconds per photon:
 
 | Telescope | sim_telarray as simtools runs it (imaging list) | sim_telarray, no imaging list | obdeect sampling + tracing | obdeect tracing only |
 | --- | --- | --- | --- | --- |
-| LSTN-01 | 1.95 | 0.33 | 0.33 | 0.26 |
-| MSTN-07 | 1.68 | 0.31 | 0.31 | 0.23 |
-| MSTS-04 (with `telescope_structure`) | 1.65 | 0.31 | 0.43 | 0.36 |
-| SSTS-17 | 1.22 | 0.30 | 0.71 | 0.64 |
+| LSTN-01 | 1.86 | 0.33 | 0.34 | 0.26 |
+| MSTN-07 | 1.68 | 0.31 | 0.31 | 0.24 |
+| MSTS-04 (with `telescope_structure`) | 1.69 | 0.31 | 0.44 | 0.36 |
+| SSTS-17 | 1.29 | 0.30 | 0.58 | 0.50 |
 
 - Per core, obdeect samples and traces single-mirror telescopes as fast as
   sim_telarray without its imaging list; the applications gain from writing no
@@ -218,6 +265,18 @@ entrance disk), microseconds per photon:
   (SSTS-17: 1.28 to 0.61 us per photon). Facet mirrors use tighter grid cells
   and a plane test before the sphere test (LSTN-01: 0.33 to 0.25 us). All
   results are bit-identical to the earlier ones.
+- Aspheres evaluated in r^2 and a better first Newton guess (rounding-level
+  changes, below): SSTS-17 tracing 0.61 to 0.50 us per photon. Single-mirror
+  telescopes are unchanged (interleaved runs of LSTN-01 against the previous
+  build agree within the timing noise of 5%).
+- Segment lookup: a cell of the segment grid that lies wholly inside one
+  segment, or in none, answers without testing a segment (proven with a margin
+  of 1e-9 m over the cell and the mirror's height range there; other points
+  take the full test). 88% of the SSTS-17 lookups are answered so, 27 to 10 ns
+  per lookup; tracing 287 to 279 ns per photon (Apple M3, one thread). Results
+  are bit-identical (replay of 6*10^6 photons per model). A plain loop over
+  the few obscurers of a leg instead of the bounding-box hierarchy gained 1%
+  and was not kept.
 
 Calibration light, the stage before sim_telarray's camera simulation (which is
 the same for both):

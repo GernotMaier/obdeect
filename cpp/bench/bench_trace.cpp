@@ -87,6 +87,9 @@ int main(int argc, char **argv) {
   bool failed = false;
   std::size_t hits = 0;
   std::vector<char> hit(n);
+#ifdef OBDEECT_BENCH_COUNTERS
+  SegmentGrid::counters() = {};
+#endif
   const double primary_ns = best_ns(n, [&] {
     hits = 0;
     for (std::size_t i = 0; i < n; ++i) {
@@ -99,6 +102,11 @@ int main(int argc, char **argv) {
   });
   std::printf("primary intersect   %8.1f ns  (hit %.4f)\n", primary_ns,
               static_cast<double>(hits) / static_cast<double>(n));
+#ifdef OBDEECT_BENCH_COUNTERS
+  // Per primary hit of the timed runs (best_ns runs the body three times).
+  if (hits && SegmentGrid::counters().calls)
+    std::printf("  %s\n", SegmentGrid::counter_report(3 * hits).c_str());
+#endif
 
   if (!model.primary.facets.empty()) {
     std::size_t candidates = 0;

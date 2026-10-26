@@ -38,7 +38,10 @@ telescopes: the focal surface polynomial, unbounded in radius.
   open side wall (dual mirror).
 - `secondary_mirror_shadow_diameter`/`_offset`: plate tested by incoming light,
   or the secondary itself if no diameter is given.
-- `secondary_mirror_baffle`: open cone on the incoming and after-primary legs.
+- `secondary_mirror_baffle` (z1, z2, R1, wall thickness, R2): open cylinder or
+  cone wall with annular end faces on the incoming and after-primary legs, as
+  `baffle_intersection` in `sim_imaging.c`; a thickness not below R1 is read
+  as the outer radius, as in `sim_config.c`.
 - Telescope structure (beyond sim_telarray, see the user guide): cylinders and
   convex polyhedra on every leg. With structure, `telescope_transmission` is
   not applied.

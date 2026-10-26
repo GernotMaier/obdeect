@@ -775,7 +775,11 @@ def _asphere(p: _Parameters, prefix: str, *, aperture: bool = True) -> dict[str,
 
 
 def _baffle(record: dict[str, Any], overall: float) -> dict[str, Any] | None:
-    """Secondary baffle (sim_telarray manual 12.3.3): an open cone wall."""
+    """Secondary baffle (sim_telarray manual 12.3.3): an open cone wall.
+
+    The values are z1, z2, R1, the wall thickness and R2 (zero: R2 = R1). As in
+    sim_config.c, a thickness not below R1 is the outer radius at z1.
+    """
     values = record.get("value")
     if not isinstance(values, list) or not 3 <= len(values) <= 5:
         raise ModelError("secondary_mirror_baffle requires 3 to 5 lengths")
@@ -785,6 +789,8 @@ def _baffle(record: dict[str, Any], overall: float) -> dict[str, Any] | None:
     if r1 == 0:
         return None
     r2 = r2 or r1
+    if thickness >= r1 > 0:
+        thickness -= r1
     if r1 < 0 or r2 < 0 or thickness < 0 or z1 == z2:
         raise ModelError("invalid secondary_mirror_baffle")
     return {

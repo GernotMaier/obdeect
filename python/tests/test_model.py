@@ -7,6 +7,7 @@ import numpy as np
 import pytest
 from obdeect import ModelError, OpticalModel, ThreadPool, trace_many
 from obdeect.cli import main
+from obdeect.compiler import model_hash
 from obdeect.model import DETECTED, STATUS_NAMES
 from obdeect.psf import containment, summary
 from obdeect.repository import read_telescope
@@ -235,6 +236,9 @@ def test_repository_and_command_line(tmp_path, capsys):
     plot = tmp_path / "plot.png"
     assert main(f"plot --model {model} --arrivals {arrivals} --output {plot}".split()) == 0
     assert plot.stat().st_size > 0
+    capsys.readouterr()
+    assert main(f"obscurers --model {model} --seed 1 --photons 2000".split()) == 0
+    assert "camera-front" in capsys.readouterr().out
     assert main([*compile_args.split(), "--model", "MISSING"]) == 1
 
 
@@ -368,3 +372,39 @@ def test_trace_many_equals_one_trace_per_request():
         trace_many([(models[0], photons[0], {"thread": 1})], seed=6, pool=ThreadPool(1))
     with pytest.raises(ValueError, match="detected_only"):
         trace_many([(models[0], photons[0], {"outputs": ["index"]})], seed=6, pool=ThreadPool(1))
+
+
+def _without_obscurer(model, name):
+    document = model.document
+    document["optics"]["obscurers"] = [
+        o for o in document["optics"]["obscurers"] if o["name"] != name
+    ]
+    document["sha256"] = model_hash(document)
+    return OpticalModel(document)
+
+
+@pytest.mark.parametrize(
+    ("telescope", "removed"),
+    [
+        (segmented(telescope_structure=STRUCTURE), "mast-0"),
+        (dual(), "secondary-baffle"),
+    ],
+)
+def test_obscurer_hits_count_what_each_obscurer_takes_away(telescope, removed):
+    model = model_of(telescope)
+    photons = model.star_photons(60_000, seed=5, towards_source=(0.02, 0.01, 1.0))
+    hits = model.obscurer_hits(photons, seed=6, threads=2)
+    names = [o["name"] for o in model.document["optics"]["obscurers"]]
+    assert list(hits["name"]) == names
+    assert np.all(hits["sole"] <= hits["first"]) and np.all(hits["first"] <= hits["crossed"])
+    assert hits["detected"] == pytest.approx(hits["unobscured"] - hits["first"].sum())
+    detected = model.trace(photons, seed=6, apply_responses=False, outputs=["status"])
+    assert hits["detected"] == np.count_nonzero(detected["status"] == DETECTED)
+    # Without the obscurer exactly the photons that only it meets come through.
+    k = names.index(removed)
+    assert hits["sole"][k] > 0
+    without = _without_obscurer(model, removed).trace(
+        photons, seed=6, apply_responses=False, outputs=["status"]
+    )
+    gained = np.count_nonzero(without["status"] == DETECTED) - hits["detected"]
+    assert gained == hits["sole"][k]
