@@ -1,5 +1,6 @@
 """Sphinx configuration of the obdeect documentation (layout as in simtools)."""
 
+import os
 import tomllib
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
@@ -43,9 +44,22 @@ html_theme = "pydata_sphinx_theme"
 html_title = project
 html_logo = "_static/images/obdeect_21ratio_small.jpg"
 html_css_files = ["obdeect.css"]
-html_static_path = ["_static"]
+DOCS_SOURCE = Path(os.environ.get("OBDEECT_DOCS_SOURCE", Path(__file__).parent))
+DOCS_VERSION = os.environ.get("OBDEECT_DOCS_VERSION", "dev")
+DOCS_BASE_URL = os.environ.get("OBDEECT_DOCS_BASE_URL", "https://GernotMaier.github.io/obdeect")
+html_static_path = [str(DOCS_SOURCE / "_static")]
+# The current theme/CSS also applies to releases predating the documentation site.
+html_static_path.append(str(Path(__file__).parent / "_static"))
+if DOCS_VERSION != "dev":
+    release = version = DOCS_VERSION.removeprefix("v")
 html_theme_options = {
-    "navbar_start": ["navbar-logo"],
+    "navbar_start": ["navbar-logo", "version-switcher"],
+    "switcher": {
+        "json_url": f"{DOCS_BASE_URL.rstrip('/')}/switcher.json",
+        "version_match": DOCS_VERSION,
+    },
+    # The manifest is generated and tested with the site, before it is published.
+    "check_switcher": False,
     "navbar_end": ["navbar-icon-links"],
     "show_toc_level": 1,
     "navigation_with_keys": False,
