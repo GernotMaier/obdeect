@@ -9,6 +9,9 @@
 #include <limits>
 #include <optional>
 #include <vector>
+#ifdef OBDEECT_BENCH_COUNTERS
+#include <string>
+#endif
 
 namespace obdeect {
 
@@ -592,15 +595,38 @@ struct Segment {
 // Uniform x-y grid over the square [-outer_radius, outer_radius]^2 of an
 // aspheric mirror. Each cell lists, sorted by segment id, the segments whose
 // conservative x-y bounding box overlaps it, so that a point is tested against
-// the few segments near it instead of all of them.
+// the few segments near it instead of all of them. A cell whose result is the
+// same for every point it can receive carries a verdict, which find() returns
+// without testing any segment.
 class SegmentGrid {
 public:
-  static constexpr std::size_t kCells = 32; // Cells per side.
+  static constexpr std::size_t kCells = 128; // Cells per side.
+
+#ifdef OBDEECT_BENCH_COUNTERS
+  // Benchmark-only counters (single thread); never compiled into the library.
+  struct Counters {
+    std::uint64_t calls{}, contains_calls{}, decided{};
+  };
+  static Counters &counters() {
+    static Counters c;
+    return c;
+  }
+  static std::string counter_report(std::size_t hits) {
+    const auto &c = counters();
+    return "segment find calls " + std::to_string(static_cast<double>(c.calls) / hits) +
+           ", segment contains calls " +
+           std::to_string(static_cast<double>(c.contains_calls) / hits) +
+           " (per primary hit, all runs), decided by a verdict " +
+           std::to_string(c.calls ? static_cast<double>(c.decided) / c.calls : 0.0) +
+           " of the find calls";
+  }
+#endif
 
   SegmentGrid() = default;
   SegmentGrid(const std::vector<Segment> &segments,
-              const std::vector<Segment::TangentFrame> &frames, double outer_radius)
-      : outer_(outer_radius), inverse_cell_(static_cast<double>(kCells) / (2.0 * outer_radius)) {
+              const std::vector<Segment::TangentFrame> &frames, const Asphere &mirror)
+      : outer_(mirror.outer_radius),
+        inverse_cell_(static_cast<double>(kCells) / (2.0 * mirror.outer_radius)) {
     std::vector<std::uint32_t> by_id(segments.size());
     for (std::uint32_t i = 0; i < by_id.size(); ++i)
       by_id[i] = i;
@@ -631,6 +657,14 @@ public:
       members_.insert(members_.end(), c.begin(), c.end());
       offsets_.push_back(static_cast<std::uint32_t>(members_.size()));
     }
+    make_verdicts(segments, frames, mirror);
+  }
+
+  // Number of cells with a verdict (for tests and diagnostics).
+  [[nodiscard]] std::size_t decided_cells() const {
+    return static_cast<std::size_t>(
+        std::count_if(verdicts_.begin(), verdicts_.end(),
+                      [](const Verdict &v) { return v.kind != Kind::undecided; }));
   }
 
   // Id of the lowest-id segment that contains p, or nullopt if none does or p
@@ -638,11 +672,26 @@ public:
   [[nodiscard]] std::optional<std::uint32_t> find(const std::vector<Segment> &segments,
                                                   const std::vector<Segment::TangentFrame> &frames,
                                                   const Vec3 &p) const {
+#ifdef OBDEECT_BENCH_COUNTERS
+    ++counters().calls;
+#endif
     if (members_.empty() || !(std::abs(p.x) <= outer_ && std::abs(p.y) <= outer_))
       return std::nullopt;
     const std::size_t cell = index(p.x) * kCells + index(p.y);
+    const Verdict &verdict = verdicts_[cell];
+    if (verdict.kind != Kind::undecided && p.z >= verdict.z_low && p.z <= verdict.z_high) {
+#ifdef OBDEECT_BENCH_COUNTERS
+      ++counters().decided;
+#endif
+      if (verdict.kind == Kind::none)
+        return std::nullopt;
+      return verdict.id;
+    }
     for (std::uint32_t k = offsets_[cell]; k < offsets_[cell + 1]; ++k) {
       const std::uint32_t i = members_[k];
+#ifdef OBDEECT_BENCH_COUNTERS
+      ++counters().contains_calls;
+#endif
       if (segments[i].contains(frames[i], p))
         return segments[i].id;
     }
@@ -650,6 +699,174 @@ public:
   }
 
 private:
+  // Result of find() for every point in the cell's x-y box with z in
+  // [z_low, z_high]: no segment, the id of the segment returned, or undecided.
+  enum class Kind : std::uint32_t { undecided, none, sole };
+  struct Verdict {
+    float z_low{}, z_high{}; // Rounded inwards: never wider than the range proven.
+    std::uint32_t id{};
+    Kind kind{Kind::undecided};
+  };
+  enum class Cover { none, all, mixed }; // No / every / some point of a box is inside.
+
+  // Margin (m) of all verdict tests, far above the rounding of Segment::contains.
+  static constexpr double kMargin = 1e-9;
+
+  // For each cell: the first member (in order) that contains the whole box
+  // decides, provided all members before it contain none of it; a cell whose
+  // members contain none of it has no result. Anything else stays undecided.
+  void make_verdicts(const std::vector<Segment> &segments,
+                     const std::vector<Segment::TangentFrame> &frames, const Asphere &mirror) {
+    verdicts_.assign(kCells * kCells, Verdict{});
+    if (!std::isfinite(mirror.max_slope))
+      return;
+    const double cell = 1.0 / inverse_cell_;
+    for (std::size_t ix = 0; ix < kCells; ++ix)
+      for (std::size_t iy = 0; iy < kCells; ++iy) {
+        const std::size_t c = ix * kCells + iy;
+        // x-y box of the cell, widened for the rounding of index().
+        const double x0 = static_cast<double>(ix) * cell - outer_ - kMargin,
+                     x1 = static_cast<double>(ix + 1) * cell - outer_ + kMargin,
+                     y0 = static_cast<double>(iy) * cell - outer_ - kMargin,
+                     y1 = static_cast<double>(iy + 1) * cell - outer_ + kMargin;
+        // Mirror points in the box have |r - r_c| <= h and |dz/dr| <= max_slope.
+        const double rc = std::hypot(0.5 * (x0 + x1), 0.5 * (y0 + y1)),
+                     h = 0.5 * std::hypot(x1 - x0, y1 - y0), dz = mirror.max_slope * h + 1e-6,
+                     zc = mirror.sag(rc);
+        const double z0 = zc - dz, z1 = zc + dz;
+        Verdict v{inward_float(z0, true), inward_float(z1, false), 0, Kind::none};
+        for (std::uint32_t k = offsets_[c]; k < offsets_[c + 1]; ++k) {
+          const std::uint32_t i = members_[k];
+          const Cover cover = classify(segments[i], frames[i], x0, x1, y0, y1, z0, z1);
+          if (cover == Cover::none)
+            continue;
+          v.kind = cover == Cover::all ? Kind::sole : Kind::undecided;
+          v.id = segments[i].id;
+          break;
+        }
+        verdicts_[c] = v;
+      }
+  }
+
+  // The float nearest to `value` that is not below it (`up`) or not above it.
+  static float inward_float(double value, bool up) {
+    float f = static_cast<float>(value);
+    if (up ? static_cast<double>(f) < value : static_cast<double>(f) > value)
+      f = std::nextafter(f, up ? std::numeric_limits<float>::infinity()
+                               : -std::numeric_limits<float>::infinity());
+    return f;
+  }
+
+  // Whether Segment::contains accepts all, none or some of the box (Cover::mixed
+  // when unsure). Hexagon, square and circle map the box affinely to (u, v), so
+  // the images of its 8 corners bound every point of it.
+  static Cover classify(const Segment &s, const Segment::TangentFrame &f, double x0, double x1,
+                        double y0, double y1, double z0, double z1) {
+    if (s.shape == Segment::Shape::annular_sector)
+      return Cover::mixed;
+    if (s.shape == Segment::Shape::polygon)
+      return classify_polygon(s, x0, x1, y0, y1);
+    // Nearest and farthest x-y distance from the centre to the box.
+    const double dx = std::max({x0 - s.centre_x, s.centre_x - x1, 0.0}),
+                 dy = std::max({y0 - s.centre_y, s.centre_y - y1, 0.0});
+    const double reach = std::sqrt(f.reach2);
+    if (dx * dx + dy * dy > (reach + kMargin) * (reach + kMargin))
+      return Cover::none;
+    const double fx = std::max(std::abs(x0 - s.centre_x), std::abs(x1 - s.centre_x)),
+                 fy = std::max(std::abs(y0 - s.centre_y), std::abs(y1 - s.centre_y));
+    const bool within_reach = fx * fx + fy * fy <= (reach - kMargin) * (reach - kMargin);
+    // Same formulas as Segment::contains.
+    std::array<std::array<double, 2>, 8> uv;
+    std::size_t n = 0;
+    for (const double x : {x0, x1})
+      for (const double y : {y0, y1})
+        for (const double z : {z0, z1}) {
+          const double ddx = x - s.centre_x, ddy = y - s.centre_y, ddz = z - f.centre_z;
+          const double radial = (ddx * f.cx + ddy * f.sx) * f.cosine + ddz * f.sine,
+                       azimuthal = -ddx * f.sx + ddy * f.cx;
+          const double px = radial * f.cx - azimuthal * f.sx, py = radial * f.sx + azimuthal * f.cx;
+          uv[n++] = {px * f.cos_rotation + py * f.sin_rotation,
+                     -px * f.sin_rotation + py * f.cos_rotation};
+        }
+    const double w = s.half_width;
+    constexpr double sq = 0.86602540378443864676;
+    // Linear forms whose absolute value must stay below w (hexagon, square),
+    // or, for the circle, the 8 directions of the enclosing octagon.
+    std::array<std::array<double, 2>, 8> forms;
+    std::size_t m = 0;
+    if (s.shape == Segment::Shape::hexagon)
+      for (const auto &a :
+           std::array<std::array<double, 2>, 3>{{{1.0, 0.0}, {0.5, sq}, {0.5, -sq}}})
+        forms[m++] = a;
+    else {
+      forms[m++] = {1.0, 0.0};
+      forms[m++] = {0.0, 1.0};
+      if (s.shape == Segment::Shape::circle) {
+        forms[m++] = {0.7071067811865475, 0.7071067811865475};
+        forms[m++] = {0.7071067811865475, -0.7071067811865475};
+      }
+    }
+    bool all = within_reach;
+    for (std::size_t j = 0; j < m; ++j) {
+      double lo = std::numeric_limits<double>::infinity(), hi = -lo;
+      for (const auto &q : uv) {
+        const double value = forms[j][0] * q[0] + forms[j][1] * q[1];
+        lo = std::min(lo, value);
+        hi = std::max(hi, value);
+      }
+      // The form range lies wholly outside [-w, w] on one side: nothing inside.
+      if (lo > w + kMargin || hi < -w - kMargin)
+        return Cover::none;
+      all = all && lo >= -w + kMargin && hi <= w - kMargin;
+    }
+    if (s.shape == Segment::Shape::circle) {
+      // The disk is convex: all corner images inside it means every point is.
+      for (const auto &q : uv)
+        all = all && q[0] * q[0] + q[1] * q[1] <= (w - kMargin) * (w - kMargin);
+    }
+    return all ? Cover::all : Cover::mixed;
+  }
+
+  // Convex polygon, x-y only: as Segment::contains, whose edge sides share one
+  // sign inside. A non-convex or degenerate polygon is never decided.
+  static Cover classify_polygon(const Segment &s, double x0, double x1, double y0, double y1) {
+    const auto &vs = s.vertices;
+    const std::size_t n = vs.size();
+    if (n < 3)
+      return Cover::mixed;
+    const auto side = [&](std::size_t i, double x, double y) {
+      const auto &a = vs[i], &b = vs[(i + 1) % n];
+      return (b[0] - a[0]) * (y - a[1]) - (b[1] - a[1]) * (x - a[0]);
+    };
+    double area = 0.0;
+    for (std::size_t i = 0; i < n; ++i)
+      area += vs[i][0] * vs[(i + 1) % n][1] - vs[(i + 1) % n][0] * vs[i][1];
+    if (!(std::abs(area) > 0.0))
+      return Cover::mixed;
+    const double orientation = area > 0.0 ? 1.0 : -1.0;
+    for (std::size_t i = 0; i < n; ++i) { // Convexity: every turn has the area's sign.
+      const auto &a = vs[i], &b = vs[(i + 1) % n], &c = vs[(i + 2) % n];
+      if (orientation * ((b[0] - a[0]) * (c[1] - b[1]) - (b[1] - a[1]) * (c[0] - b[0])) <= 0.0)
+        return Cover::mixed;
+    }
+    bool all = true;
+    for (std::size_t i = 0; i < n; ++i) {
+      const auto &a = vs[i], &b = vs[(i + 1) % n];
+      const double margin = kMargin * std::hypot(b[0] - a[0], b[1] - a[1]);
+      double lo = std::numeric_limits<double>::infinity(), hi = -lo;
+      for (const double x : {x0, x1})
+        for (const double y : {y0, y1}) {
+          const double value = orientation * side(i, x, y);
+          lo = std::min(lo, value);
+          hi = std::max(hi, value);
+        }
+      if (hi < -margin) // Wholly outside this edge: some other edge is positive.
+        return Cover::none;
+      all = all && lo > margin;
+    }
+    return all ? Cover::all : Cover::mixed;
+  }
+
   [[nodiscard]] std::size_t index(double value) const {
     const double cell = (value + outer_) * inverse_cell_;
     if (!(cell > 0.0))
@@ -708,6 +925,7 @@ private:
 
   double outer_{}, inverse_cell_{1.0};
   std::vector<std::uint32_t> offsets_, members_;
+  std::vector<Verdict> verdicts_;
 };
 
 } // namespace obdeect
