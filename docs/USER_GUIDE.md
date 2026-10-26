@@ -22,11 +22,14 @@ obdeect trace --model lst.json --seed 2 --photons 100000 \
 
 # Draw the dish seen from the sky and the focal-plane image.
 obdeect plot --model lst.json --arrivals lst-arrivals.npz --output lst.png
+
+# Which obscurers (camera, baffle, masts) shade a star 2 deg off axis.
+obdeect obscurers --model lst.json --seed 2 --photons 100000 --field-deg 2 0
 ```
 
 `compile` reads full and patch productions of the simulation models; a patch
 production is laid over the productions in its `model_version_history`, as in
-simtools. `--seed fixes the random mirror errors (focal
+simtools. `--seed` fixes the random mirror errors (focal
 lengths, alignment); `--zenith-deg` is the telescope zenith angle used by
 zenith-dependent focus offsets and alignment errors. `trace --seed` fixes source
 sampling and mirror scattering. `--geometry-only` leaves the photon weights
@@ -70,7 +73,8 @@ arrays costs memory bandwidth, so ask for what you use:
 
 ```python
 detected = model.trace(
-    photons, seed=2,
+    photons,
+    seed=2,
     outputs=("position_m", "direction", "time_ns", "weight", "index"),
     detected_only=True,
 )
@@ -124,16 +128,25 @@ thins and traces them without making every photon a full trace:
 
 ```python
 out = model.trace_bunches(
-    {"x": x, "y": y, "cx": cx, "cy": cy, "time_ns": t, "zem": zem,
-     "size": size, "wavelength_nm": wavelength, "bunch_id": bunch_id},
+    {
+        "x": x,
+        "y": y,
+        "cx": cx,
+        "cy": cy,
+        "time_ns": t,
+        "zem": zem,
+        "size": size,
+        "wavelength_nm": wavelength,
+        "bunch_id": bunch_id,
+    },
     seed=run_seed_of_this_telescope,
-    frame_rotation=rotation,          # 3 x 3, input frame to telescope frame
+    frame_rotation=rotation,  # 3 x 3, input frame to telescope frame
     frame_offset_m=offset_m,
-    length_unit_m=0.01,               # metres per input length unit (cm here)
-    plane_z=0.0,                      # height of the input plane, input units
-    acceptance=(wavelength_nm_axis, zem_m_axis, values),   # optional, in [0, 1]
-    wavelength_density=(nm, density),                      # optional
-    pool=pool,                        # or threads=...
+    length_unit_m=0.01,  # metres per input length unit (cm here)
+    plane_z=0.0,  # height of the input plane, input units
+    acceptance=(wavelength_nm_axis, zem_m_axis, values),  # optional, in [0, 1]
+    wavelength_density=(nm, density),  # optional
+    pool=pool,  # or threads=...
 )
 ```
 
@@ -184,11 +197,11 @@ shape (relative rate against time), both tables:
 ```python
 camera = model.focal_surface_z_m
 photons = model.emitter_photons(
-    1e6,                                   # photons emitted into 4 pi
+    1e6,  # photons emitted into 4 pi
     seed=3,
-    position_m=(0.2, 0.2, camera - 16.5),   # telescope frame
+    position_m=(0.2, 0.2, camera - 16.5),  # telescope frame
     intensity=([0.0, 11.0, 11.0001], [1.0, 1.0, 0.0]),  # 11 deg filled cone
-    pulse=([-1.25, 1.25], [1.0, 1.0]),     # 2.5 ns flat pulse
+    pulse=([-1.25, 1.25], [1.0, 1.0]),  # 2.5 ns flat pulse
     wavelength_nm=385.0,
     disk=((0.0, 0.0, camera), (0.0, 0.0, 1.0), 1.2),  # the camera
 )
@@ -211,8 +224,13 @@ with a positive weight (`position_m`, `direction`, `time_ns`, `weight`,
 memory stays bounded by one block. The photons do not depend on `block_size`:
 
 ```python
-arrivals = model.trace_emitter(1e10, seed=3, position_m=(0.0, 0.0, 600.0),
-                               intensity=([0.0, 180.0], [1.0, 1.0]), axis=(0.0, 0.0, -1.0))
+arrivals = model.trace_emitter(
+    1e10,
+    seed=3,
+    position_m=(0.0, 0.0, 600.0),
+    intensity=([0.0, 180.0], [1.0, 1.0]),
+    axis=(0.0, 0.0, -1.0),
+)
 ```
 
 ## Frames and units
@@ -259,6 +277,11 @@ the dish vertex), one row per element, by its `shape`:
 
 Columns `id`, `group` (optional) and `shape` are text. A row leaves the
 columns it does not use as `nan`; unused points come last.
+
+Which elements actually shade the light is shown by
+`OpticalModel.obscurer_hits` and `obdeect obscurers` (see
+[shadowing](shadowing.md)): per obscurer, the light whose path meets it, that
+it absorbs, and that only it stops.
 
 ## Build options
 

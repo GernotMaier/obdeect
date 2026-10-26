@@ -267,6 +267,15 @@ public:
     return nearest_in_hierarchy(ray, leg, t_max);
   }
 
+  // Every obscurer on `leg` that the ray meets with kMinDistanceM < t < t_max,
+  // appended to `ids` in model order. A diagnostic: it tests each obscurer.
+  void crossed(const Ray &ray, Leg leg, double t_max, std::vector<std::uint32_t> &ids) const {
+    for (const auto &o : items_)
+      if (o.legs & leg)
+        if (const auto t = o.intersect(ray, planes_, kMinDistanceM); t && *t < t_max)
+          ids.push_back(o.id);
+  }
+
   // The same through the bounding-box hierarchy alone (the reference for the grid).
   [[nodiscard]] std::optional<Hit> nearest_in_hierarchy(const Ray &ray, Leg leg,
                                                         double t_max) const {

@@ -6,6 +6,7 @@
 #include "obdeect/random.hpp"
 #include "obdeect/source.hpp"
 
+#include <algorithm>
 #include <bit>
 #include <cstdint>
 #include <optional>
@@ -583,6 +584,18 @@ void check_nearest(const Obscurers &set, const std::vector<Obscurer> &items,
       CHECK(found->t == expected->t);
     }
   }
+  // crossed() lists every obscurer met, the nearest among them.
+  std::vector<std::uint32_t> crossed;
+  set.crossed(ray, leg, t_max, crossed);
+  std::size_t met = 0;
+  for (const auto &item : items)
+    if (item.legs & leg)
+      if (const auto t = item.intersect(ray, planes, kMinDistanceM); t && *t < t_max)
+        ++met;
+  CHECK(crossed.size() == met);
+  CHECK(crossed.empty() == !expected.has_value());
+  if (expected)
+    CHECK(std::find(crossed.begin(), crossed.end(), expected->id) != crossed.end());
   hits += expected.has_value();
 }
 

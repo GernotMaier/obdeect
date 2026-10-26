@@ -279,6 +279,38 @@ public:
     return result;
   }
 
+  // Every obscurer met on the segments from start to end (row i on leg[i],
+  // obdeect::Leg bits): (rows, obscurer ids), one entry per crossing.
+  [[nodiscard]] std::tuple<nb::object, nb::object> obscurer_crossings(In3 start, In3 end,
+                                                                      In1<std::uint8_t> leg) const {
+    const std::size_t n = start.shape(0);
+    if (end.shape(0) != n || leg.shape(0) != n)
+      throw nb::value_error("start, end and leg must have the same length");
+    std::vector<std::uint64_t> rows;
+    std::vector<std::uint32_t> ids;
+    {
+      nb::gil_scoped_release release;
+      std::vector<std::uint32_t> crossed;
+      for (std::size_t i = 0; i < n; ++i) {
+        const obdeect::Vec3 a{start(i, 0), start(i, 1), start(i, 2)};
+        const obdeect::Vec3 b{end(i, 0), end(i, 1), end(i, 2)};
+        const double length = obdeect::norm(b - a);
+        if (!(length > 0.0) || !std::isfinite(length))
+          continue;
+        crossed.clear();
+        model_.obscurers.crossed({a, (b - a) * (1.0 / length)}, static_cast<obdeect::Leg>(leg(i)),
+                                 length, crossed);
+        rows.insert(rows.end(), crossed.size(), i);
+        ids.insert(ids.end(), crossed.begin(), crossed.end());
+      }
+    }
+    const auto row_array = owned_array<std::uint64_t>(rows.size());
+    const auto id_array = owned_array<std::uint32_t>(ids.size());
+    std::copy(rows.begin(), rows.end(), data_of<std::uint64_t>(row_array));
+    std::copy(ids.begin(), ids.end(), data_of<std::uint32_t>(id_array));
+    return {row_array, id_array};
+  }
+
   [[nodiscard]] const obdeect::OpticalModel &optical_model() const { return model_; }
 
 private:
@@ -470,7 +502,8 @@ NB_MODULE(_core, module) {
            "zem"_a, "size"_a, "wavelength_nm"_a, "bunch_id"_a, "rotation"_a, "offset_m"_a,
            "length_unit_m"_a, "plane_z"_a, nb::kw_only(), "seed"_a, "acceptance"_a = nb::none(),
            "wavelength_density"_a = nb::none(), "roulette"_a = true, "classify_losses"_a = true,
-           "pool"_a);
+           "pool"_a)
+      .def("obscurer_crossings", &Model::obscurer_crossings, "start"_a, "end"_a, "leg"_a);
   module.def("trace_many", &trace_many, "items"_a, nb::kw_only(), "seed"_a, "pool"_a);
   nb::class_<Emitter>(module, "Emitter")
       .def(nb::init<In1<double>, In1<double>, In1<double>, In1<double>, In1<double>, In1<double>,

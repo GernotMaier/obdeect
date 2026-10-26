@@ -14,6 +14,9 @@ from obdeect.formats import ModelError
 from obdeect.model import STATUS_NAMES, OpticalModel
 from obdeect.psf import summary
 
+# Columns of `obdeect obscurers` (see OpticalModel.obscurer_hits).
+CENSUS = ("crossed", "first", "sole")
+
 
 def _compile(args: argparse.Namespace) -> None:
     model = OpticalModel.from_simulation_models(
@@ -33,15 +36,7 @@ def _compile(args: argparse.Namespace) -> None:
 
 def _trace(args: argparse.Namespace) -> None:
     model = OpticalModel.load(args.model)
-    fx, fy = (math.radians(a) for a in args.field_deg)
-    towards = np.array([math.tan(fx), math.tan(fy), 1.0])
-    photons = model.star_photons(
-        args.photons,
-        seed=args.seed,
-        towards_source=tuple(towards / np.linalg.norm(towards)),
-        distance_m=args.distance_m,
-        wavelength_nm=args.wavelength_nm,
-    )
+    photons = _star(model, args)
     arrivals = model.trace(
         photons, seed=args.seed, apply_responses=not args.geometry_only, threads=args.threads
     )
@@ -52,6 +47,32 @@ def _trace(args: argparse.Namespace) -> None:
             {"model_sha256": model.sha256, **summary(arrivals, model.sampling_area_m2)}, indent=1
         )
     )
+
+
+def _star(model: OpticalModel, args: argparse.Namespace) -> dict:
+    fx, fy = (math.radians(a) for a in args.field_deg)
+    towards = np.array([math.tan(fx), math.tan(fy), 1.0])
+    return model.star_photons(
+        args.photons,
+        seed=args.seed,
+        towards_source=tuple(towards / np.linalg.norm(towards)),
+        distance_m=args.distance_m,
+        wavelength_nm=args.wavelength_nm,
+    )
+
+
+def _obscurers(args: argparse.Namespace) -> None:
+    model = OpticalModel.load(args.model)
+    hits = model.obscurer_hits(_star(model, args), seed=args.seed, threads=args.threads)
+    unobscured = hits["unobscured"]
+    print(f"optical model {model.sha256[:12]}: {unobscured:.0f} photons reach the focal surface")
+    print(f"without obscurers, {hits['detected']:.0f} with them; per obscurer (in percent):")
+    print(f"{'name':40s} {'group':20s} {'crossed':>8s} {'first':>8s} {'sole':>8s}")
+    for k in np.argsort(-hits["crossed"], kind="stable"):
+        shares = (100 * hits[c][k] / unobscured if unobscured else 0.0 for c in CENSUS)
+        print(
+            f"{hits['name'][k]:40s} {hits['group'][k]:20s} " + " ".join(f"{s:8.3f}" for s in shares)
+        )
 
 
 def _write(path: Path, photons: dict, arrivals: dict) -> None:
@@ -80,6 +101,27 @@ def _plot(args: argparse.Namespace) -> None:
     print(f"plot written to {args.output}")
 
 
+def _source_arguments(command: argparse.ArgumentParser) -> None:
+    command.add_argument("--model", type=Path, required=True)
+    command.add_argument(
+        "--seed", type=int, required=True, help="seed of source sampling and mirror scatter"
+    )
+    command.add_argument("--photons", type=int, default=100000)
+    command.add_argument(
+        "--field-deg",
+        type=float,
+        nargs=2,
+        default=(0.0, 0.0),
+        metavar=("X", "Y"),
+        help="source direction: field angles from the optical axis",
+    )
+    command.add_argument(
+        "--distance-m", type=float, default=math.inf, help="source distance (default: star)"
+    )
+    command.add_argument("--wavelength-nm", type=float, default=400.0)
+    command.add_argument("--threads", type=int, default=0, help="0 uses every core")
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="obdeect", description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
@@ -98,27 +140,18 @@ def main(argv: list[str] | None = None) -> int:
     c.set_defaults(run=_compile)
 
     t = commands.add_parser("trace", help="trace a star or point source")
-    t.add_argument("--model", type=Path, required=True)
-    t.add_argument(
-        "--seed", type=int, required=True, help="seed of source sampling and mirror scatter"
-    )
-    t.add_argument("--photons", type=int, default=100000)
-    t.add_argument(
-        "--field-deg",
-        type=float,
-        nargs=2,
-        default=(0.0, 0.0),
-        metavar=("X", "Y"),
-        help="source direction: field angles from the optical axis",
-    )
-    t.add_argument(
-        "--distance-m", type=float, default=math.inf, help="source distance (default: star)"
-    )
-    t.add_argument("--wavelength-nm", type=float, default=400.0)
+    _source_arguments(t)
     t.add_argument("--geometry-only", action="store_true", help="do not apply optical responses")
-    t.add_argument("--threads", type=int, default=0, help="0 uses every core")
     t.add_argument("--output", type=Path, help="per-photon results (.npz or .csv)")
     t.set_defaults(run=_trace)
+
+    o = commands.add_parser(
+        "obscurers",
+        help="which obscurers shade a star: the share of the light each one meets (crossed), "
+        "absorbs (first) or alone stops (sole)",
+    )
+    _source_arguments(o)
+    o.set_defaults(run=_obscurers)
 
     p = commands.add_parser("plot", help="plot the dish layout and the focal-plane image")
     p.add_argument("--model", type=Path, required=True)

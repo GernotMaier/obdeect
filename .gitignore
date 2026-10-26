@@ -27,3 +27,6 @@ __pycache__/
 .DS_Store
 .vscode/
 .idea/
+
+# Documentation build
+/docs/_build/
