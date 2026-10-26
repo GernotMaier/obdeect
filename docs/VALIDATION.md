@@ -12,6 +12,8 @@ obdeect is validated in three layers:
 3. **Equivalence with sim_telarray** (below): the same simtools applications
    run with both backends on the same simulation models.
 
+![Deviation of obdeect from sim_telarray](_static/figures/validation_psf_area.png)
+
 ## How to repeat the comparison
 
 In a simtools environment with sim_telarray and obdeect installed, for each

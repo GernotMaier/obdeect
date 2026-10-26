@@ -1,40 +1,57 @@
 # obdeect
 
-obdeect traces photons through the optics of imaging atmospheric Cherenkov
-telescopes: from the sky, a light source or a shower photon bunch, over the
+obdeect is an optical ray tracer for imaging atmospheric Cherenkov
+telescopes and one of the ray-tracing backends of [simtools](https://github.com/gammasim/simtools).
+
+Photons might originate from the sky, a light source or a shower photon bunch, over the
 mirrors, past the telescope structure, to the camera entrance. It is a C++20
 library with a Python interface and a command line. The telescope is described
-by an **optical model**: one JSON document compiled from the CTAO simulation
-models (simulation-models repository), with the provenance of every parameter and file it was made from.
+by an optical model compiled from the CTAO simulation
+models.
 
-obdeect reproduces the optical part of sim_telarray and is one of the two
-ray-tracing backends of [simtools](https://github.com/gammasim/simtools)
-(`--ray_tracing_backend obdeect`). It is validated against sim_telarray for
-every CTAO telescope type: point-spread function, effective area, focal
-length, incidence angles, flashers and illuminators.
+::::{grid} 1 2 2 4
+:gutter: 3
 
-![Deviation of obdeect from sim_telarray](_static/figures/validation_psf_area.png)
+:::{grid-item-card} {fas}`bolt;pst-color-primary` User Guide
+:link: user-guide
+:link-type: doc
+:class-card: sd-shadow-sm
+
+Learn how to get started as a user.
+This guid will cover how to install obdeect, and introduce the main functionalities.
+:::
+
+:::{grid-item-card} {fas}`eye;pst-color-primary` Optics and Validation
+:link: physics-validation
+:link-type: doc
+:class-card: sd-shadow-sm
+
+Learn how obdeect builds the optical model and traces photons through it.
+Find validation results and comparisons with other ray-tracing backends.
+:::
+
+:::{grid-item-card} {fas}`book;pst-color-primary`  Python API
+:link: api
+:link-type: doc
+:class-card: sd-shadow-sm
+Learn about the `obdeect` Python API.
+:::
+
+:::{grid-item-card} {fas}`hammer;pst-color-primary` Changelog
+:link: changelog
+:link-type: doc
+:class-card: sd-shadow-sm
+Learn what has changed in each release of obdeect.
+:::
+
+::::
 
 ```{toctree}
-:maxdepth: 2
-:caption: User guide
-
-USER_GUIDE
-shadowing
-```
-
-```{toctree}
-:maxdepth: 2
-:caption: Physics and validation
-
-PHYSICS
-limitations
-VALIDATION
-```
-
-```{toctree}
+:hidden:
 :maxdepth: 1
-:caption: Reference
 
+user-guide
+physics-validation
 api
+changelog
 ```

@@ -28,19 +28,21 @@ extensions = [
     "sphinx.ext.mathjax",
     "sphinx.ext.viewcode",
     "sphinx.ext.githubpages",
+    "sphinx_design",
 ]
 source_suffix = {".md": "markdown"}
 root_doc = "index"
 exclude_patterns = ["_build", "changes", "figures"]
 myst_heading_anchors = 3
-myst_enable_extensions = ["dollarmath"]
+myst_enable_extensions = ["colon_fence", "dollarmath"]
 nitpicky = False
 autodoc_typehints = "description"
 autodoc_member_order = "bysource"
 
 html_theme = "pydata_sphinx_theme"
 html_title = project
-html_logo = "_static/images/obdeect_small.jpg"
+html_logo = "_static/images/obdeect_21ratio_small.jpg"
+html_css_files = ["obdeect.css"]
 html_static_path = ["_static"]
 html_theme_options = {
     "navbar_start": ["navbar-logo"],
