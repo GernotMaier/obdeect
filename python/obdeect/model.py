@@ -267,7 +267,7 @@ class OpticalModel:
         classify_losses: bool = True,
         pool: ThreadPool | None = None,
     ) -> dict[str, np.ndarray]:
-        """Trace photons; returns per-photon arrays (see docs/USER_GUIDE.md).
+        """Trace photons; returns per-photon arrays (see docs/python-guide.md).
 
         `photons` holds position_m (n, 3), direction (n, 3), wavelength_nm,
         time_ns, weight and photon_id. With apply_responses False only geometry
@@ -392,7 +392,7 @@ class OpticalModel:
         pool: ThreadPool | None = None,
         threads: int = 0,
     ) -> dict[str, np.ndarray]:
-        """Trace photon bunches of an air shower (see docs/USER_GUIDE.md).
+        """Trace photon bunches of an air shower (see docs/batch-tracing.md).
 
         `bunches` holds x, y, cx, cy, time_ns, zem, size, wavelength_nm (all
         float32; wavelength 0 means "sample one from `wavelength_density`")

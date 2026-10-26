@@ -41,7 +41,7 @@ from obdeect.formats import (
 from obdeect.simtel_tables import evaluate
 
 MODEL_FORMAT = "obdeect.optical-model.v2"
-# Structure table (masts, quadrupods, dish frame); see docs/USER_GUIDE.md.
+# Structure table (masts, quadrupods, dish frame); see docs/optical-elements.md#telescope-structure.
 STRUCTURE_PARAMETER = "telescope_structure"
 ALL_LEGS = ["incoming", "after_primary", "after_secondary"]
 

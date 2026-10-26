@@ -1,6 +1,7 @@
-# Validation against sim_telarray
+# Validation
 
-obdeect is validated in three layers:
+Validation proceeds from analytic kernels to optical-model compilation and
+comparisons with sim_telarray:
 
 1. **Kernels and primitives** (`cpp/tests`): random numbers (Philox known
    answers), tables, apertures, facet grid against brute force, polynomial
@@ -220,7 +221,7 @@ illuminators: 10 pulses of 10^9 photons.
   SST optics are isochronous to 0.01 ns.
 - (d) sim_telarray reflectivity for 2-D (wavelength, incidence angle) tables:
   it applies R(lambda, 0) R(lambda, theta) / R_max(lambda) instead of
-  R(lambda, theta) (see [PHYSICS.md](PHYSICS.md)). The SST mirrors have such
+  R(lambda, theta) (see [Optics](optics.md)). The SST mirrors have such
   tables; predicted ratios 1.7449 (300 nm) and 1.0943 (400 nm), measured
   1.7458 +- 0.0048 and 1.0942 +- 0.0018. Image centres and shapes agree. For
   Cherenkov light this bug makes sim_telarray's SSTs about 9% too dim at 400 nm.
@@ -281,7 +282,7 @@ the same for both):
 | Illuminator 600 m above LSTN-01, 10^10 photons, 8.3*10^5 at the camera | `xyzls` 14.7 s | 0.8 s | 0.5 s | 11.8 |
 
 `xyzls` follows every emitted photon; obdeect makes only the photons crossing
-the telescope entrance (weights, PHYSICS.md), and its cost scales with those.
+the telescope entrance (see [Light sources](light-sources.md#flashers-and-illuminators)), and its cost scales with those.
 Scripts: `val/phase2/bench_star.py`, `bench_light.py`.
 
 ## Rounding-level changes
@@ -330,7 +331,7 @@ per model):
 | SSTS-17 | 0 | 2.8e-10 | 8.2e-11 | 5.5e-10 | 1.8e-9 | 2.3e-12 |
 | SCTS-design | 0 | 1.1e-10 | 1.1e-11 | 3.4e-10 | 1.1e-9 | 0 |
 
-Physics check (container `obdeect-val`, simtools with model version 6.0.2,
+Optics check (container `obdeect-val`, simtools with model version 6.0.2,
 seeds 11 and 11): the optics validation of SSTS-01 and MSTS-01 and the
 cumulative PSF of LSTN-01, once with the reference build and once with the
 final build. Largest relative difference of D80, effective area and centroid

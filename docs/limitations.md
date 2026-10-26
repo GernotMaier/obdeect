@@ -1,4 +1,4 @@
-# Not implemented, and why
+# Scope and limitations
 
 obdeect replaces the ray tracing of sim_telarray. The effects below are
 deliberately left out: sim_telarray does not trace them either, so leaving
@@ -91,6 +91,6 @@ equivalence.
   studies that the parametrisations were fitted to).
 - **Pixels, light guides, photodetectors:** camera simulation (sim_telarray).
 - **Refraction in air** between an illuminator and the telescope: a few arcsec
-  over hundreds of metres ([physics](PHYSICS.md#known-differences-from-sim_telarray)).
+  over hundreds of metres ([Differences from sim_telarray](sim-telarray-differences.md)).
 - **Diffraction and polarisation:** irrelevant at the size of IACT mirrors and
   for unpolarised Cherenkov light.

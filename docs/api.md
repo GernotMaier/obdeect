@@ -2,7 +2,7 @@
 
 The package exports the optical model and the helpers below; everything else is
 internal. Units are metres, nanoseconds and nanometres; frames are described in
-the [user guide](USER_GUIDE.md#frames-and-units).
+the [user guide](optical-models.md#frames-and-units).
 
 ## Optical models
 

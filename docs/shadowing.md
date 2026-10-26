@@ -3,7 +3,7 @@
 Light can be absorbed on its way to the camera by the camera body, the
 secondary mirror and its baffle, and, if the model has a `telescope_structure`
 table, by the masts, quadrupods and dish frame (see the
-[user guide](USER_GUIDE.md#telescope-structure) for the table format). Every
+[optical elements](optical-elements.md#telescope-structure) for the table format). Every
 such body is an **obscurer** of the optical model, active on one or more legs
 of the photon path: `incoming` (sky to primary), `after_primary` and
 `after_secondary`. A photon absorbed by an obscurer has the status `blocked`
