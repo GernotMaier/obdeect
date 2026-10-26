@@ -289,7 +289,14 @@ def test_invalid_input_is_rejected_before_tracing():
         trace_bunches(model, bunches, plane_z, acceptance=constant_acceptance(1.01))
     with pytest.raises(ValueError, match="acceptance"):
         trace_bunches(model, bunches, plane_z, acceptance=constant_acceptance(-0.01))
+    repeated = (np.array([100.0, 100.0]), np.array([0.0, 1.0e6]), np.full((2, 2), 0.5))
+    with pytest.raises(ValueError, match="acceptance"):
+        trace_bunches(model, bunches, plane_z, acceptance=repeated)
     unsampled = {**bunches, "wavelength_nm": np.zeros(100, dtype=np.float32)}
+    with pytest.raises(ValueError, match="density"):
+        trace_bunches(
+            model, unsampled, plane_z, wavelength_density=(np.array([0.0, 500.0]), np.ones(2))
+        )
     with pytest.raises(ValueError, match="wavelength"):
         trace_bunches(model, unsampled, plane_z)
     for name, bad in (("size", 0.0), ("size", np.nan), ("x", np.inf), ("cx", 1.5)):

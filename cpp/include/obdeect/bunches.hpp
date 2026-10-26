@@ -73,6 +73,10 @@ inline void validate_acceptance(const Map2D &a) {
   for (const double v : a.values)
     if (!(v >= 0.0 && v <= 1.0))
       throw std::invalid_argument("bunch acceptance: values must lie in [0, 1]");
+  for (const auto *axis : {&a.x_m, &a.y_m})
+    for (std::size_t i = 0; i < axis->size(); ++i)
+      if (!std::isfinite((*axis)[i]) || (i > 0 && !((*axis)[i] > (*axis)[i - 1])))
+        throw std::invalid_argument("bunch acceptance: axes must be finite and increase");
 }
 
 // Largest bunch size: the sub-photon index is 32-bit.
@@ -230,7 +234,9 @@ std::size_t trace_bunches(const OpticalModel &model, const BunchBlock &in, const
   detail::validate_frame(frame);
   if (options.acceptance)
     detail::validate_acceptance(*options.acceptance);
-  (void)response_bound(model, 400.0); // Throws ModelError for an unsupported transmission.
+  if (options.wavelength_density && !(options.wavelength_density->lower() > 0.0))
+    throw std::invalid_argument("bunch wavelength density: nodes must start above 0 nm");
+  validate_bound_support(model); // Throws ModelError for an unsupported transmission.
   const detail::BunchTask task(model, in, frame, options, seed);
 
   // First pass: the most rows each chunk can write (and the input check).

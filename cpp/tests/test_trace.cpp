@@ -1,6 +1,7 @@
 // End-to-end transport through analytic telescopes.
 #include "check.hpp"
 
+#include "obdeect/bunches.hpp"
 #include "obdeect/source.hpp"
 #include "obdeect/trace.hpp"
 
@@ -9,6 +10,9 @@
 #include <cstring>
 #include <memory>
 #include <numeric>
+#include <stdexcept>
+#include <string>
+#include <utility>
 #include <vector>
 
 using namespace obdeect;
@@ -553,6 +557,79 @@ void thread_pool() {
   }
 }
 
+// An exception in a task reaches the caller; the pool stays usable.
+void thread_pool_exceptions() {
+  for (const unsigned threads : {1U, 4U}) {
+    ThreadPool pool(threads);
+    for (int round = 0; round < 3; ++round) {
+      bool caught = false;
+      try {
+        pool.run(1000, [](std::size_t c) {
+          if (c == 500)
+            throw std::runtime_error("task failed");
+        });
+      } catch (const std::runtime_error &e) {
+        caught = std::string(e.what()) == "task failed";
+      }
+      CHECK(caught);
+      std::atomic<std::size_t> count{0}, sum{0};
+      pool.run(1000, [&](std::size_t c) {
+        count.fetch_add(1);
+        sum.fetch_add(c);
+      });
+      CHECK(count.load() == 1000 && sum.load() == 1000 * 999 / 2);
+    }
+  }
+}
+
+template <class F> bool throws_invalid_argument(F &&f) {
+  try {
+    f();
+  } catch (const std::invalid_argument &) {
+    return true;
+  }
+  return false;
+}
+
+// trace_bunches rejects a wavelength density reaching 0 nm and bad acceptance axes.
+void bunch_option_validation() {
+  const auto model = single_facet(10.0, 0.5);
+  const float zero = 0.0F, one = 1.0F;
+  const std::uint64_t id = 0;
+  BunchBlock in;
+  in.x = in.y = in.cx = in.cy = in.time_ns = in.zem = &zero;
+  in.size = &one;
+  in.wavelength_nm = &zero;
+  in.bunch_id = &id;
+  in.n = 1;
+  BunchFrame frame;
+  frame.plane_z = 20.0;
+  ThreadPool pool(1);
+  const auto allocate = [](std::size_t) { return BunchResult{}; };
+  const auto run = [&](const BunchOptions &options) {
+    trace_bunches(model, in, frame, options, 1, pool, allocate);
+  };
+
+  const LinearDensity from_zero({0.0, 500.0}, {1.0, 1.0}), from_below({-1.0, 500.0}, {1.0, 1.0});
+  BunchOptions options;
+  options.wavelength_density = &from_zero;
+  CHECK(throws_invalid_argument([&] { run(options); }));
+  options.wavelength_density = &from_below;
+  CHECK(throws_invalid_argument([&] { run(options); }));
+
+  const double nan = std::numeric_limits<double>::quiet_NaN();
+  const std::vector<double> ok{100.0, 1000.0};
+  for (const auto &[x, y] : {std::pair{std::vector<double>{100.0, 100.0}, ok},
+                             std::pair{std::vector<double>{1000.0, 100.0}, ok},
+                             std::pair{ok, std::vector<double>{0.0, nan}},
+                             std::pair{std::vector<double>{100.0, kInfinity}, ok}}) {
+    const Map2D acceptance{x, y, std::vector<double>(4, 0.5), false};
+    BunchOptions bad;
+    bad.acceptance = &acceptance;
+    CHECK(throws_invalid_argument([&] { run(bad); }));
+  }
+}
+
 } // namespace
 
 void all_tests() {
@@ -566,6 +643,8 @@ void all_tests() {
   sub_photon_index();
   block_invariance();
   thread_pool();
+  thread_pool_exceptions();
+  bunch_option_validation();
 }
 
 int main() { return run_checks(all_tests); }

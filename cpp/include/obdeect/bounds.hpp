@@ -40,20 +40,25 @@ inline double response_bound(const Mirror &mirror, double wavelength_nm) {
 
 } // namespace detail
 
+// Throws ModelError for a telescope transmission whose maximum is not known.
+inline void validate_bound_support(const OpticalModel &model) {
+  if (const auto &t = model.telescope_transmission)
+    if (!(t->amplitude >= 0.0 && t->power > 0.0 && t->angular_scale_rad > 0.0 &&
+          t->outer_power >= 0.0))
+      throw ModelError("response_bound: unsupported telescope transmission");
+}
+
 // An upper bound of the weight factor that trace_photon with apply_responses
 // can apply to a photon of this wavelength: reflectivities, degradation maps
 // and the telescope transmission. Throws ModelError for a transmission whose
 // maximum is not known.
 [[nodiscard]] inline double response_bound(const OpticalModel &model, double wavelength_nm) {
+  validate_bound_support(model);
   double bound = detail::response_bound(model.primary, wavelength_nm);
   if (model.secondary)
     bound *= detail::response_bound(*model.secondary, wavelength_nm);
-  if (const auto &t = model.telescope_transmission) {
-    if (!(t->amplitude >= 0.0 && t->power > 0.0 && t->angular_scale_rad > 0.0 &&
-          t->outer_power >= 0.0))
-      throw ModelError("response_bound: unsupported telescope transmission");
+  if (const auto &t = model.telescope_transmission)
     bound *= t->on_axis;
-  }
   return bound * (1.0 + 1e-12);
 }
 

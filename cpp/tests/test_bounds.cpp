@@ -139,7 +139,17 @@ void bounds_exact_and_errors() {
       threw = true;
     }
     CHECK(threw);
+    threw = false;
+    try {
+      validate_bound_support(m);
+    } catch (const ModelError &) {
+      threw = true;
+    }
+    CHECK(threw);
   }
+  m.telescope_transmission = TelescopeTransmission{1.0, 1.0, 0.1, 2.0, 1.0};
+  validate_bound_support(m); // A valid transmission does not throw.
+  validate_bound_support(plain);
 }
 
 } // namespace

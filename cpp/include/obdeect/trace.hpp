@@ -10,6 +10,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <exception>
 #include <functional>
 #include <limits>
 #include <mutex>
@@ -347,8 +348,19 @@ template <class Body> void parallel_for(std::size_t n, unsigned threads, const B
 class ThreadPool {
 public:
   explicit ThreadPool(unsigned threads) {
-    for (unsigned i = 1; i < std::max(1U, threads); ++i)
-      workers_.emplace_back([this] { loop(); });
+    try {
+      for (unsigned i = 1; i < std::max(1U, threads); ++i)
+        workers_.emplace_back([this] { loop(); });
+    } catch (...) { // Joinable threads must not be destroyed.
+      {
+        std::lock_guard<std::mutex> lock(mutex_);
+        stop_ = true;
+      }
+      wake_.notify_all();
+      for (auto &w : workers_)
+        w.join();
+      throw;
+    }
   }
   ~ThreadPool() {
     {
@@ -365,7 +377,8 @@ public:
   [[nodiscard]] unsigned size() const { return static_cast<unsigned>(workers_.size()) + 1; }
 
   // Calls task(c) for every c in [0, count) and returns when all calls are done.
-  // `task` must not throw.
+  // If `task` throws, the remaining calls are skipped and the first exception
+  // is rethrown here once all workers have left the job.
   template <class Task> void run(std::size_t count, const Task &task) {
     if (count == 0)
       return;
@@ -383,6 +396,8 @@ public:
     std::unique_lock<std::mutex> lock(mutex_);
     job_ = nullptr; // Workers that have not joined yet will not touch the job.
     done_.wait(lock, [&] { return job.active == 0; });
+    if (job.error)
+      std::rethrow_exception(job.error);
   }
 
 private:
@@ -391,10 +406,21 @@ private:
     std::function<void(std::size_t)> call;
     std::atomic<std::size_t> next{0};
     std::size_t active{0}; // Workers inside work(job); guarded by mutex_.
+    std::exception_ptr error;
+    std::mutex error_mutex;
   };
   static void work(Job &job) {
     for (std::size_t c = job.next.fetch_add(1); c < job.count; c = job.next.fetch_add(1))
-      job.call(c);
+      try {
+        job.call(c);
+      } catch (...) {
+        {
+          std::lock_guard<std::mutex> lock(job.error_mutex);
+          if (!job.error)
+            job.error = std::current_exception();
+        }
+        job.next.store(job.count); // Skip the remaining chunks.
+      }
   }
   void loop() {
     std::uint64_t seen = 0;
