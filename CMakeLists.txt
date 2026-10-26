@@ -22,6 +22,14 @@ if(NOT MSVC)
   target_compile_options(obdeect_core INTERFACE -ffp-contract=off)
 endif()
 
+# Changes results at the rounding level. Use only on hardware with fused
+# multiply-add; without it std::fma is emulated and very slow. Results differ
+# from builds without it. Default builds, wheels and CI stay without FMA.
+option(OBDEECT_USE_FMA "Use std::fma in the aspheric polynomial evaluation" OFF)
+if(OBDEECT_USE_FMA)
+  target_compile_definitions(obdeect_core INTERFACE OBDEECT_USE_FMA=1)
+endif()
+
 function(obdeect_enable_warnings target)
   if(MSVC)
     target_compile_options(${target} PRIVATE /W4 /WX)
@@ -50,6 +58,18 @@ if(OBDEECT_BUILD_TESTING)
     obdeect_enable_warnings(test_${name})
     add_test(NAME ${name} COMMAND test_${name})
   endforeach()
+  # Newton-step counts need the benchmark counters compiled in.
+  add_executable(test_asphere_steps cpp/tests/test_asphere_steps.cpp)
+  target_link_libraries(test_asphere_steps PRIVATE obdeect_core)
+  target_compile_definitions(test_asphere_steps PRIVATE OBDEECT_BENCH_COUNTERS)
+  obdeect_enable_warnings(test_asphere_steps)
+  add_test(NAME asphere_steps COMMAND test_asphere_steps)
+  # The replay tool's limit comparison (header in cpp/bench, standard library only).
+  add_executable(test_replay_compare cpp/tests/test_replay_compare.cpp)
+  target_link_libraries(test_replay_compare PRIVATE obdeect_core)
+  target_include_directories(test_replay_compare PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/cpp/bench)
+  obdeect_enable_warnings(test_replay_compare)
+  add_test(NAME replay_compare COMMAND test_replay_compare)
 endif()
 
 if(OBDEECT_BUILD_BENCH)

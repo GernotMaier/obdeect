@@ -228,6 +228,16 @@ private:
   std::vector<std::uint32_t> members_;
 };
 
+// c + value * q; with OBDEECT_USE_FMA a fused multiply-add, which changes results
+// at the rounding level (see CMakeLists.txt).
+[[nodiscard]] inline double multiply_add(double c, double value, double q) {
+#ifdef OBDEECT_USE_FMA
+  return std::fma(value, q, c);
+#else
+  return c + value * q;
+#endif
+}
+
 // Rotationally symmetric surface z(r) = vertex + sum_i c_i (r / scale)^(2i),
 // within inner_radius <= r <= outer_radius, in the telescope frame.
 struct Asphere {
@@ -240,10 +250,17 @@ struct Asphere {
   // Vertex height and rim curvature of the first-guess paraboloid; NaN until
   // cache_guess() is called, then intersect() computes them per ray.
   double guess_z0{std::numeric_limits<double>::quiet_NaN()}, guess_k{guess_z0};
+  // 1 / scale^2 and the squared aperture radii; NaN until prepare() is called,
+  // then intersect() computes them per ray (as for the first-guess constants).
+  double inv_scale2{guess_z0}, inner_radius2{guess_z0}, outer_radius2{guess_z0};
 
-  // Computes max_slope and the first-guess constants; call after the shape is set.
+  // Computes max_slope, the first-guess constants and the squared quantities;
+  // call after the shape is set.
   void prepare() {
     max_slope = slope_bound();
+    inv_scale2 = 1.0 / (scale * scale);
+    inner_radius2 = inner_radius * inner_radius;
+    outer_radius2 = outer_radius * outer_radius;
     guess_z0 = sag(0.0);
     guess_k = (sag(outer_radius) - guess_z0) / (outer_radius * outer_radius);
   }
@@ -287,14 +304,32 @@ struct Asphere {
     return value * rho / scale;
   }
 
-  [[nodiscard]] Vec3 normal_at(const Vec3 &p) const { return normal_at(p, std::hypot(p.x, p.y)); }
+  // The same sag in q = (x^2 + y^2) / scale^2 (Horner in q).
+  [[nodiscard]] double sag_q(double q) const {
+    double value = 0.0;
+    for (auto c = coefficients.rbegin(); c != coefficients.rend(); ++c)
+      value = multiply_add(*c, value, q);
+    return vertex_z + value;
+  }
 
-  // The same, for r = hypot(p.x, p.y) already known.
-  [[nodiscard]] Vec3 normal_at(const Vec3 &p, double r) const {
-    if (r == 0.0)
-      return {0.0, 0.0, 1.0};
-    const double s = slope(r);
-    return normalized(Vec3{-s * p.x / r, -s * p.y / r, 1.0});
+  // (dz/dr) / r as a polynomial in q: (1 / scale^2) sum_{i>=1} 2 i c_i q^(i-1).
+  // No special case at r = 0: the slope term is then k * 0 = 0.
+  [[nodiscard]] double slope_over_r_q(double q) const {
+    double value = 0.0;
+    for (std::size_t i = coefficients.size(); i-- > 1;)
+      value = multiply_add(2.0 * static_cast<double>(i) * coefficients[i], value, q);
+    return value * (std::isnan(inv_scale2) ? 1.0 / (scale * scale) : inv_scale2);
+  }
+
+  [[nodiscard]] Vec3 normal_at(const Vec3 &p) const {
+    const double inv = std::isnan(inv_scale2) ? 1.0 / (scale * scale) : inv_scale2;
+    return normal_from_q(p, (p.x * p.x + p.y * p.y) * inv);
+  }
+
+  // The normal at p for q = (p.x^2 + p.y^2) / scale^2 already known.
+  [[nodiscard]] Vec3 normal_from_q(const Vec3 &p, double q) const {
+    const double k = slope_over_r_q(q);
+    return normalized(Vec3{-k * p.x, -k * p.y, 1.0});
   }
 
   // Nearest intersection beyond t_min inside the annulus for which
@@ -311,32 +346,37 @@ struct Asphere {
     const double shift = std::max(0.0, dot(Vec3{0.0, 0.0, vertex_z} - ray.origin, ray.direction));
     const Ray local{ray.at(shift), ray.direction};
     const double local_min = t_min - shift;
-    // Residual and derivative at the point p = local.at(t) with r = hypot(p.x, p.y).
-    const auto residual_at = [&](const Vec3 &p, double r) { return p.z - sag(r); };
-    const auto derivative_at = [&](const Vec3 &p, double r) {
+    // Everything in rr = p.x^2 + p.y^2 and q = rr / scale^2: no hypot, sqrt or
+    // division per step.
+    const double inv_s2 = std::isnan(inv_scale2) ? 1.0 / (scale * scale) : inv_scale2;
+    const double inner2 = std::isnan(inner_radius2) ? inner_radius * inner_radius : inner_radius2;
+    const double outer2 = std::isnan(outer_radius2) ? outer_radius * outer_radius : outer_radius2;
+    // Residual and derivative at the point p = local.at(t) with rr = p.x^2 + p.y^2.
+    const auto residual_at = [&](const Vec3 &p, double rr) { return p.z - sag_q(rr * inv_s2); };
+    const auto derivative_at = [&](const Vec3 &p, double rr) {
       const Vec3 &d = local.direction;
-      return r > 0.0 ? d.z - slope(r) * (p.x * d.x + p.y * d.y) / r : d.z;
+      return d.z - slope_over_r_q(rr * inv_s2) * (p.x * d.x + p.y * d.y);
     };
     const auto residual = [&](double t) {
       const Vec3 p = local.at(t);
-      return residual_at(p, std::hypot(p.x, p.y));
+      return residual_at(p, p.x * p.x + p.y * p.y);
     };
-    // A root t at the point p = local.at(t), r = hypot(p.x, p.y).
+    // A root t at the point p = local.at(t), rr = p.x^2 + p.y^2.
     struct Root {
       double t;
       Vec3 p;
-      double r;
+      double rr;
     };
     const auto accept_root = [&](const Root &root) -> std::optional<SurfaceHit> {
       if (!(root.t > local_min))
         return std::nullopt;
-      if (root.r < inner_radius || root.r > outer_radius || !accept(root.p))
+      if (root.rr < inner2 || root.rr > outer2 || !accept(root.p))
         return std::nullopt;
-      return SurfaceHit{root.t + shift, root.p, normal_at(root.p, root.r), id};
+      return SurfaceHit{root.t + shift, root.p, normal_from_q(root.p, root.rr * inv_s2), id};
     };
     const auto root_at = [&](double t) {
       const Vec3 p = local.at(t);
-      return Root{t, p, std::hypot(p.x, p.y)};
+      return Root{t, p, p.x * p.x + p.y * p.y};
     };
     const auto newton = [&](double t, double lo, double hi) -> std::optional<Root> {
       for (int iteration = 0; iteration < 50; ++iteration) {
@@ -344,16 +384,16 @@ struct Asphere {
         ++counters().newton_steps;
 #endif
         const Vec3 p = local.at(t);
-        const double r = std::hypot(p.x, p.y);
-        const double g = residual_at(p, r);
+        const double rr = p.x * p.x + p.y * p.y;
+        const double g = residual_at(p, rr);
         if (std::abs(g) <= kTolerance)
-          return Root{t, p, r};
-        const double gd = derivative_at(p, r);
+          return Root{t, p, rr};
+        const double gd = derivative_at(p, rr);
         if (gd == 0.0 || !std::isfinite(gd))
           return std::nullopt;
         const double next = t - g / gd;
         if (!(next >= lo && next <= hi) || next == t)
-          return std::abs(g) <= 100 * kTolerance ? std::optional<Root>{Root{t, p, r}}
+          return std::abs(g) <= 100 * kTolerance ? std::optional<Root>{Root{t, p, rr}}
                                                  : std::nullopt;
         t = next;
       }
@@ -363,7 +403,7 @@ struct Asphere {
     // Range of t over which the ray lies inside the outer aperture cylinder.
     const Vec3 &o = local.origin, &d = local.direction;
     const double a2 = d.x * d.x + d.y * d.y, b2 = o.x * d.x + o.y * d.y;
-    const double c2 = o.x * o.x + o.y * o.y - outer_radius * outer_radius;
+    const double c2 = o.x * o.x + o.y * o.y - outer2;
     double lo = local_min, hi = std::numeric_limits<double>::infinity();
     if (a2 > 0.0) {
       const double disc = b2 * b2 - a2 * c2;
@@ -406,6 +446,15 @@ struct Asphere {
     // Ascending, NaN last.
     if (!std::isnan(guesses[1]) && (std::isnan(guesses[0]) || guesses[1] < guesses[0]))
       std::swap(guesses[0], guesses[1]);
+    // With the single root proven there is at most one intersection, so the
+    // start point cannot change which root is found, only how fast Newton gets
+    // there: try a guess inside [lo, hi] before one outside it (which would be
+    // clamped to the end of the range). Otherwise keep the ascending order.
+    if (single_root) {
+      const auto inside = [&](double g) { return g >= lo && (!std::isfinite(hi) || g <= hi); };
+      if (!std::isnan(guesses[1]) && !inside(guesses[0]) && inside(guesses[1]))
+        std::swap(guesses[0], guesses[1]);
+    }
     const double span = std::isfinite(hi) ? hi - lo : 0.0;
     for (const double guess : guesses) {
       if (std::isnan(guess))

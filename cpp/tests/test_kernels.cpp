@@ -1,5 +1,6 @@
 // Analytic tests of the random generator, tables, surfaces and obscurers.
 #include "check.hpp"
+#include "legacy_asphere.hpp"
 
 #include "obdeect/model.hpp"
 #include "obdeect/random.hpp"
@@ -296,7 +297,7 @@ void slope_bound() {
 }
 
 // The single-root shortcut must give exactly the hits and misses of the
-// search without it.
+// search without it (and the same points up to the Newton tolerance).
 void single_root_shortcut() {
   const auto m = sst_like_segmented();
   Asphere reference = m.asphere;
@@ -319,8 +320,12 @@ void single_root_shortcut() {
     CHECK(failed == failed_reference);
     CHECK(a.has_value() == b.has_value());
     if (a && b) {
-      CHECK(a->t == b->t);
-      CHECK(a->point.x == b->point.x && a->point.y == b->point.y && a->point.z == b->point.z);
+      // The same root, found from a different start (the shortcut tries the guess
+      // inside the aperture range first): equal up to the Newton tolerance.
+      CHECK_NEAR(a->t, b->t, 1e-9);
+      CHECK_NEAR(a->point.x, b->point.x, 1e-9);
+      CHECK_NEAR(a->point.y, b->point.y, 1e-9);
+      CHECK_NEAR(a->point.z, b->point.z, 1e-9);
       ++hits;
     } else {
       ++misses;
@@ -877,6 +882,145 @@ void transmission() {
     }
 }
 
+// Three polynomial surfaces: a paraboloid that was never prepared (the lazy
+// path of the r^2 members), and an SST-like and an SCT-like asphere that were.
+std::vector<Asphere> polynomial_surfaces() {
+  std::vector<Asphere> surfaces;
+  surfaces.push_back(Asphere{1, 0.0, 0.0, 6.0, 1.0, {0.0, 1.0 / 40.0}});
+  std::vector<double> sst_cm{0.0,          0.000608051,  -7.36248e-10, 5.82125e-15,
+                             -6.76447e-20, -3.89542e-24, -5.28036e-29, 2.99107e-34,
+                             4.39153e-38,  6.17433e-43,  -2.73586e-47};
+  Asphere sst{2, 0.0, 0.2, 2.12, 1.0, {}};
+  for (std::size_t i = 0; i < sst_cm.size(); ++i)
+    sst.coefficients.push_back(sst_cm[i] * std::pow(0.01, 1.0 - 2.0 * static_cast<double>(i)));
+  sst.prepare();
+  surfaces.push_back(sst);
+  Asphere sct{3, 0.0, 0.0, 2.7, 5.5863, {}};
+  for (const double c : {1.5, 0.416667, 0.145816, -0.712012, 4.17685, -23.1617, 118.844, -520.501,
+                         1802.98, -4605.3, 8019.1, -8422.9, 4004.61})
+    sct.coefficients.push_back(c * 5.5863);
+  sct.prepare();
+  surfaces.push_back(sct);
+  return surfaces;
+}
+
+// sag_q and slope_over_r_q reproduce sag(r) and slope(r); no special case at r = 0.
+void asphere_in_r_squared() {
+  for (const Asphere &a : polynomial_surfaces()) {
+    const double inv_scale2 = 1.0 / (a.scale * a.scale);
+    for (int k = 1; k <= 100000; ++k) {
+      const double r = a.outer_radius * k / 100000.0, q = r * r * inv_scale2;
+      const double sag = a.sag(r), slope = a.slope(r);
+      CHECK(std::abs(a.sag_q(q) - sag) <= 1e-12 * std::abs(sag) + 1e-300);
+      CHECK(std::abs(a.slope_over_r_q(q) * r - slope) <= 1e-12 * std::abs(slope) + 1e-300);
+    }
+    // On the axis the slope term vanishes by itself.
+    CHECK(std::isfinite(a.slope_over_r_q(0.0)));
+    const Vec3 n = a.normal_at({0.0, 0.0, a.sag(0.0)});
+    CHECK(n.x == 0.0 && n.y == 0.0 && n.z == 1.0);
+    const Ray axis{{0.0, 0.0, a.sag(0.0) + 50.0}, {0.0, 0.0, -1.0}};
+    bool failed = false;
+    if (a.inner_radius == 0.0) {
+      const auto hit = a.intersect(axis, kMinDistanceM, [](const Vec3 &) { return true; }, failed);
+      CHECK(!failed && hit.has_value());
+      if (hit) {
+        CHECK_NEAR(hit->t, 50.0, 1e-9);
+        CHECK(hit->normal.x == 0.0 && hit->normal.y == 0.0 && hit->normal.z == 1.0);
+      }
+    }
+  }
+}
+
+// The r^2 intersection finds the points and normals of the hypot-based one.
+void asphere_against_legacy() {
+  const auto accept = [](const Vec3 &) { return true; };
+  std::size_t both = 0, differ = 0;
+  for (const Asphere &a : polynomial_surfaces())
+    for (std::uint64_t k = 0; k < 100000; ++k) {
+      const auto u = uniform4(17 + a.id, k, Stream::source);
+      const double angle = k % 4 == 0 ? 1e-6 * u[2] : 0.05 * (u[2] - 0.5);
+      const Vec3 d = normalized({angle, 0.03 * (u[3] - 0.5) * (k % 4 != 0), -1});
+      const double reach = 1.1 * a.outer_radius;
+      const Vec3 target{2 * reach * (u[0] - 0.5), 2 * reach * (u[1] - 0.5), 0.0};
+      const double distance = k % 2 ? 1e4 : 30.0;
+      const Ray ray{target - d * distance, d};
+      bool failed_new = false, failed_old = false;
+      const auto n = a.intersect(ray, kMinDistanceM, accept, failed_new);
+      const auto o = legacy::intersect(a, ray, kMinDistanceM, accept, failed_old);
+      CHECK(failed_new == failed_old);
+      if (n && o) {
+        ++both;
+        CHECK_NEAR(n->t, o->t, 1e-9);
+        CHECK_NEAR(n->point.x, o->point.x, 1e-9);
+        CHECK_NEAR(n->point.y, o->point.y, 1e-9);
+        CHECK_NEAR(n->point.z, o->point.z, 1e-9);
+        CHECK_NEAR(n->normal.x, o->normal.x, 1e-9);
+        CHECK_NEAR(n->normal.y, o->normal.y, 1e-9);
+        CHECK_NEAR(n->normal.z, o->normal.z, 1e-9);
+      } else if (n.has_value() != o.has_value()) {
+        // Allowed only within 1e-8 m of an aperture edge.
+        ++differ;
+        const Vec3 p = n ? n->point : o->point;
+        const double r = std::hypot(p.x, p.y);
+        CHECK(std::abs(r - a.outer_radius) <= 1e-8 ||
+              (a.inner_radius > 0.0 && std::abs(r - a.inner_radius) <= 1e-8));
+      }
+    }
+  CHECK(both > 100000);
+  CHECK(differ <= 5);
+}
+
+// Convex secondary-like aspheres (rays travel upwards from below the vertex
+// plane, so the second root of the first-guess paraboloid lies beyond the start).
+std::vector<Asphere> secondary_like_surfaces() {
+  std::vector<Asphere> surfaces;
+  Asphere sst{4, 3.1084, 0.0, 0.9, 1.0, {0.0, -0.2335, -0.1, 0.05}};
+  sst.prepare();
+  surfaces.push_back(sst);
+  Asphere sct{5, 3.0, 0.0, 1.2, 1.0, {0.0, -0.3, 0.12, -0.2, 0.15}};
+  sct.prepare();
+  surfaces.push_back(sct);
+  Asphere hole{6, 3.0, 0.1, 1.2, 1.0, {0.0, -0.3, 0.12, -0.2, 0.15}};
+  surfaces.push_back(hole); // Never prepared.
+  return surfaces;
+}
+
+// The hits of the current intersect equal those of the reference copy, also on
+// secondary-like surfaces where the root-ordering of the first guesses matters.
+void asphere_secondary_against_legacy() {
+  const auto accept = [](const Vec3 &) { return true; };
+  std::size_t both = 0, differ = 0;
+  for (const Asphere &a : secondary_like_surfaces())
+    for (std::uint64_t k = 0; k < 100000; ++k) {
+      const auto u = uniform4(31 + a.id, k, Stream::source);
+      const double reach = 1.3 * a.outer_radius;
+      const Vec3 origin{2 * reach * (u[0] - 0.5), 2 * reach * (u[1] - 0.5), 0.3 * u[2]};
+      const Vec3 target{0.5 * reach * (u[3] - 0.5), 0.5 * reach * (u[2] - 0.5), a.sag(0.0)};
+      const Vec3 d = normalized(target - origin + Vec3{0.6 * (u[1] - 0.5), 0.6 * (u[0] - 0.5), 0});
+      const Ray ray{origin, d};
+      bool failed_new = false, failed_old = false;
+      const auto n = a.intersect(ray, kMinDistanceM, accept, failed_new);
+      const auto o = legacy::intersect(a, ray, kMinDistanceM, accept, failed_old);
+      CHECK(failed_new == failed_old);
+      if (n && o) {
+        ++both;
+        CHECK_NEAR(n->t, o->t, 1e-9);
+        CHECK_NEAR(n->point.x, o->point.x, 1e-9);
+        CHECK_NEAR(n->point.y, o->point.y, 1e-9);
+        CHECK_NEAR(n->point.z, o->point.z, 1e-9);
+      } else if (n.has_value() != o.has_value()) {
+        ++differ;
+        const Vec3 p = n ? n->point : o->point;
+        const double r = std::hypot(p.x, p.y);
+        std::fprintf(stderr, "secondary %u ray %llu: differing hit/miss at r = %.12g\n", a.id,
+                     static_cast<unsigned long long>(k), r);
+        CHECK(std::abs(r - a.outer_radius) <= 1e-8 || std::abs(r - a.inner_radius) <= 1e-8);
+      }
+    }
+  CHECK(both > 50000);
+  CHECK(differ <= 5);
+}
+
 } // namespace
 
 void all_tests() {
@@ -886,6 +1030,9 @@ void all_tests() {
   facets();
   facet_prefilter();
   aspheres();
+  asphere_in_r_squared();
+  asphere_against_legacy();
+  asphere_secondary_against_legacy();
   slope_bound();
   single_root_shortcut();
   segment_grid();

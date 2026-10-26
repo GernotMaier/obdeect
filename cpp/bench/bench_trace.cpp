@@ -208,6 +208,9 @@ int main(int argc, char **argv) {
 
   // Reflected rays after the primary, with the distance to their next surface.
   std::vector<Ray> after_primary_rays, after_secondary_rays;
+#ifdef OBDEECT_BENCH_COUNTERS
+  std::vector<Ray> reflected_primary_rays; // All of them, also those that miss the next surface.
+#endif
   std::vector<double> after_primary_limits, after_secondary_limits;
   for (std::size_t k = 0; k < primary_hits.size(); ++k) {
     const std::size_t i = primary_index[k];
@@ -215,6 +218,9 @@ int main(int argc, char **argv) {
     const Vec3 d1 = detail::reflect_at(model.primary, mh, photons[i].ray.direction, i, 3,
                                        Stream::primary_scatter);
     const Ray r1{mh.hit.point, d1};
+#ifdef OBDEECT_BENCH_COUNTERS
+    reflected_primary_rays.push_back(r1);
+#endif
     std::optional<double> limit1;
     std::optional<detail::MirrorHit> m2;
     if (model.secondary) {
@@ -275,15 +281,42 @@ int main(int argc, char **argv) {
   }
 
 #ifdef OBDEECT_BENCH_COUNTERS
-  if (model.primary.asphere) {
+  // Newton steps per call of each aspheric surface, for the rays that reach it:
+  // photons (primary), all rays reflected by the primary (secondary, or the focal
+  // surface without a secondary) and rays after the secondary (focal surface).
+  const auto report_steps = [&](const char *label, const std::vector<Ray> &rays, auto intersect) {
     Asphere::counters() = {};
-    for (std::size_t i = 0; i < n; ++i)
-      checksum += detail::intersect_mirror(model.primary, photons[i].ray, failed).has_value();
+    for (const Ray &r : rays)
+      checksum += intersect(r);
     const auto &c = Asphere::counters();
-    std::printf("  asphere newton steps per intersect %.3f (%llu calls)\n",
-                static_cast<double>(c.newton_steps) / static_cast<double>(c.calls),
-                static_cast<unsigned long long>(c.calls));
+    if (c.calls)
+      std::printf("  newton steps per call %-9s %.3f (%llu calls)\n", label,
+                  static_cast<double>(c.newton_steps) / static_cast<double>(c.calls),
+                  static_cast<unsigned long long>(c.calls));
+  };
+  const auto through_mirror = [&](const Mirror &m) {
+    return [&](const Ray &r) {
+      return detail::intersect_mirror(m, r, failed).has_value() ? 1.0 : 0.0;
+    };
+  };
+  if (model.primary.asphere) {
+    std::vector<Ray> rays;
+    for (const auto &photon : photons)
+      rays.push_back(photon.ray);
+    report_steps("primary", rays, through_mirror(model.primary));
   }
+  if (model.secondary && model.secondary->asphere)
+    report_steps("secondary", reflected_primary_rays, through_mirror(*model.secondary));
+  if (model.focal_surface.asphere)
+    report_steps("focal", model.secondary ? after_secondary_rays : reflected_primary_rays,
+                 [&](const Ray &r) {
+                   return model.focal_surface.asphere
+                                  ->intersect(
+                                      r, kMinDistanceM, [](const Vec3 &) { return true; }, failed)
+                                  .has_value()
+                              ? 1.0
+                              : 0.0;
+                 });
 #endif
   std::printf("checksum %.17g\n", checksum);
   return 0;

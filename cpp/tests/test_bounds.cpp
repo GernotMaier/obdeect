@@ -46,8 +46,10 @@ OpticalModel folded_paraboloid() {
 Response angle_response(double p) {
   const auto row = [](double v) { return std::vector<double>{v, v, 0.6 * v, 0.3 * v}; };
   Response r{250.0, 150.0, 4, {0.0, p, 2 * p, 4 * p}, {}};
-  for (const double v : {0.90, 0.95, 0.85, 0.70})
-    r.values.insert(r.values.end(), row(v).begin(), row(v).end());
+  for (const double v : {0.90, 0.95, 0.85, 0.70}) {
+    const auto values = row(v);
+    r.values.insert(r.values.end(), values.begin(), values.end());
+  }
   return r;
 }
 

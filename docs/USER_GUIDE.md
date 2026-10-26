@@ -259,3 +259,13 @@ the dish vertex), one row per element, by its `shape`:
 
 Columns `id`, `group` (optional) and `shape` are text. A row leaves the
 columns it does not use as `nan`; unused points come last.
+
+## Build options
+
+- `-DOBDEECT_USE_FMA=ON` (CMake, default OFF) evaluates the aspheric polynomials
+  with `std::fma`. Use it only on hardware with fused multiply-add: without it
+  `std::fma` is emulated and very slow. Results differ from builds without it
+  at the rounding level. Default builds, wheels and CI do not use it.
+- Results also remain platform-dependent in the last bits, because the math
+  library (`std::pow`, `std::hypot`, trigonometric functions) differs between
+  platforms; see `VALIDATION.md`, section "Rounding-level changes".

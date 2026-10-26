@@ -230,3 +230,57 @@ the same for both):
 `xyzls` follows every emitted photon; obdeect makes only the photons crossing
 the telescope entrance (weights, PHYSICS.md), and its cost scales with those.
 Scripts: `val/phase2/bench_star.py`, `bench_light.py`.
+
+## Rounding-level changes
+
+These changes alter results in the last bits of floating-point arithmetic. Each
+was measured against the state at the start of the round (commit 13daac1, the
+reference worktree `ref3`) with a replay of 6 * 10^6 photons per model, the same
+seeds, and fixed tier G limits: at most 5 flips per 10^6 photons (a flip is a
+photon whose status or any surface id changes), and per field |difference|
+at most 1e-8 m for position and path, 1e-9 for direction, 1e-7 ns for time and
+1e-9 (relative) for weight.
+
+What changed, and what was measured:
+
+- **Aspheres evaluated in r^2** (SST, SCT): the sag and slope polynomials take
+  r^2 instead of r. SSTS-17: max position difference 5.8e-15 m, 0 flips.
+  SCTS-design: max position 1.0e-10 m, 0 flips.
+- **Order of the first guesses for aspheres**: when the surface can have only
+  one intersection with the ray (the single-root rule), Newton starts from the
+  paraboloid guess inside the aperture interval instead of the one clamped to
+  its edge. A fitted quadric as first guess was tried and gave no further gain.
+  Secondary Newton steps for SSTS-17 fell from 4.54 to 2.95 per photon.
+  SSTS-17: max position 2.8e-10 m, direction 8.2e-11, 0 flips. SCTS-design: max
+  position 1.1e-10 m.
+- **Estrin evaluation of the polynomials**: no speed gain, reverted.
+- **Facet mirror scatter in closed form**: no speed gain, reverted. The check
+  found that on curved facets the facet tangent vectors are not exactly
+  perpendicular to the hit normal (up to 1.9e-2 rad). This property is not
+  changed by the round.
+- **Telescope transmission**: the power of the outer term is skipped when it is
+  1, and a 4096-interval table of the transmission was tried. The outer power is
+  1 in all models, and the table fails the 1e-8 validation for every model with
+  a transmission (max relative table error 1.9e-7 MSTN-07, 6.7e-6 SCTS-design,
+  6.5e-4 SSTS-17), so no model uses a table. The replay is bit-identical, and the
+  change gave no speed gain: reverted.
+- **`OBDEECT_USE_FMA`** (CMake option, default OFF): see the user guide.
+
+Total change of the round (final state against 13daac1, tier G, 6 * 10^6 photons
+per model):
+
+| Model | Flips | Max position (m) | Max direction | Max path (m) | Max time (ns) | Max weight (rel.) |
+| --- | --- | --- | --- | --- | --- | --- |
+| LSTN-01 | 0 | 0 | 0 | 0 | 0 | 0 |
+| MSTN-07 | 0 | 0 | 0 | 0 | 0 | 0 |
+| MSTS-04 | 0 | 0 | 0 | 0 | 0 | 0 |
+| SSTS-17 | 0 | 2.8e-10 | 8.2e-11 | 5.5e-10 | 1.8e-9 | 2.3e-12 |
+| SCTS-design | 0 | 1.1e-10 | 1.1e-11 | 3.4e-10 | 1.1e-9 | 0 |
+
+Physics check (container `obdeect-val`, simtools with model version 6.0.2,
+seeds 11 and 11): the optics validation of SSTS-01 and MSTS-01 and the
+cumulative PSF of LSTN-01, once with the reference build and once with the
+final build. Largest relative difference of D80, effective area and centroid
+per offset: SSTS-01 3.7e-9 (centroid), MSTS-01 0, LSTN-01 0. The gate of 1e-4
+passes. The effective focal length is not deterministic in simtools and is not
+gated (SSTS-01: 7.9e-11).
