@@ -233,7 +233,8 @@ public:
       if (!tree.pieces.empty())
         build(tree, 0, static_cast<std::uint32_t>(tree.pieces.size()), 0);
     }
-    build_grid();
+    for (std::size_t leg = 0; leg < grids_.size(); ++leg)
+      build_grid(leg);
   }
 
 #ifdef OBDEECT_BENCH_COUNTERS
@@ -259,8 +260,10 @@ public:
   // Nearest obscurer on `leg` with kMinDistanceM < t < t_max; the lowest id
   // wins exact ties, so the result does not depend on the hierarchy.
   [[nodiscard]] std::optional<Hit> nearest(const Ray &ray, Leg leg, double t_max) const {
-    if (leg == Leg::incoming && grid_.nx > 0 && std::abs(ray.direction.z) >= kGridMinDz)
-      return nearest_in_grid(ray, t_max);
+    const Grid &grid = grids_[leg == Leg::incoming ? 0 : leg == Leg::after_primary ? 1 : 2];
+    if (grid.nx > 0 && std::abs(ray.direction.z) >= kGridMinDz)
+      return leg == Leg::incoming ? nearest_in_grid(ray, t_max)
+                                  : nearest_in_grid_dda(grid, ray, t_max);
     return nearest_in_hierarchy(ray, leg, t_max);
   }
 
@@ -322,6 +325,7 @@ private:
   static constexpr std::size_t kSahDepth = 32;    // Deeper levels split at the median.
   static constexpr std::uint32_t kLeafPieces = 4; // Largest leaf.
   static constexpr double kGridCellM = 0.125;     // Cell size of the incoming-leg grid.
+  static constexpr double kGridCellAfterM = 1.0;  // Cell size of the grids after the primary.
   static constexpr double kGridMinDz = 0.5;       // Rays steeper than this use the grid.
   static constexpr double kGridPieceRadii = 4.0;  // Piece length for the grid, in radii.
   static constexpr std::size_t kGridMaxCells = 1U << 20;
@@ -376,8 +380,9 @@ private:
     }
   }
 
-  // Uniform x-y grid over the incoming-leg obscurers: each cell lists the items
-  // with a capsule piece whose x-y box overlaps it.
+  // Uniform x-y grid over the obscurers of one leg: each cell lists the items
+  // with a capsule piece whose x-y box overlaps it, once per item, with the
+  // union of the boxes of that item's pieces in the cell.
   struct Grid {
     double x0{}, y0{}, cell{kGridCellM}, z_low{}, z_high{};
     std::size_t nx{}, ny{};
@@ -385,15 +390,15 @@ private:
     std::vector<Piece> members; // Pieces by cell, each with its box.
   };
 
-  void build_grid() {
+  void build_grid(std::size_t leg) {
     Tree pieces;
-    std::size_t incoming = 0;
+    std::size_t count = 0;
     for (std::uint32_t i = 0; i < items_.size(); ++i)
-      if (items_[i].legs & Leg::incoming) {
+      if (items_[i].legs & (1U << leg)) {
         add_pieces(pieces, i, kGridPieceRadii);
-        ++incoming;
+        ++count;
       }
-    if (incoming < kGridMinItems)
+    if (count < kGridMinItems)
       return;
     Vec3 lo = pieces.pieces[0].low, hi = pieces.pieces[0].high;
     for (const Piece &p : pieces.pieces) {
@@ -401,6 +406,7 @@ private:
       hi = {std::max(hi.x, p.high.x), std::max(hi.y, p.high.y), std::max(hi.z, p.high.z)};
     }
     Grid g;
+    g.cell = leg == 0 ? kGridCellM : kGridCellAfterM;
     g.x0 = lo.x;
     g.y0 = lo.y;
     g.z_low = lo.z;
@@ -417,14 +423,24 @@ private:
            ix <= cell_index(p.high.x, g.x0, g.cell, g.nx); ++ix)
         for (std::size_t iy = cell_index(p.low.y, g.y0, g.cell, g.ny);
              iy <= cell_index(p.high.y, g.y0, g.cell, g.ny); ++iy) {
-          cells[ix * g.ny + iy].push_back(p);
+          auto &cell = cells[ix * g.ny + iy];
+          // The pieces of an item are consecutive: merge them into one entry.
+          if (!cell.empty() && cell.back().item == p.item) {
+            Piece &q = cell.back();
+            q.low = {std::min(q.low.x, p.low.x), std::min(q.low.y, p.low.y),
+                     std::min(q.low.z, p.low.z)};
+            q.high = {std::max(q.high.x, p.high.x), std::max(q.high.y, p.high.y),
+                      std::max(q.high.z, p.high.z)};
+            continue;
+          }
+          cell.push_back(p);
         }
     g.offsets.assign(1, 0);
     for (const auto &c : cells) {
       g.members.insert(g.members.end(), c.begin(), c.end());
       g.offsets.push_back(static_cast<std::uint32_t>(g.members.size()));
     }
-    grid_ = std::move(g);
+    grids_[leg] = std::move(g);
   }
 
   [[nodiscard]] static std::size_t cell_index(double value, double origin, double cell,
@@ -438,7 +454,7 @@ private:
   // Nearest hit among the items in the cells crossed by the ray between the
   // lowest and highest height of the structure; nothing else can be hit.
   [[nodiscard]] std::optional<Hit> nearest_in_grid(const Ray &ray, double t_max) const {
-    const Grid &g = grid_;
+    const Grid &g = grids_[0];
     const Vec3 inverse{1.0 / ray.direction.x, 1.0 / ray.direction.y, 1.0 / ray.direction.z};
     // Only the cells to visit depend on these heights, so they carry a margin.
     constexpr double margin = 1e-9;
@@ -462,23 +478,117 @@ private:
          ix <= cell_index(std::max(a.x, b.x), g.x0, g.cell, g.nx); ++ix)
       for (std::size_t iy = cell_index(std::min(a.y, b.y), g.y0, g.cell, g.ny);
            iy <= cell_index(std::max(a.y, b.y), g.y0, g.cell, g.ny); ++iy)
-        for (std::uint32_t k = g.offsets[ix * g.ny + iy]; k < g.offsets[ix * g.ny + iy + 1]; ++k) {
-          const Piece &piece = g.members[k];
-          const std::uint32_t item = piece.item;
-          if (seen(tested, item) ||
-              !enters(piece.low, piece.high, ray, inverse, best ? best->t : t_max))
-            continue;
-          tested[next_slot] = item;
-          next_slot = (next_slot + 1) % kMailbox;
-#ifdef OBDEECT_BENCH_COUNTERS
-          ++counters().exact_tests;
-#endif
-          const Obscurer &o = items_[item];
-          if (const auto t = o.intersect(ray, planes_, kMinDistanceM))
-            if (*t < t_max && (!best || *t < best->t || (*t == best->t && o.id < best->id)))
-              best = Hit{*t, o.id};
-        }
+        visit_cell<false>(g, ix * g.ny + iy, ray, inverse, t_max, 0.0, 0.0, best, tested,
+                          next_slot);
     return best;
+  }
+
+  // The same search walking the cells in order along the ray (Amanatides-Woo)
+  // and stopping once the best hit lies before the next cell. A hit at t lies
+  // in a piece box, which is listed in every cell it overlaps, so in the cell
+  // holding ray.at(t); later cells hold only points at or after their entry
+  // parameter.
+  [[nodiscard]] std::optional<Hit> nearest_in_grid_dda(const Grid &g, const Ray &ray,
+                                                       double t_max) const {
+    constexpr double margin = 1e-9;
+    constexpr double infinity = std::numeric_limits<double>::infinity();
+    std::optional<Hit> best;
+    const Vec3 &o = ray.origin, &d = ray.direction;
+    const Vec3 inverse{1.0 / d.x, 1.0 / d.y, 1.0 / d.z};
+    const double ta = (g.z_low - margin - o.z) * inverse.z,
+                 tb = (g.z_high + margin - o.z) * inverse.z;
+    double t0 = std::max(std::min(ta, tb), kMinDistanceM), t1 = std::min(std::max(ta, tb), t_max);
+    const double x_max = g.x0 + g.cell * static_cast<double>(g.nx),
+                 y_max = g.y0 + g.cell * static_cast<double>(g.ny);
+    // Clip to the x-y range of the grid (slab method). A ray parallel to an
+    // axis either stays inside the range or never enters it.
+    const bool x_fixed = d.x == 0.0 || !std::isfinite(inverse.x),
+               y_fixed = d.y == 0.0 || !std::isfinite(inverse.y);
+    if ((x_fixed && (o.x < g.x0 - margin || o.x > x_max + margin)) ||
+        (y_fixed && (o.y < g.y0 - margin || o.y > y_max + margin)))
+      return best;
+    if (!x_fixed) {
+      const double u = (g.x0 - margin - o.x) * inverse.x, w = (x_max + margin - o.x) * inverse.x;
+      t0 = std::max(t0, std::min(u, w));
+      t1 = std::min(t1, std::max(u, w));
+    }
+    if (!y_fixed) {
+      const double u = (g.y0 - margin - o.y) * inverse.y, w = (y_max + margin - o.y) * inverse.y;
+      t0 = std::max(t0, std::min(u, w));
+      t1 = std::min(t1, std::max(u, w));
+    }
+    if (!(t0 <= t1))
+      return best;
+    const Vec3 start = ray.at(t0);
+    std::size_t ix = cell_index(start.x, g.x0, g.cell, g.nx),
+                iy = cell_index(start.y, g.y0, g.cell, g.ny);
+    // Per axis: the parameter of the next cell boundary and the step to the one after.
+    double next_x = infinity, next_y = infinity, step_x = infinity, step_y = infinity;
+    if (!x_fixed) {
+      next_x = (g.x0 + g.cell * static_cast<double>(d.x > 0.0 ? ix + 1 : ix) - o.x) * inverse.x;
+      step_x = g.cell * std::abs(inverse.x);
+    }
+    if (!y_fixed) {
+      next_y = (g.y0 + g.cell * static_cast<double>(d.y > 0.0 ? iy + 1 : iy) - o.y) * inverse.y;
+      step_y = g.cell * std::abs(inverse.y);
+    }
+    std::array<std::uint32_t, kMailbox> tested;
+    tested.fill(kNone);
+    std::size_t next_slot = 0;
+    double t_in = t0;
+    for (std::size_t steps = g.nx + g.ny + 2; steps > 0; --steps) {
+      const double exit = std::min(next_x, next_y);
+      const double za = o.z + d.z * (t_in - margin), zb = o.z + d.z * (std::min(exit, t1) + margin);
+      visit_cell<true>(g, ix * g.ny + iy, ray, inverse, t_max, std::min(za, zb), std::max(za, zb),
+                       best, tested, next_slot);
+      t_in = exit;
+      if ((best && best->t < exit - margin) || exit > t1)
+        break;
+      if (next_x < next_y) {
+        if (d.x > 0.0 ? ix + 1 >= g.nx : ix == 0)
+          break;
+        ix = d.x > 0.0 ? ix + 1 : ix - 1;
+        next_x += step_x;
+      } else {
+        if (d.y > 0.0 ? iy + 1 >= g.ny : iy == 0)
+          break;
+        iy = d.y > 0.0 ? iy + 1 : iy - 1;
+        next_y += step_y;
+      }
+    }
+    return best;
+  }
+
+  // Exact tests of the entries listed in one cell, updating `best`. With a
+  // height window, entries that lie wholly outside [z_low, z_high] (the heights
+  // of the ray inside this cell) are skipped before the box test: a hit inside
+  // this cell is within the window, and a hit in another cell is found there.
+  template <bool kHeightWindow>
+  void visit_cell(const Grid &g, std::size_t cell, const Ray &ray, const Vec3 &inverse,
+                  double t_max, double z_low, double z_high, std::optional<Hit> &best,
+                  std::array<std::uint32_t, kMailbox> &tested, std::size_t &next_slot) const {
+#ifdef OBDEECT_BENCH_COUNTERS
+    ++counters().node_visits;
+#endif
+    for (std::uint32_t k = g.offsets[cell]; k < g.offsets[cell + 1]; ++k) {
+      const Piece &piece = g.members[k];
+      if (kHeightWindow && (piece.high.z < z_low || piece.low.z > z_high))
+        continue;
+      // The box test rejects most pieces and is cheaper than the mailbox.
+      if (!enters(piece.low, piece.high, ray, inverse, best ? best->t : t_max) ||
+          seen(tested, piece.item))
+        continue;
+      const std::uint32_t item = piece.item;
+      tested[next_slot] = item;
+      next_slot = (next_slot + 1) % kMailbox;
+#ifdef OBDEECT_BENCH_COUNTERS
+      ++counters().exact_tests;
+#endif
+      const Obscurer &o = items_[item];
+      if (const auto t = o.intersect(ray, planes_, kMinDistanceM))
+        if (*t < t_max && (!best || *t < best->t || (*t == best->t && o.id < best->id)))
+          best = Hit{*t, o.id};
+    }
   }
 
   // Is `item` in the mailbox? A plain loop: the ring holds only a few entries.
@@ -638,7 +748,7 @@ private:
   std::vector<Obscurer> items_;
   std::vector<Plane> planes_;
   std::array<Tree, 3> trees_;
-  Grid grid_;
+  std::array<Grid, 3> grids_; // By leg, indexed as trees_.
 };
 
 } // namespace obdeect

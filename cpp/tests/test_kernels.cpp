@@ -1,10 +1,13 @@
 // Analytic tests of the random generator, tables, surfaces and obscurers.
 #include "check.hpp"
+#include "legacy_asphere.hpp"
 
 #include "obdeect/model.hpp"
 #include "obdeect/random.hpp"
 #include "obdeect/source.hpp"
 
+#include <bit>
+#include <cstdint>
 #include <optional>
 #include <stdexcept>
 #include <vector>
@@ -294,7 +297,7 @@ void slope_bound() {
 }
 
 // The single-root shortcut must give exactly the hits and misses of the
-// search without it.
+// search without it (and the same points up to the Newton tolerance).
 void single_root_shortcut() {
   const auto m = sst_like_segmented();
   Asphere reference = m.asphere;
@@ -317,8 +320,12 @@ void single_root_shortcut() {
     CHECK(failed == failed_reference);
     CHECK(a.has_value() == b.has_value());
     if (a && b) {
-      CHECK(a->t == b->t);
-      CHECK(a->point.x == b->point.x && a->point.y == b->point.y && a->point.z == b->point.z);
+      // The same root, found from a different start (the shortcut tries the guess
+      // inside the aperture range first): equal up to the Newton tolerance.
+      CHECK_NEAR(a->t, b->t, 1e-9);
+      CHECK_NEAR(a->point.x, b->point.x, 1e-9);
+      CHECK_NEAR(a->point.y, b->point.y, 1e-9);
+      CHECK_NEAR(a->point.z, b->point.z, 1e-9);
       ++hits;
     } else {
       ++misses;
@@ -549,9 +556,84 @@ void obscurer_hierarchy() {
   CHECK(!Obscurers().nearest({{0, 0, 1}, {0, 0, -1}}, Leg::incoming, 10.0));
 }
 
-// Random slender beams (polyhedra with a vertex box) and rods: the grid for steep
-// incoming rays, the hierarchy for every leg and a brute-force loop give the
-// same nearest hit.
+// The nearest obscurer of `leg` by testing every item, with the lowest id on ties.
+std::optional<Obscurers::Hit> brute_force_nearest(const std::vector<Obscurer> &items,
+                                                  const std::vector<Plane> &planes, const Ray &ray,
+                                                  Leg leg, double t_max) {
+  std::optional<Obscurers::Hit> expected;
+  for (const auto &item : items)
+    if (item.legs & leg)
+      if (const auto t = item.intersect(ray, planes, kMinDistanceM))
+        if (*t < t_max &&
+            (!expected || *t < expected->t || (*t == expected->t && item.id < expected->id)))
+          expected = Obscurers::Hit{*t, item.id};
+  return expected;
+}
+
+// nearest() (grids), the hierarchy and the brute-force loop agree bit for bit.
+void check_nearest(const Obscurers &set, const std::vector<Obscurer> &items,
+                   const std::vector<Plane> &planes, const Ray &ray, Leg leg, double t_max,
+                   std::size_t &hits) {
+  const auto expected = brute_force_nearest(items, planes, ray, leg, t_max);
+  for (const auto &found :
+       {set.nearest(ray, leg, t_max), set.nearest_in_hierarchy(ray, leg, t_max)}) {
+    CHECK(found.has_value() == expected.has_value());
+    if (found && expected) {
+      CHECK(found->id == expected->id);
+      CHECK(found->t == expected->t);
+    }
+  }
+  hits += expected.has_value();
+}
+
+// A lattice of vertical and slanted rods whose grid cells have dyadic edges
+// (the lowest box edge is -4.0):
+// rays start exactly on cell boundaries, run along cell edges or parallel to an
+// axis, and the walk along the cells still finds the brute-force hit on every leg.
+void obscurer_grid_boundaries() {
+  std::vector<Obscurer> rods;
+  for (std::uint32_t i = 0; i < 8; ++i)
+    for (std::uint32_t j = 0; j < 8; ++j) {
+      Obscurer rod;
+      rod.kind = Obscurer::Kind::cylinder;
+      rod.id = 100 + 8 * i + j;
+      rod.legs = static_cast<std::uint8_t>(1 + (i + 2 * j) % 7);
+      rod.a = {-3.9 + 0.75 * i, -3.9 + 0.75 * j, 0.0};
+      rod.b = rod.a + Vec3{(i + j) % 3 == 0 ? 0.5 : 0.0, 0.0, 3.0};
+      rod.radius_a = 0.1;
+      rod.bound_a = rod.a;
+      rod.bound_b = rod.b;
+      rod.bound_radius = rod.radius_a;
+      rods.push_back(rod);
+    }
+  const Obscurers set(rods, {});
+  std::size_t hits = 0, rays = 0;
+  for (std::uint64_t k = 0; k < 60000; ++k) {
+    const auto u = uniform4(61, k, Stream::source), w = uniform4(62, k, Stream::source);
+    const auto on_grid = [](double x) { return std::floor(16.0 * x) / 16.0; }; // Multiples of 1/16.
+    // Diagonal, axis-parallel and general directions, up and down. A ray with a
+    // zero component is moved off the plane of a rod's bounding box (which a
+    // ray lying in it may miss by design).
+    const double dx = k % 5 == 0 ? 0.0 : k % 7 == 0 ? 1.0 : 2.0 * w[0] - 1.0;
+    const double dy = k % 11 == 0 ? 0.0 : k % 7 == 0 ? -1.0 : 2.0 * w[1] - 1.0;
+    const Vec3 origin{on_grid(9.0 * u[0] - 4.5) + (dx == 0.0 ? 1.0 / 64.0 : 0.0),
+                      on_grid(9.0 * u[1] - 4.5) + (dy == 0.0 ? 1.0 / 64.0 : 0.0),
+                      k % 2 ? 8.0 : on_grid(4.0 * u[2])};
+    const double dz = k % 13 == 0 ? 1.0 : -(0.5 + w[2]);
+    const Ray ray{origin, normalized({dx, dy, dz})};
+    const double t_max = k % 6 == 0 ? std::numeric_limits<double>::infinity() : 4.0 + 14.0 * w[3];
+    for (const Leg leg : {Leg::incoming, Leg::after_primary, Leg::after_secondary}) {
+      check_nearest(set, rods, {}, ray, leg, t_max, hits);
+      ++rays;
+    }
+  }
+  CHECK(hits > rays / 20);
+}
+
+// Random slender beams (polyhedra with a vertex box) and rods: the grids (steep
+// rays), the hierarchy for every leg and a brute-force loop give the same
+// nearest hit, for rays from outside and from inside the structure, shallow and
+// steep, with finite and infinite limits and with a zero direction component.
 void obscurer_grid() {
   std::vector<Obscurer> items;
   std::vector<Plane> planes;
@@ -596,28 +678,16 @@ void obscurer_grid() {
     const auto u = uniform4(43, k, Stream::source), w = uniform4(44, k, Stream::source);
     // Mostly steep rays, some shallow ones.
     const double tilt = k % 4 == 0 ? 1.5 : 0.8;
-    const Ray ray{{20 * u[0] - 10, 20 * u[1] - 10, 20.0},
-                  normalized({tilt * (w[0] - 0.5), tilt * (w[1] - 0.5), -1.0})};
-    const double t_max = 8.0 + 20.0 * w[2];
+    const double dx = k % 17 == 0 ? 0.0 : tilt * (w[0] - 0.5);
+    const double dy = k % 19 == 0 ? 0.0 : tilt * (w[1] - 0.5);
+    // Every fifth ray starts inside the structure's height range, every eighth goes up.
+    const Ray ray{{20 * u[0] - 10, 20 * u[1] - 10, k % 5 == 0 ? 12.0 * u[3] : 20.0},
+                  normalized({dx, dy, k % 8 == 0 ? 1.0 : -1.0})};
+    const double t_max = k % 6 == 0 ? std::numeric_limits<double>::infinity() : 8.0 + 20.0 * w[2];
     const Leg leg = k % 3 == 0   ? Leg::incoming
                     : k % 3 == 1 ? Leg::after_primary
                                  : Leg::after_secondary;
-    std::optional<Obscurers::Hit> expected;
-    for (const auto &item : items)
-      if (item.legs & leg)
-        if (const auto t = item.intersect(ray, planes, kMinDistanceM))
-          if (*t < t_max &&
-              (!expected || *t < expected->t || (*t == expected->t && item.id < expected->id)))
-            expected = Obscurers::Hit{*t, item.id};
-    for (const auto &found :
-         {set.nearest(ray, leg, t_max), set.nearest_in_hierarchy(ray, leg, t_max)}) {
-      CHECK(found.has_value() == expected.has_value());
-      if (found && expected) {
-        CHECK(found->id == expected->id);
-        CHECK(found->t == expected->t);
-      }
-    }
-    hits += expected.has_value();
+    check_nearest(set, items, planes, ray, leg, t_max, hits);
     steep += leg == Leg::incoming && std::abs(ray.direction.z) >= 0.5;
   }
   CHECK(hits > 1500 && steep > 10000);
@@ -786,6 +856,169 @@ void transmission() {
   CHECK_NEAR(t.at({0, 0, -1}), 0.9, 1e-15);
   CHECK_NEAR(t.at(normalized({0.1, 0, -1})),
              0.9 / (1 + 0.5 * std::pow(0.1 / std::sqrt(1.01) / 0.1, 2)), 1e-12);
+
+  // Random directions near the axis: deterministic, from the source stream.
+  const auto direction = [](std::uint64_t i) {
+    const auto u = uniform4(1234, i, Stream::source);
+    return normalized({u[0] - 0.5, u[1] - 0.5, u[2] + 0.1});
+  };
+  const auto bits = [](double x) { return std::bit_cast<std::uint64_t>(x); };
+  // Amplitude 0: exactly on_axis, bit for bit, for every direction.
+  for (const double on_axis : {1.0, 0.9, 0.123456789}) {
+    const TelescopeTransmission constant{on_axis, 0.0, 0.1, 2.0, 1.0};
+    for (std::uint64_t i = 0; i < 1000; ++i)
+      CHECK(bits(constant.at(direction(i))) == bits(on_axis));
+  }
+  // Amplitude not 0: the formula of the header, bit for bit.
+  const TelescopeTransmission varying[] = {{0.9, 0.5, 0.1, 2.0, 1.0}, {0.95, 0.3, 0.2, 1.7, 1.3}};
+  for (const auto &v : varying)
+    for (std::uint64_t i = 0; i < 1000; ++i) {
+      const Vec3 d = direction(i);
+      const double s = std::hypot(d.x, d.y);
+      const double formula =
+          v.on_axis /
+          std::pow(1.0 + v.amplitude * std::pow(s / v.angular_scale_rad, v.power), v.outer_power);
+      CHECK(bits(v.at(d)) == bits(formula));
+    }
+}
+
+// Three polynomial surfaces: a paraboloid that was never prepared (the lazy
+// path of the r^2 members), and an SST-like and an SCT-like asphere that were.
+std::vector<Asphere> polynomial_surfaces() {
+  std::vector<Asphere> surfaces;
+  surfaces.push_back(Asphere{1, 0.0, 0.0, 6.0, 1.0, {0.0, 1.0 / 40.0}});
+  std::vector<double> sst_cm{0.0,          0.000608051,  -7.36248e-10, 5.82125e-15,
+                             -6.76447e-20, -3.89542e-24, -5.28036e-29, 2.99107e-34,
+                             4.39153e-38,  6.17433e-43,  -2.73586e-47};
+  Asphere sst{2, 0.0, 0.2, 2.12, 1.0, {}};
+  for (std::size_t i = 0; i < sst_cm.size(); ++i)
+    sst.coefficients.push_back(sst_cm[i] * std::pow(0.01, 1.0 - 2.0 * static_cast<double>(i)));
+  sst.prepare();
+  surfaces.push_back(sst);
+  Asphere sct{3, 0.0, 0.0, 2.7, 5.5863, {}};
+  for (const double c : {1.5, 0.416667, 0.145816, -0.712012, 4.17685, -23.1617, 118.844, -520.501,
+                         1802.98, -4605.3, 8019.1, -8422.9, 4004.61})
+    sct.coefficients.push_back(c * 5.5863);
+  sct.prepare();
+  surfaces.push_back(sct);
+  return surfaces;
+}
+
+// sag_q and slope_over_r_q reproduce sag(r) and slope(r); no special case at r = 0.
+void asphere_in_r_squared() {
+  for (const Asphere &a : polynomial_surfaces()) {
+    const double inv_scale2 = 1.0 / (a.scale * a.scale);
+    for (int k = 1; k <= 100000; ++k) {
+      const double r = a.outer_radius * k / 100000.0, q = r * r * inv_scale2;
+      const double sag = a.sag(r), slope = a.slope(r);
+      CHECK(std::abs(a.sag_q(q) - sag) <= 1e-12 * std::abs(sag) + 1e-300);
+      CHECK(std::abs(a.slope_over_r_q(q) * r - slope) <= 1e-12 * std::abs(slope) + 1e-300);
+    }
+    // On the axis the slope term vanishes by itself.
+    CHECK(std::isfinite(a.slope_over_r_q(0.0)));
+    const Vec3 n = a.normal_at({0.0, 0.0, a.sag(0.0)});
+    CHECK(n.x == 0.0 && n.y == 0.0 && n.z == 1.0);
+    const Ray axis{{0.0, 0.0, a.sag(0.0) + 50.0}, {0.0, 0.0, -1.0}};
+    bool failed = false;
+    if (a.inner_radius == 0.0) {
+      const auto hit = a.intersect(axis, kMinDistanceM, [](const Vec3 &) { return true; }, failed);
+      CHECK(!failed && hit.has_value());
+      if (hit) {
+        CHECK_NEAR(hit->t, 50.0, 1e-9);
+        CHECK(hit->normal.x == 0.0 && hit->normal.y == 0.0 && hit->normal.z == 1.0);
+      }
+    }
+  }
+}
+
+// The r^2 intersection finds the points and normals of the hypot-based one.
+void asphere_against_legacy() {
+  const auto accept = [](const Vec3 &) { return true; };
+  std::size_t both = 0, differ = 0;
+  for (const Asphere &a : polynomial_surfaces())
+    for (std::uint64_t k = 0; k < 100000; ++k) {
+      const auto u = uniform4(17 + a.id, k, Stream::source);
+      const double angle = k % 4 == 0 ? 1e-6 * u[2] : 0.05 * (u[2] - 0.5);
+      const Vec3 d = normalized({angle, 0.03 * (u[3] - 0.5) * (k % 4 != 0), -1});
+      const double reach = 1.1 * a.outer_radius;
+      const Vec3 target{2 * reach * (u[0] - 0.5), 2 * reach * (u[1] - 0.5), 0.0};
+      const double distance = k % 2 ? 1e4 : 30.0;
+      const Ray ray{target - d * distance, d};
+      bool failed_new = false, failed_old = false;
+      const auto n = a.intersect(ray, kMinDistanceM, accept, failed_new);
+      const auto o = legacy::intersect(a, ray, kMinDistanceM, accept, failed_old);
+      CHECK(failed_new == failed_old);
+      if (n && o) {
+        ++both;
+        CHECK_NEAR(n->t, o->t, 1e-9);
+        CHECK_NEAR(n->point.x, o->point.x, 1e-9);
+        CHECK_NEAR(n->point.y, o->point.y, 1e-9);
+        CHECK_NEAR(n->point.z, o->point.z, 1e-9);
+        CHECK_NEAR(n->normal.x, o->normal.x, 1e-9);
+        CHECK_NEAR(n->normal.y, o->normal.y, 1e-9);
+        CHECK_NEAR(n->normal.z, o->normal.z, 1e-9);
+      } else if (n.has_value() != o.has_value()) {
+        // Allowed only within 1e-8 m of an aperture edge.
+        ++differ;
+        const Vec3 p = n ? n->point : o->point;
+        const double r = std::hypot(p.x, p.y);
+        CHECK(std::abs(r - a.outer_radius) <= 1e-8 ||
+              (a.inner_radius > 0.0 && std::abs(r - a.inner_radius) <= 1e-8));
+      }
+    }
+  CHECK(both > 100000);
+  CHECK(differ <= 5);
+}
+
+// Convex secondary-like aspheres (rays travel upwards from below the vertex
+// plane, so the second root of the first-guess paraboloid lies beyond the start).
+std::vector<Asphere> secondary_like_surfaces() {
+  std::vector<Asphere> surfaces;
+  Asphere sst{4, 3.1084, 0.0, 0.9, 1.0, {0.0, -0.2335, -0.1, 0.05}};
+  sst.prepare();
+  surfaces.push_back(sst);
+  Asphere sct{5, 3.0, 0.0, 1.2, 1.0, {0.0, -0.3, 0.12, -0.2, 0.15}};
+  sct.prepare();
+  surfaces.push_back(sct);
+  Asphere hole{6, 3.0, 0.1, 1.2, 1.0, {0.0, -0.3, 0.12, -0.2, 0.15}};
+  surfaces.push_back(hole); // Never prepared.
+  return surfaces;
+}
+
+// The hits of the current intersect equal those of the reference copy, also on
+// secondary-like surfaces where the root-ordering of the first guesses matters.
+void asphere_secondary_against_legacy() {
+  const auto accept = [](const Vec3 &) { return true; };
+  std::size_t both = 0, differ = 0;
+  for (const Asphere &a : secondary_like_surfaces())
+    for (std::uint64_t k = 0; k < 100000; ++k) {
+      const auto u = uniform4(31 + a.id, k, Stream::source);
+      const double reach = 1.3 * a.outer_radius;
+      const Vec3 origin{2 * reach * (u[0] - 0.5), 2 * reach * (u[1] - 0.5), 0.3 * u[2]};
+      const Vec3 target{0.5 * reach * (u[3] - 0.5), 0.5 * reach * (u[2] - 0.5), a.sag(0.0)};
+      const Vec3 d = normalized(target - origin + Vec3{0.6 * (u[1] - 0.5), 0.6 * (u[0] - 0.5), 0});
+      const Ray ray{origin, d};
+      bool failed_new = false, failed_old = false;
+      const auto n = a.intersect(ray, kMinDistanceM, accept, failed_new);
+      const auto o = legacy::intersect(a, ray, kMinDistanceM, accept, failed_old);
+      CHECK(failed_new == failed_old);
+      if (n && o) {
+        ++both;
+        CHECK_NEAR(n->t, o->t, 1e-9);
+        CHECK_NEAR(n->point.x, o->point.x, 1e-9);
+        CHECK_NEAR(n->point.y, o->point.y, 1e-9);
+        CHECK_NEAR(n->point.z, o->point.z, 1e-9);
+      } else if (n.has_value() != o.has_value()) {
+        ++differ;
+        const Vec3 p = n ? n->point : o->point;
+        const double r = std::hypot(p.x, p.y);
+        std::fprintf(stderr, "secondary %u ray %llu: differing hit/miss at r = %.12g\n", a.id,
+                     static_cast<unsigned long long>(k), r);
+        CHECK(std::abs(r - a.outer_radius) <= 1e-8 || std::abs(r - a.inner_radius) <= 1e-8);
+      }
+    }
+  CHECK(both > 50000);
+  CHECK(differ <= 5);
 }
 
 } // namespace
@@ -797,6 +1030,9 @@ void all_tests() {
   facets();
   facet_prefilter();
   aspheres();
+  asphere_in_r_squared();
+  asphere_against_legacy();
+  asphere_secondary_against_legacy();
   slope_bound();
   single_root_shortcut();
   segment_grid();
@@ -804,6 +1040,7 @@ void all_tests() {
   obscurers();
   obscurer_hierarchy();
   obscurer_grid();
+  obscurer_grid_boundaries();
   sources();
   densities();
   emitters();

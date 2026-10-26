@@ -13,6 +13,8 @@ _EXPORTS = {
     "DETECTED": "obdeect.model",
     "STATUS_NAMES": "obdeect.model",
     "OpticalModel": "obdeect.model",
+    "ThreadPool": "obdeect.model",
+    "trace_many": "obdeect.model",
     "ModelError": "obdeect.formats",
 }
 __all__ = list(_EXPORTS)

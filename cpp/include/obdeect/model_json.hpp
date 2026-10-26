@@ -17,11 +17,6 @@ namespace obdeect {
 
 inline constexpr std::string_view kModelFormat = "obdeect.optical-model.v2";
 
-// Thrown for any invalid optical model; the message names the JSON path.
-struct ModelError : std::runtime_error {
-  using std::runtime_error::runtime_error;
-};
-
 namespace detail {
 
 // A JSON value together with its path, for precise error messages.

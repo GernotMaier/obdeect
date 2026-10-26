@@ -5,12 +5,12 @@ import math
 
 import numpy as np
 import pytest
-from obdeect import ModelError, OpticalModel
+from obdeect import ModelError, OpticalModel, ThreadPool, trace_many
 from obdeect.cli import main
 from obdeect.model import DETECTED, STATUS_NAMES
 from obdeect.psf import containment, summary
 from obdeect.repository import read_telescope
-from telescopes import dual, record, segmented, write_simulation_models
+from telescopes import STRUCTURE, dual, record, segmented, write_simulation_models
 
 
 def model_of(records_files, **options):
@@ -310,3 +310,61 @@ def test_unknown_output_columns_are_rejected():
         model.trace(photons, seed=6, outputs=["position_m", "nonsense"])
     with pytest.raises(ValueError, match="detected_only"):
         model.trace(photons, seed=6, outputs=["index"])
+
+
+def test_pool_trace_equals_threads_trace():
+    model, photons, _ = _photons_and_full_trace(60_000)
+    pool = ThreadPool(3)
+    assert pool.size == 3
+    assert ThreadPool(0).size >= 1
+    for options in ({}, {"outputs": ["index", "position_m"], "detected_only": True}):
+        by_threads = model.trace(photons, seed=6, threads=2, **options)
+        by_pool = model.trace(photons, seed=6, threads=7, pool=pool, **options)
+        assert set(by_threads) == set(by_pool)
+        for name in by_threads:
+            assert np.array_equal(by_threads[name], by_pool[name], equal_nan=True), name
+
+
+def test_classify_losses_only_renames_photons_missing_the_primary():
+    # The mast of the structure sits on the incoming leg, beside the dish.
+    model = model_of(segmented(telescope_structure=STRUCTURE))
+    photons = model.star_photons(60_000, seed=5)
+    full = model.trace(photons, seed=6, threads=1)
+    default = model.trace(photons, seed=6, threads=1, classify_losses=True)
+    for name in full:
+        assert np.array_equal(default[name], full[name], equal_nan=True), name
+    fast = model.trace(photons, seed=6, threads=1, classify_losses=False)
+    differ = fast["status"] != full["status"]
+    assert np.count_nonzero(differ) > 0
+    blocked, missed = STATUS_NAMES.index("blocked"), STATUS_NAMES.index("missed_primary")
+    assert np.all(full["status"][differ] == blocked)
+    assert np.all(fast["status"][differ] == missed)
+    same = ~differ
+    for name in full:
+        assert np.array_equal(fast[name][same], full[name][same], equal_nan=True), name
+    options = {"classify_losses": False, "outputs": ["status"]}
+    many = trace_many([(model, photons, options)], seed=6, pool=ThreadPool(2))[0]
+    assert np.array_equal(many["status"], fast["status"])
+
+
+def test_trace_many_equals_one_trace_per_request():
+    models = [model_of(segmented()), model_of(dual()), model_of(segmented(), seed=2)]
+    photons = [m.star_photons(count, seed=5) for m, count in zip(models, (30_000, 9_000, 20_001))]
+    options = [
+        {},
+        {"detected_only": True, "outputs": ["index", "position_m", "weight"]},
+        {"apply_responses": False, "outputs": ["status", "position_m"]},
+    ]
+    requests = list(zip(models, photons, options, strict=True))
+    for threads in (1, 4):
+        many = trace_many(requests, seed=6, pool=ThreadPool(threads))
+        assert len(many) == 3
+        for (model, request_photons, request_options), result in zip(requests, many, strict=True):
+            expected = model.trace(request_photons, seed=6, threads=1, **request_options)
+            assert set(result) == set(expected)
+            for name in expected:
+                assert np.array_equal(result[name], expected[name], equal_nan=True), name
+    with pytest.raises(TypeError, match="unknown trace options"):
+        trace_many([(models[0], photons[0], {"thread": 1})], seed=6, pool=ThreadPool(1))
+    with pytest.raises(ValueError, match="detected_only"):
+        trace_many([(models[0], photons[0], {"outputs": ["index"]})], seed=6, pool=ThreadPool(1))

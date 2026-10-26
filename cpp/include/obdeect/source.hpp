@@ -79,6 +79,7 @@ public:
       throw std::invalid_argument("a density must have a positive integral");
   }
 
+  [[nodiscard]] double lower() const { return x_.front(); }
   [[nodiscard]] double integral() const { return cdf_.back(); }
   [[nodiscard]] double maximum() const { return *std::max_element(y_.begin(), y_.end()); }
 

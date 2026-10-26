@@ -24,7 +24,14 @@ namespace obdeect {
 }
 
 // Independent random streams of one photon.
-enum class Stream : std::uint32_t { source = 0, primary_scatter = 1, secondary_scatter = 2 };
+// New values are appended; existing ones are never renumbered.
+enum class Stream : std::uint32_t {
+  source = 0,
+  primary_scatter = 1,
+  secondary_scatter = 2,
+  thinning = 3,
+  wavelength = 4
+};
 
 // Four uniform deviates in the open interval (0, 1).
 [[nodiscard]] constexpr std::array<double, 4> uniform4(std::uint64_t seed, std::uint64_t photon_id,
