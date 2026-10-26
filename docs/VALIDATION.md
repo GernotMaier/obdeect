@@ -272,6 +272,14 @@ entrance disk), microseconds per photon:
   changes, below): SSTS-17 tracing 0.61 to 0.50 us per photon. Single-mirror
   telescopes are unchanged (interleaved runs of LSTN-01 against the previous
   build agree within the timing noise of 5%).
+- Segment lookup: a cell of the segment grid that lies wholly inside one
+  segment, or in none, answers without testing a segment (proven with a margin
+  of 1e-9 m over the cell and the mirror's height range there; other points
+  take the full test). 88% of the SSTS-17 lookups are answered so, 27 to 10 ns
+  per lookup; tracing 287 to 279 ns per photon (Apple M3, one thread). Results
+  are bit-identical (replay of 6*10^6 photons per model). A plain loop over
+  the few obscurers of a leg instead of the bounding-box hierarchy gained 1%
+  and was not kept.
 
 Calibration light, the stage before sim_telarray's camera simulation (which is
 the same for both):

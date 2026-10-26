@@ -271,7 +271,7 @@ SegmentedAsphere sst_like_segmented() {
       m.segments.push_back(s);
       m.frames.push_back(s.tangent_frame(m.asphere));
     }
-  m.grid = SegmentGrid(m.segments, m.frames, m.asphere.outer_radius);
+  m.grid = SegmentGrid(m.segments, m.frames, m.asphere);
   return m;
 }
 
@@ -389,7 +389,7 @@ void segment_grid() {
   // Overlapping footprints: the lowest id must win.
   other.centre_x = 0.2;
   add(other, 1);
-  m.grid = SegmentGrid(m.segments, m.frames, m.asphere.outer_radius);
+  m.grid = SegmentGrid(m.segments, m.frames, m.asphere);
   std::size_t found = 0, overlapping = 0;
   for (std::uint64_t k = 0; k < 300000; ++k) {
     const auto u = uniform4(31, k, Stream::source);
@@ -412,6 +412,178 @@ void segment_grid() {
     const Vec3 p{x, y, hexagons.asphere.sag(std::hypot(x, y))};
     CHECK(hexagons.grid.find(hexagons.segments, hexagons.frames, p) == hexagons.lowest_id(p));
   }
+}
+
+// Cell verdicts: find() equals the brute-force loop (the earlier algorithm) for
+// random surface points, points on cell borders, segment edges and corners, and
+// points off the surface in z (which must fall back to the full test).
+struct VerdictChecks {
+  const SegmentedAsphere &m;
+  std::size_t points{}, mismatches{};
+
+  void check(double x, double y, double z) {
+    const Vec3 p{x, y, z};
+    ++points;
+    if (m.grid.find(m.segments, m.frames, p) != m.lowest_id(p))
+      ++mismatches;
+  }
+
+  // A point on the surface (z jitter +-1e-8 m) or, with `off`, off it by up to 1 m.
+  void surface(double x, double y, double jitter, double off) {
+    check(x, y, m.asphere.sag(std::hypot(x, y)) + 1e-8 * (2.0 * jitter - 1.0) + off);
+  }
+
+  void random_points(std::uint64_t seed, std::size_t count) {
+    const double outer = m.asphere.outer_radius;
+    for (std::uint64_t k = 0; k < count; ++k) {
+      const auto u = uniform4(seed, k, Stream::source);
+      // Mostly on the surface; every 10th point off it by 1e-5 .. 1 m either way.
+      const double off =
+          k % 10 == 9 ? (u[3] < 0.5 ? -1.0 : 1.0) * std::pow(10.0, -5.0 * u[2]) : 0.0;
+      surface(1.05 * outer * (2.0 * u[0] - 1.0), 1.05 * outer * (2.0 * u[1] - 1.0), u[3], off);
+    }
+  }
+
+  void cell_borders(std::uint64_t seed, std::size_t count) {
+    const double outer = m.asphere.outer_radius, cell = 2.0 * outer / SegmentGrid::kCells;
+    for (std::uint64_t k = 0; k < count; ++k) {
+      const auto u = uniform4(seed, k, Stream::source);
+      const double border = -outer + cell * std::floor(u[0] * (SegmentGrid::kCells + 1)),
+                   other = outer * (2.0 * u[1] - 1.0),
+                   shift = (u[2] < 0.5 ? -1.0 : 1.0) * std::pow(10.0, -12.0 * u[3]);
+      surface(border + shift * 1e-3, other, u[3], 0.0);
+      surface(other, border + shift * 1e-3, u[2], 0.0);
+      // A cell corner.
+      const double border2 = -outer + cell * std::floor(u[1] * (SegmentGrid::kCells + 1));
+      surface(border + shift * 1e-6, border2 - shift * 1e-6, u[3], 0.0);
+    }
+  }
+
+  // Points within 1e-9 .. 1e-6 m of the edges and corners of each segment, found
+  // by bisection along rays from its (inside) centre point.
+  void edges(std::uint64_t seed, std::size_t rays_per_segment) {
+    for (std::size_t i = 0; i < m.segments.size(); ++i) {
+      const auto &s = m.segments[i];
+      double cx = s.centre_x, cy = s.centre_y;
+      if (s.shape == Segment::Shape::polygon) {
+        cx = cy = 0.0;
+        for (const auto &v : s.vertices) {
+          cx += v[0] / static_cast<double>(s.vertices.size());
+          cy += v[1] / static_cast<double>(s.vertices.size());
+        }
+      }
+      for (std::size_t k = 0; k < rays_per_segment; ++k) {
+        const auto u = uniform4(seed + i, k, Stream::source);
+        // The first 24 rays point at multiples of 15 degrees (hexagon corners
+        // and edge midpoints for the unrotated hexagons).
+        const double angle =
+            k < 24 ? 0.26179938779914943 * static_cast<double>(k) : 6.283185307179586 * u[0];
+        const double dx = std::cos(angle), dy = std::sin(angle);
+        const auto inside = [&](double r) {
+          const double x = cx + r * dx, y = cy + r * dy;
+          return s.contains(m.frames[i], {x, y, m.asphere.sag(std::hypot(x, y))});
+        };
+        double lo = 0.0, hi = 1.0;
+        if (!inside(lo) || inside(hi))
+          continue;
+        for (int it = 0; it < 80; ++it)
+          (inside(0.5 * (lo + hi)) ? lo : hi) = 0.5 * (lo + hi);
+        for (const double d : {-1e-6, -1e-8, -1e-9, 0.0, 1e-9, 1e-8, 1e-6}) {
+          const double r = lo + d * (0.5 + u[1]);
+          surface(cx + r * dx, cy + r * dy, u[2], 0.0);
+        }
+      }
+    }
+  }
+};
+
+void segment_verdicts() {
+  SegmentedAsphere hexagons = sst_like_segmented();
+  // A mirror of convex polygons of both orientations, a triangle, and
+  // overlapping footprints.
+  SegmentedAsphere polygons = sst_like_segmented();
+  polygons.segments.clear();
+  polygons.frames.clear();
+  std::uint32_t id = 50;
+  const auto add = [&](SegmentedAsphere &m, Segment s) {
+    s.id = id++ % 17 + 1; // Ids out of order, with duplicates.
+    m.segments.push_back(s);
+    m.frames.push_back(s.tangent_frame(m.asphere));
+  };
+  Segment polygon;
+  polygon.shape = Segment::Shape::polygon;
+  polygon.vertices = {{-1.5, -0.5}, {-0.3, -0.6}, {-0.2, 0.7}, {-1.4, 0.9}};
+  add(polygons, polygon);
+  polygon.vertices = {{-0.3, -0.6}, {1.0, -1.2}, {1.1, 0.0}, {-0.2, 0.7}}; // Shares an edge.
+  add(polygons, polygon);
+  polygon.vertices = {{0.2, 0.8}, {1.7, 0.6}, {0.9, 1.7}}; // Clockwise triangle.
+  std::reverse(polygon.vertices.begin(), polygon.vertices.end());
+  add(polygons, polygon);
+  polygon.vertices = {{-1.0, 1.0}, {-0.2, 1.0}, {0.1, 1.5}, {-0.5, 1.9}, {-1.1, 1.6}};
+  add(polygons, polygon);
+  polygon.vertices = {{-0.8, -1.9}, {0.8, -1.9}, {0.8, -0.9}, {-0.8, -0.9}}; // Rectangle.
+  add(polygons, polygon);
+  polygons.grid = SegmentGrid(polygons.segments, polygons.frames, polygons.asphere);
+  // Squares, circles and rotated hexagons, overlapping.
+  SegmentedAsphere shapes = sst_like_segmented();
+  shapes.segments.clear();
+  shapes.frames.clear();
+  Segment s;
+  s.shape = Segment::Shape::square;
+  s.centre_x = 1.0;
+  s.centre_y = 0.5;
+  s.half_width = 0.4;
+  s.rotation = 0.3;
+  add(shapes, s);
+  s.shape = Segment::Shape::circle;
+  s.centre_x = -1.0;
+  s.centre_y = 0.9;
+  add(shapes, s);
+  s.shape = Segment::Shape::hexagon;
+  s.centre_x = 0.1;
+  s.centre_y = -1.2;
+  s.rotation = 0.7;
+  add(shapes, s);
+  s.centre_x = 0.3;
+  add(shapes, s);
+  s.centre_x = -1.1;
+  s.centre_y = -0.6;
+  s.half_width = 0.25;
+  s.rotation = 0.0;
+  add(shapes, s);
+  shapes.grid = SegmentGrid(shapes.segments, shapes.frames, shapes.asphere);
+
+  std::size_t decided_total = 0;
+  for (SegmentedAsphere *m : {&hexagons, &polygons, &shapes}) {
+    VerdictChecks checks{*m};
+    checks.random_points(41, 1'000'000);
+    checks.cell_borders(42, 50'000);
+    checks.edges(43, 600);
+    CHECK(checks.points > 1'000'000);
+    CHECK(checks.mismatches == 0);
+    // Most of the grid is decided for these mirrors.
+    CHECK(m->grid.decided_cells() > SegmentGrid::kCells * SegmentGrid::kCells / 2);
+    decided_total += m->grid.decided_cells();
+  }
+  CHECK(decided_total > 0);
+  // Sector segments only get verdicts for cells they do not reach.
+  auto sectors = sst_like_segmented();
+  sectors.segments.clear();
+  sectors.frames.clear();
+  Segment sector;
+  sector.id = 1;
+  sector.shape = Segment::Shape::annular_sector;
+  sector.inner_radius = 0.3;
+  sector.outer_radius = 1.9;
+  sector.span = 6.0;
+  sector.gap = 0.02;
+  sectors.segments.push_back(sector);
+  sectors.frames.push_back(sector.tangent_frame(sectors.asphere));
+  sectors.grid = SegmentGrid(sectors.segments, sectors.frames, sectors.asphere);
+  CHECK(sectors.grid.decided_cells() < SegmentGrid::kCells * SegmentGrid::kCells);
+  VerdictChecks sector_checks{sectors};
+  sector_checks.random_points(44, 100'000);
+  CHECK(sector_checks.mismatches == 0);
 }
 
 void segments() {
@@ -1049,6 +1221,7 @@ void all_tests() {
   slope_bound();
   single_root_shortcut();
   segment_grid();
+  segment_verdicts();
   segments();
   obscurers();
   obscurer_hierarchy();
