@@ -197,10 +197,10 @@ entrance disk), microseconds per photon:
 
 | Telescope | sim_telarray as simtools runs it (imaging list) | sim_telarray, no imaging list | obdeect sampling + tracing | obdeect tracing only |
 | --- | --- | --- | --- | --- |
-| LSTN-01 | 1.82 | 0.32 | 0.32 | 0.25 |
-| MSTN-07 | 1.58 | 0.30 | 0.30 | 0.23 |
-| MSTS-04 (with `telescope_structure`) | 1.60 | 0.30 | 0.46 | 0.39 |
-| SSTS-17 | 1.20 | 0.29 | 0.68 | 0.61 |
+| LSTN-01 | 1.95 | 0.33 | 0.33 | 0.26 |
+| MSTN-07 | 1.68 | 0.31 | 0.31 | 0.23 |
+| MSTS-04 (with `telescope_structure`) | 1.65 | 0.31 | 0.43 | 0.36 |
+| SSTS-17 | 1.22 | 0.30 | 0.71 | 0.64 |
 
 - Per core, obdeect samples and traces single-mirror telescopes as fast as
   sim_telarray without its imaging list; the applications gain from writing no

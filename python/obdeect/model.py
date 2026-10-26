@@ -18,6 +18,7 @@ from obdeect.repository import read_telescope
 
 STATUS_NAMES: tuple[str, ...] = _core.STATUS_NAMES
 DETECTED = STATUS_NAMES.index("detected")
+ThreadPool = _core.ThreadPool
 
 
 class OpticalModel:
@@ -261,6 +262,8 @@ class OpticalModel:
         direct: bool = False,
         outputs: Sequence[str] | None = None,
         detected_only: bool = False,
+        classify_losses: bool = True,
+        pool: ThreadPool | None = None,
     ) -> dict[str, np.ndarray]:
         """Trace photons; returns per-photon arrays (see docs/USER_GUIDE.md).
 
@@ -276,25 +279,171 @@ class OpticalModel:
         photons with status ``detected`` are returned, in input order, and the
         extra column ``index`` (their row in the input) becomes available.
         An unknown column raises ``ValueError``.
+
+        With `classify_losses` False a photon that misses the primary mirror
+        is reported as ``missed_primary`` even where it would be ``blocked``
+        before missing it; detected photons are the same either way.
+
+        With a `pool` (a `ThreadPool`) its threads run the work and `threads`
+        is ignored; the results are the same.
         """
-
-        def column(name: str, dtype: type) -> np.ndarray:
-            return np.ascontiguousarray(photons[name], dtype=dtype)
-
+        arrays = _photon_arrays(photons)
         return self._native.trace(
-            column("position_m", np.float64),
-            column("direction", np.float64),
-            column("wavelength_nm", np.float64),
-            column("time_ns", np.float64),
-            column("weight", np.float64),
-            column("photon_id", np.uint64),
+            arrays["position_m"],
+            arrays["direction"],
+            arrays["wavelength_nm"],
+            arrays["time_ns"],
+            arrays["weight"],
+            arrays["photon_id"],
             seed=seed,
             apply_responses=apply_responses,
             threads=threads,
             direct=direct,
             outputs=None if outputs is None else list(outputs),
             detected_only=detected_only,
+            classify_losses=classify_losses,
+            pool=pool,
         )
+
+    def trace_bunches(
+        self,
+        bunches: Mapping[str, np.ndarray],
+        *,
+        seed: int,
+        frame_rotation: np.ndarray,
+        frame_offset_m: Sequence[float],
+        length_unit_m: float,
+        plane_z: float,
+        acceptance: tuple[np.ndarray, np.ndarray, np.ndarray] | None = None,
+        wavelength_density: tuple[np.ndarray, np.ndarray] | None = None,
+        roulette: bool = True,
+        classify_losses: bool = True,
+        pool: ThreadPool | None = None,
+        threads: int = 0,
+    ) -> dict[str, np.ndarray]:
+        """Trace photon bunches of an air shower (see docs/USER_GUIDE.md).
+
+        `bunches` holds x, y, cx, cy, time_ns, zem, size, wavelength_nm (all
+        float32; wavelength 0 means "sample one from `wavelength_density`")
+        and bunch_id (uint64, unique per bunch for one `seed`). `frame_rotation`
+        (3 x 3, input to telescope frame), `frame_offset_m`, `length_unit_m`
+        (metres per input length unit) and `plane_z` (input units) place the
+        input plane in the telescope frame. `acceptance` is
+        ``(wavelength_nm, zem_m, values)`` with values (n_wavelength, n_zem) in
+        [0, 1]; `wavelength_density` is ``(nm, values)``.
+
+        Each photon of a bunch is thinned by the acceptance and the model's
+        response bound, traced, and, with `roulette`, kept with the probability
+        weight / bound (survivors have weight 1; without it they carry that
+        ratio as weight). Returns the surviving photons as columns position_m,
+        direction, time_ns, weight, wavelength_nm, bunch_index (input row) and
+        sub_photon, in input order. Invalid input raises ``ValueError`` before
+        any tracing. The result does not depend on `threads` or `pool`.
+        """
+        dtypes = {
+            "x": np.float32,
+            "y": np.float32,
+            "cx": np.float32,
+            "cy": np.float32,
+            "time_ns": np.float32,
+            "zem": np.float32,
+            "size": np.float32,
+            "wavelength_nm": np.float32,
+            "bunch_id": np.uint64,
+        }
+        arrays = {
+            name: np.ascontiguousarray(bunches[name], dtype=dtype) for name, dtype in dtypes.items()
+        }
+        rotation = np.ascontiguousarray(frame_rotation, dtype=np.float64)
+        if rotation.shape != (3, 3):
+            raise ValueError("frame_rotation must be a 3 x 3 matrix")
+        offset = np.ascontiguousarray(frame_offset_m, dtype=np.float64)
+        if acceptance is not None:
+            wavelengths, heights, values = (np.asarray(a, dtype=np.float64) for a in acceptance)
+            if wavelengths.ndim != 1 or heights.ndim != 1:
+                raise ValueError("acceptance axes must be one-dimensional")
+            if values.shape != (wavelengths.size, heights.size):
+                raise ValueError("acceptance values must have shape (n_wavelength, n_zem)")
+            acceptance = (
+                np.ascontiguousarray(wavelengths),
+                np.ascontiguousarray(heights),
+                np.ascontiguousarray(values).ravel(),
+            )
+        if wavelength_density is not None:
+            nodes, weights = (np.ascontiguousarray(a, dtype=np.float64) for a in wavelength_density)
+            if nodes.ndim != 1 or nodes.shape != weights.shape:
+                raise ValueError("wavelength_density needs two equally long 1-D arrays")
+            wavelength_density = (nodes, weights)
+        return self._native.trace_bunches(
+            arrays["x"],
+            arrays["y"],
+            arrays["cx"],
+            arrays["cy"],
+            arrays["time_ns"],
+            arrays["zem"],
+            arrays["size"],
+            arrays["wavelength_nm"],
+            arrays["bunch_id"],
+            rotation.ravel(),
+            offset,
+            float(length_unit_m),
+            float(plane_z),
+            seed=seed,
+            acceptance=acceptance,
+            wavelength_density=wavelength_density,
+            roulette=roulette,
+            classify_losses=classify_losses,
+            pool=pool if pool is not None else ThreadPool(threads),
+        )
+
+
+def _photon_arrays(photons: Mapping[str, np.ndarray]) -> dict[str, np.ndarray]:
+    """The photon columns as the contiguous arrays of the native tracer."""
+    dtypes = {
+        "position_m": np.float64,
+        "direction": np.float64,
+        "wavelength_nm": np.float64,
+        "time_ns": np.float64,
+        "weight": np.float64,
+        "photon_id": np.uint64,
+    }
+    return {
+        name: np.ascontiguousarray(photons[name], dtype=dtype) for name, dtype in dtypes.items()
+    }
+
+
+def trace_many(
+    requests: Sequence[tuple[OpticalModel, Mapping[str, np.ndarray], Mapping[str, Any]]],
+    *,
+    seed: int,
+    pool: ThreadPool,
+) -> list[dict[str, np.ndarray]]:
+    """Trace the photons of several models in one job on `pool`.
+
+    Each request is ``(model, photons, options)``; `options` may hold
+    `apply_responses`, `direct`, `outputs`, `detected_only` and
+    `classify_losses` with the meaning and defaults of `OpticalModel.trace`.
+    The result is the list of the dicts that one `OpticalModel.trace` call per
+    request returns, with the same values; the blocks and models share the
+    pool's threads, which keeps them busy when single blocks are small.
+    """
+    allowed = {"apply_responses", "direct", "outputs", "detected_only", "classify_losses"}
+    items = []
+    for model, photons, options in requests:
+        unknown = set(options) - allowed
+        if unknown:
+            raise TypeError(f"unknown trace options: {', '.join(sorted(unknown))}")
+        outputs = options.get("outputs")
+        items.append((
+            model._native,  # noqa: SLF001
+            _photon_arrays(photons),
+            options.get("apply_responses", True),
+            options.get("direct", False),
+            None if outputs is None else list(outputs),
+            options.get("detected_only", False),
+            options.get("classify_losses", True),
+        ))
+    return _core.trace_many(items, seed=seed, pool=pool)
 
 
 def _emitter_count(source: _core.Emitter, emitted: float, seed: int, first_id: int) -> int:

@@ -14,8 +14,10 @@ option(OBDEECT_BUILD_PYTHON_API "Build the Python extension" ${OBDEECT_BUILD_PYT
 add_library(obdeect_core INTERFACE)
 target_include_directories(obdeect_core INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/cpp/include)
 target_compile_features(obdeect_core INTERFACE cxx_std_20)
-# Identical floating-point results on every platform: no implicit fused
-# multiply-add contraction.
+# Identical floating-point results for any thread count and block size on one
+# platform: no implicit fused multiply-add contraction. Transcendental functions
+# come from the platform's math library, so results may differ between
+# platforms.
 if(NOT MSVC)
   target_compile_options(obdeect_core INTERFACE -ffp-contract=off)
 endif()
@@ -42,7 +44,7 @@ endif()
 
 if(OBDEECT_BUILD_TESTING)
   enable_testing()
-  foreach(name kernels trace model_json)
+  foreach(name kernels trace model_json bounds)
     add_executable(test_${name} cpp/tests/test_${name}.cpp)
     target_link_libraries(test_${name} PRIVATE obdeect_core)
     obdeect_enable_warnings(test_${name})

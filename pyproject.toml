@@ -21,7 +21,7 @@ dependencies = [
   "matplotlib>=3.8",
   "numpy>=2.3",
 ]
-optional-dependencies.dev = [ "nanobind>=3.1", "pre-commit", "pytest", "ruff" ]
+optional-dependencies.dev = [ "nanobind>=3.1", "pre-commit", "pytest", "ruff", "scipy" ]
 scripts.obdeect = "obdeect.cli:main"
 
 [tool.setuptools_scm]

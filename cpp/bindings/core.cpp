@@ -1,3 +1,4 @@
+#include "obdeect/bunches.hpp"
 #include "obdeect/model_json.hpp"
 #include "obdeect/source.hpp"
 #include "obdeect/trace.hpp"
@@ -6,6 +7,7 @@
 #include <nanobind/ndarray.h>
 #include <nanobind/stl/optional.h>
 #include <nanobind/stl/string.h>
+#include <nanobind/stl/tuple.h>
 #include <nanobind/stl/vector.h>
 
 #include <algorithm>
@@ -70,22 +72,25 @@ public:
                                              "secondary_incidence_deg",
                                              "focal_incidence_deg"};
 
-  nb::dict trace(In3 position, In3 direction, In1<double> wavelength_nm, In1<double> time_ns,
-                 In1<double> weight, In1<std::uint64_t> photon_id, std::uint64_t seed,
-                 bool apply_responses, unsigned threads, bool direct,
-                 std::optional<std::vector<std::string>> outputs, bool detected_only) const {
-    const std::size_t n = position.shape(0);
-    if (direction.shape(0) != n || wavelength_nm.shape(0) != n || time_ns.shape(0) != n ||
-        weight.shape(0) != n || photon_id.shape(0) != n)
-      throw nb::value_error("photon arrays must have the same length");
+  // The output columns of one trace: the Python arrays and the block that
+  // points into them. Only the requested columns are allocated.
+  struct Columns {
+    nb::dict result;
+    std::vector<std::string> requested;
+    obdeect::ResultBlock block;
+  };
+
+  static Columns allocate(std::size_t n, const std::optional<std::vector<std::string>> &outputs,
+                          bool detected_only) {
     std::vector<std::string> valid(std::begin(kColumns), std::end(kColumns));
     valid.emplace_back("index");
-    std::vector<std::string> requested;
+    Columns columns;
     if (outputs) {
-      requested = *outputs;
+      columns.requested = *outputs;
     } else {
-      requested.assign(std::begin(kColumns), std::end(kColumns));
+      columns.requested.assign(std::begin(kColumns), std::end(kColumns));
     }
+    const auto &requested = columns.requested;
     for (const auto &name : requested) {
       if (std::find(valid.begin(), valid.end(), name) == valid.end()) {
         std::string message = "unknown output column '" + name + "'; valid columns are:";
@@ -99,13 +104,13 @@ public:
     const auto wants = [&](const char *name) {
       return std::find(requested.begin(), requested.end(), name) != requested.end();
     };
-    nb::dict result;
+    nb::dict &result = columns.result;
     // The requested columns are allocated; the others stay null (not computed).
-    const auto make = [&](const char *name, auto *null, std::size_t columns = 0) {
+    const auto make = [&](const char *name, auto *null, std::size_t width = 0) {
       using T = std::remove_pointer_t<decltype(null)>;
       if (!wants(name))
         return static_cast<T *>(nullptr);
-      nb::object array = owned_array<T>(n, columns);
+      nb::object array = owned_array<T>(n, width);
       result[name] = array;
       return data_of<T>(array);
     };
@@ -128,30 +133,153 @@ public:
     const auto m2_angle = make("secondary_incidence_deg", f64);
     const auto focal_angle = make("focal_incidence_deg", f64);
     const auto index = make("index", u64);
-    const obdeect::PhotonBlock in{position.data(),
-                                  direction.data(),
-                                  wavelength_nm.data(),
-                                  time_ns.data(),
-                                  weight.data(),
-                                  photon_id.data(),
-                                  n};
-    const obdeect::ResultBlock out{status, surface,  m1_id,    m2_id,       pos,
-                                   dir,    path,     time,     w,           m1,
-                                   m2,     m1_angle, m2_angle, focal_angle, index};
+    columns.block = {status, surface, m1_id, m2_id,    pos,      dir,         path, time,
+                     w,      m1,      m2,    m1_angle, m2_angle, focal_angle, index};
+    return columns;
+  }
+
+  // With detected_only the arrays become views of the first `count` rows.
+  static nb::dict finish(Columns &columns, std::size_t count, bool detected_only) {
+    if (detected_only)
+      for (const auto &name : columns.requested) {
+        const nb::object array = columns.result[name.c_str()];
+        columns.result[name.c_str()] = array[nb::slice(
+            std::ptrdiff_t{0}, static_cast<std::ptrdiff_t>(count), std::ptrdiff_t{1})];
+      }
+    return columns.result;
+  }
+
+  static obdeect::PhotonBlock photons(const In3 &position, const In3 &direction,
+                                      const In1<double> &wavelength_nm, const In1<double> &time_ns,
+                                      const In1<double> &weight,
+                                      const In1<std::uint64_t> &photon_id) {
+    const std::size_t n = position.shape(0);
+    if (direction.shape(0) != n || wavelength_nm.shape(0) != n || time_ns.shape(0) != n ||
+        weight.shape(0) != n || photon_id.shape(0) != n)
+      throw nb::value_error("photon arrays must have the same length");
+    return {position.data(),
+            direction.data(),
+            wavelength_nm.data(),
+            time_ns.data(),
+            weight.data(),
+            photon_id.data(),
+            n};
+  }
+
+  // `pool`, if given, runs the chunks and `threads` is ignored.
+  nb::dict trace(In3 position, In3 direction, In1<double> wavelength_nm, In1<double> time_ns,
+                 In1<double> weight, In1<std::uint64_t> photon_id, std::uint64_t seed,
+                 bool apply_responses, unsigned threads, bool direct,
+                 std::optional<std::vector<std::string>> outputs, bool detected_only,
+                 bool classify_losses, obdeect::ThreadPool *pool) const {
+    const obdeect::PhotonBlock in =
+        photons(position, direction, wavelength_nm, time_ns, weight, photon_id);
+    Columns columns = allocate(in.size, outputs, detected_only);
     std::size_t count = 0;
     {
       nb::gil_scoped_release release;
-      count = obdeect::trace_block(model_, in, out, seed, apply_responses, thread_count(threads),
-                                   direct, detected_only);
+      count = pool ? obdeect::trace_block(model_, in, columns.block, seed, apply_responses, *pool,
+                                          direct, detected_only, classify_losses)
+                   : obdeect::trace_block(model_, in, columns.block, seed, apply_responses,
+                                          thread_count(threads), direct, detected_only,
+                                          classify_losses);
     }
-    if (detected_only) // Views of the first `count` rows.
-      for (const auto &name : requested) {
-        const nb::object array = result[name.c_str()];
-        result[name.c_str()] = array[nb::slice(
-            std::ptrdiff_t{0}, static_cast<std::ptrdiff_t>(count), std::ptrdiff_t{1})];
+    return finish(columns, count, detected_only);
+  }
+
+  // Photon bunches (see obdeect::trace_bunches). Acceptance and density are
+  // given as arrays; the output arrays are views of the rows written.
+  nb::dict
+  trace_bunches(In1<float> x, In1<float> y, In1<float> cx, In1<float> cy, In1<float> time_ns,
+                In1<float> zem, In1<float> size, In1<float> wavelength_nm,
+                In1<std::uint64_t> bunch_id, In1<double> rotation, In1<double> offset_m,
+                double length_unit_m, double plane_z, std::uint64_t seed,
+                const std::optional<std::tuple<In1<double>, In1<double>, In1<double>>> &acceptance,
+                const std::optional<std::tuple<In1<double>, In1<double>>> &density, bool roulette,
+                bool classify_losses, obdeect::ThreadPool &pool) const {
+    const std::size_t n = x.shape(0);
+    for (const std::size_t length :
+         {y.shape(0), cx.shape(0), cy.shape(0), time_ns.shape(0), zem.shape(0), size.shape(0),
+          wavelength_nm.shape(0), bunch_id.shape(0)})
+      if (length != n)
+        throw nb::value_error("bunch arrays must have the same length");
+    if (rotation.shape(0) != 9 || offset_m.shape(0) != 3)
+      throw nb::value_error("rotation needs nine elements and offset_m three");
+    obdeect::BunchFrame frame;
+    std::copy_n(rotation.data(), 9, frame.rotation);
+    std::copy_n(offset_m.data(), 3, frame.offset_m);
+    frame.length_unit_m = length_unit_m;
+    frame.plane_z = plane_z;
+
+    obdeect::Map2D acceptance_map;
+    obdeect::LinearDensity wavelength_density;
+    obdeect::BunchOptions options;
+    options.roulette = roulette;
+    options.classify_losses = classify_losses;
+    try {
+      if (acceptance) {
+        const auto &[wavelengths, heights, values] = *acceptance;
+        acceptance_map.x_m.assign(wavelengths.data(), wavelengths.data() + wavelengths.shape(0));
+        acceptance_map.y_m.assign(heights.data(), heights.data() + heights.shape(0));
+        acceptance_map.values.assign(values.data(), values.data() + values.shape(0));
+        if (!std::is_sorted(acceptance_map.x_m.begin(), acceptance_map.x_m.end()) ||
+            !std::is_sorted(acceptance_map.y_m.begin(), acceptance_map.y_m.end()))
+          throw std::invalid_argument("bunch acceptance: axes must increase");
+        options.acceptance = &acceptance_map;
       }
+      if (density) {
+        const auto &[nodes, weights] = *density;
+        wavelength_density =
+            obdeect::LinearDensity({nodes.data(), nodes.data() + nodes.shape(0)},
+                                   {weights.data(), weights.data() + weights.shape(0)});
+        options.wavelength_density = &wavelength_density;
+      }
+    } catch (const std::invalid_argument &error) {
+      throw nb::value_error(error.what());
+    }
+
+    const obdeect::BunchBlock block{x.data(),        y.data(),   cx.data(),   cy.data(),
+                                    time_ns.data(),  zem.data(), size.data(), wavelength_nm.data(),
+                                    bunch_id.data(), n};
+    static constexpr const char *names[] = {"position_m",    "direction",   "time_ns",   "weight",
+                                            "wavelength_nm", "bunch_index", "sub_photon"};
+    nb::dict result;
+    std::size_t count = 0;
+    try {
+      nb::gil_scoped_release release;
+      count =
+          obdeect::trace_bunches(model_, block, frame, options, seed, pool, [&](std::size_t rows) {
+            nb::gil_scoped_acquire acquire; // The arrays are Python objects.
+            const auto position = owned_array<double>(rows, 3);
+            const auto direction = owned_array<double>(rows, 3);
+            const auto time = owned_array<double>(rows), weight = owned_array<double>(rows);
+            const auto wavelength = owned_array<double>(rows);
+            const auto index = owned_array<std::uint64_t>(rows);
+            const auto sub = owned_array<std::uint32_t>(rows);
+            result["position_m"] = position;
+            result["direction"] = direction;
+            result["time_ns"] = time;
+            result["weight"] = weight;
+            result["wavelength_nm"] = wavelength;
+            result["bunch_index"] = index;
+            result["sub_photon"] = sub;
+            return obdeect::BunchResult{data_of<double>(position),   data_of<double>(direction),
+                                        data_of<double>(time),       data_of<double>(weight),
+                                        data_of<double>(wavelength), data_of<std::uint64_t>(index),
+                                        data_of<std::uint32_t>(sub)};
+          });
+    } catch (const obdeect::ModelError &error) {
+      throw nb::value_error(error.what());
+    }
+    for (const char *name : names) {
+      const nb::object array = result[name];
+      result[name] = array[nb::slice(std::ptrdiff_t{0}, static_cast<std::ptrdiff_t>(count),
+                                     std::ptrdiff_t{1})];
+    }
     return result;
   }
+
+  [[nodiscard]] const obdeect::OpticalModel &optical_model() const { return model_; }
 
 private:
   obdeect::OpticalModel model_;
@@ -273,16 +401,77 @@ private:
   obdeect::Emitter emitter_;
 };
 
+// One request of trace_many: (Model, photons, apply_responses, direct, outputs,
+// detected_only, classify_losses), where photons holds the contiguous arrays that
+// Model.trace takes.
+using ManyItem =
+    std::tuple<Model *, nb::dict, bool, bool, std::optional<std::vector<std::string>>, bool, bool>;
+
+nb::list trace_many(const std::vector<ManyItem> &items, std::uint64_t seed,
+                    obdeect::ThreadPool &pool) {
+  struct Prepared {
+    In3 position, direction;
+    In1<double> wavelength_nm, time_ns, weight;
+    In1<std::uint64_t> photon_id;
+    Model::Columns columns;
+    bool detected_only;
+  };
+  std::vector<Prepared> prepared;
+  std::vector<obdeect::BlockRequest> requests;
+  prepared.reserve(items.size());
+  for (const auto &[model, photon_dict, apply_responses, direct, outputs, detected_only,
+                    classify_losses] : items) {
+    const auto get = [&photon_dict](const char *name) { return photon_dict[name]; };
+    Prepared p{nb::cast<In3>(get("position_m")),
+               nb::cast<In3>(get("direction")),
+               nb::cast<In1<double>>(get("wavelength_nm")),
+               nb::cast<In1<double>>(get("time_ns")),
+               nb::cast<In1<double>>(get("weight")),
+               nb::cast<In1<std::uint64_t>>(get("photon_id")),
+               {},
+               detected_only};
+    const obdeect::PhotonBlock in =
+        Model::photons(p.position, p.direction, p.wavelength_nm, p.time_ns, p.weight, p.photon_id);
+    p.columns = Model::allocate(in.size, outputs, detected_only);
+    requests.push_back({&model->optical_model(), in, p.columns.block, apply_responses, direct,
+                        detected_only, classify_losses});
+    prepared.push_back(std::move(p));
+  }
+  std::vector<std::size_t> rows;
+  {
+    nb::gil_scoped_release release;
+    rows = obdeect::trace_blocks(requests, seed, pool);
+  }
+  nb::list results;
+  for (std::size_t i = 0; i < prepared.size(); ++i)
+    results.append(Model::finish(prepared[i].columns, rows[i], prepared[i].detected_only));
+  return results;
+}
+
 } // namespace
 
 NB_MODULE(_core, module) {
   module.doc() = "obdeect native optical transport";
+  nb::class_<obdeect::ThreadPool>(module, "ThreadPool")
+      .def(
+          "__init__",
+          [](obdeect::ThreadPool *self, unsigned threads) {
+            new (self) obdeect::ThreadPool(thread_count(threads));
+          },
+          "threads"_a = 0U)
+      .def_prop_ro("size", &obdeect::ThreadPool::size);
   nb::class_<Model>(module, "Model")
       .def(nb::init<const std::string &>(), "json"_a)
       .def("trace", &Model::trace, "position_m"_a, "direction"_a, "wavelength_nm"_a, "time_ns"_a,
            "weight"_a, "photon_id"_a, nb::kw_only(), "seed"_a, "apply_responses"_a = true,
            "threads"_a = 0U, "direct"_a = false, "outputs"_a = nb::none(),
-           "detected_only"_a = false);
+           "detected_only"_a = false, "classify_losses"_a = true, "pool"_a = nb::none())
+      .def("trace_bunches", &Model::trace_bunches, "x"_a, "y"_a, "cx"_a, "cy"_a, "time_ns"_a,
+           "zem"_a, "size"_a, "wavelength_nm"_a, "bunch_id"_a, "rotation"_a, "offset_m"_a,
+           "length_unit_m"_a, "plane_z"_a, nb::kw_only(), "seed"_a, "acceptance"_a = nb::none(),
+           "wavelength_density"_a = nb::none(), "roulette"_a = true, "classify_losses"_a = true,
+           "pool"_a);
+  module.def("trace_many", &trace_many, "items"_a, nb::kw_only(), "seed"_a, "pool"_a);
   nb::class_<Emitter>(module, "Emitter")
       .def(nb::init<In1<double>, In1<double>, In1<double>, In1<double>, In1<double>, In1<double>,
                     In1<double>, In1<double>, double, double>(),

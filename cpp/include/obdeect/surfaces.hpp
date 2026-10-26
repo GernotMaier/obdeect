@@ -248,6 +248,17 @@ struct Asphere {
     guess_k = (sag(outer_radius) - guess_z0) / (outer_radius * outer_radius);
   }
 
+#ifdef OBDEECT_BENCH_COUNTERS
+  // Benchmark-only counters (single thread); never compiled into the library.
+  struct Counters {
+    std::uint64_t calls{}, newton_steps{};
+  };
+  static Counters &counters() {
+    static Counters c;
+    return c;
+  }
+#endif
+
   // Rigorous bound sum_i 2 i |c_i| rho^(2i-1) / scale, rho = outer_radius / scale.
   // Every term grows with r, so the value at the outer radius bounds |slope(r)|
   // everywhere inside. A relative margin covers the rounding of the sum.
@@ -292,6 +303,9 @@ struct Asphere {
   [[nodiscard]] std::optional<SurfaceHit> intersect(const Ray &ray, double t_min, Accept accept,
                                                     bool &failed) const {
     failed = false;
+#ifdef OBDEECT_BENCH_COUNTERS
+    ++counters().calls;
+#endif
     // Work from a point near the vertex plane: distant sources otherwise
     // lose precision in every residual.
     const double shift = std::max(0.0, dot(Vec3{0.0, 0.0, vertex_z} - ray.origin, ray.direction));
@@ -326,6 +340,9 @@ struct Asphere {
     };
     const auto newton = [&](double t, double lo, double hi) -> std::optional<Root> {
       for (int iteration = 0; iteration < 50; ++iteration) {
+#ifdef OBDEECT_BENCH_COUNTERS
+        ++counters().newton_steps;
+#endif
         const Vec3 p = local.at(t);
         const double r = std::hypot(p.x, p.y);
         const double g = residual_at(p, r);

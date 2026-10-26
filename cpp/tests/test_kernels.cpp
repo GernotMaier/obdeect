@@ -5,6 +5,8 @@
 #include "obdeect/random.hpp"
 #include "obdeect/source.hpp"
 
+#include <bit>
+#include <cstdint>
 #include <optional>
 #include <stdexcept>
 #include <vector>
@@ -549,9 +551,84 @@ void obscurer_hierarchy() {
   CHECK(!Obscurers().nearest({{0, 0, 1}, {0, 0, -1}}, Leg::incoming, 10.0));
 }
 
-// Random slender beams (polyhedra with a vertex box) and rods: the grid for steep
-// incoming rays, the hierarchy for every leg and a brute-force loop give the
-// same nearest hit.
+// The nearest obscurer of `leg` by testing every item, with the lowest id on ties.
+std::optional<Obscurers::Hit> brute_force_nearest(const std::vector<Obscurer> &items,
+                                                  const std::vector<Plane> &planes, const Ray &ray,
+                                                  Leg leg, double t_max) {
+  std::optional<Obscurers::Hit> expected;
+  for (const auto &item : items)
+    if (item.legs & leg)
+      if (const auto t = item.intersect(ray, planes, kMinDistanceM))
+        if (*t < t_max &&
+            (!expected || *t < expected->t || (*t == expected->t && item.id < expected->id)))
+          expected = Obscurers::Hit{*t, item.id};
+  return expected;
+}
+
+// nearest() (grids), the hierarchy and the brute-force loop agree bit for bit.
+void check_nearest(const Obscurers &set, const std::vector<Obscurer> &items,
+                   const std::vector<Plane> &planes, const Ray &ray, Leg leg, double t_max,
+                   std::size_t &hits) {
+  const auto expected = brute_force_nearest(items, planes, ray, leg, t_max);
+  for (const auto &found :
+       {set.nearest(ray, leg, t_max), set.nearest_in_hierarchy(ray, leg, t_max)}) {
+    CHECK(found.has_value() == expected.has_value());
+    if (found && expected) {
+      CHECK(found->id == expected->id);
+      CHECK(found->t == expected->t);
+    }
+  }
+  hits += expected.has_value();
+}
+
+// A lattice of vertical and slanted rods whose grid cells have dyadic edges
+// (the lowest box edge is -4.0):
+// rays start exactly on cell boundaries, run along cell edges or parallel to an
+// axis, and the walk along the cells still finds the brute-force hit on every leg.
+void obscurer_grid_boundaries() {
+  std::vector<Obscurer> rods;
+  for (std::uint32_t i = 0; i < 8; ++i)
+    for (std::uint32_t j = 0; j < 8; ++j) {
+      Obscurer rod;
+      rod.kind = Obscurer::Kind::cylinder;
+      rod.id = 100 + 8 * i + j;
+      rod.legs = static_cast<std::uint8_t>(1 + (i + 2 * j) % 7);
+      rod.a = {-3.9 + 0.75 * i, -3.9 + 0.75 * j, 0.0};
+      rod.b = rod.a + Vec3{(i + j) % 3 == 0 ? 0.5 : 0.0, 0.0, 3.0};
+      rod.radius_a = 0.1;
+      rod.bound_a = rod.a;
+      rod.bound_b = rod.b;
+      rod.bound_radius = rod.radius_a;
+      rods.push_back(rod);
+    }
+  const Obscurers set(rods, {});
+  std::size_t hits = 0, rays = 0;
+  for (std::uint64_t k = 0; k < 60000; ++k) {
+    const auto u = uniform4(61, k, Stream::source), w = uniform4(62, k, Stream::source);
+    const auto on_grid = [](double x) { return std::floor(16.0 * x) / 16.0; }; // Multiples of 1/16.
+    // Diagonal, axis-parallel and general directions, up and down. A ray with a
+    // zero component is moved off the plane of a rod's bounding box (which a
+    // ray lying in it may miss by design).
+    const double dx = k % 5 == 0 ? 0.0 : k % 7 == 0 ? 1.0 : 2.0 * w[0] - 1.0;
+    const double dy = k % 11 == 0 ? 0.0 : k % 7 == 0 ? -1.0 : 2.0 * w[1] - 1.0;
+    const Vec3 origin{on_grid(9.0 * u[0] - 4.5) + (dx == 0.0 ? 1.0 / 64.0 : 0.0),
+                      on_grid(9.0 * u[1] - 4.5) + (dy == 0.0 ? 1.0 / 64.0 : 0.0),
+                      k % 2 ? 8.0 : on_grid(4.0 * u[2])};
+    const double dz = k % 13 == 0 ? 1.0 : -(0.5 + w[2]);
+    const Ray ray{origin, normalized({dx, dy, dz})};
+    const double t_max = k % 6 == 0 ? std::numeric_limits<double>::infinity() : 4.0 + 14.0 * w[3];
+    for (const Leg leg : {Leg::incoming, Leg::after_primary, Leg::after_secondary}) {
+      check_nearest(set, rods, {}, ray, leg, t_max, hits);
+      ++rays;
+    }
+  }
+  CHECK(hits > rays / 20);
+}
+
+// Random slender beams (polyhedra with a vertex box) and rods: the grids (steep
+// rays), the hierarchy for every leg and a brute-force loop give the same
+// nearest hit, for rays from outside and from inside the structure, shallow and
+// steep, with finite and infinite limits and with a zero direction component.
 void obscurer_grid() {
   std::vector<Obscurer> items;
   std::vector<Plane> planes;
@@ -596,28 +673,16 @@ void obscurer_grid() {
     const auto u = uniform4(43, k, Stream::source), w = uniform4(44, k, Stream::source);
     // Mostly steep rays, some shallow ones.
     const double tilt = k % 4 == 0 ? 1.5 : 0.8;
-    const Ray ray{{20 * u[0] - 10, 20 * u[1] - 10, 20.0},
-                  normalized({tilt * (w[0] - 0.5), tilt * (w[1] - 0.5), -1.0})};
-    const double t_max = 8.0 + 20.0 * w[2];
+    const double dx = k % 17 == 0 ? 0.0 : tilt * (w[0] - 0.5);
+    const double dy = k % 19 == 0 ? 0.0 : tilt * (w[1] - 0.5);
+    // Every fifth ray starts inside the structure's height range, every eighth goes up.
+    const Ray ray{{20 * u[0] - 10, 20 * u[1] - 10, k % 5 == 0 ? 12.0 * u[3] : 20.0},
+                  normalized({dx, dy, k % 8 == 0 ? 1.0 : -1.0})};
+    const double t_max = k % 6 == 0 ? std::numeric_limits<double>::infinity() : 8.0 + 20.0 * w[2];
     const Leg leg = k % 3 == 0   ? Leg::incoming
                     : k % 3 == 1 ? Leg::after_primary
                                  : Leg::after_secondary;
-    std::optional<Obscurers::Hit> expected;
-    for (const auto &item : items)
-      if (item.legs & leg)
-        if (const auto t = item.intersect(ray, planes, kMinDistanceM))
-          if (*t < t_max &&
-              (!expected || *t < expected->t || (*t == expected->t && item.id < expected->id)))
-            expected = Obscurers::Hit{*t, item.id};
-    for (const auto &found :
-         {set.nearest(ray, leg, t_max), set.nearest_in_hierarchy(ray, leg, t_max)}) {
-      CHECK(found.has_value() == expected.has_value());
-      if (found && expected) {
-        CHECK(found->id == expected->id);
-        CHECK(found->t == expected->t);
-      }
-    }
-    hits += expected.has_value();
+    check_nearest(set, items, planes, ray, leg, t_max, hits);
     steep += leg == Leg::incoming && std::abs(ray.direction.z) >= 0.5;
   }
   CHECK(hits > 1500 && steep > 10000);
@@ -786,6 +851,30 @@ void transmission() {
   CHECK_NEAR(t.at({0, 0, -1}), 0.9, 1e-15);
   CHECK_NEAR(t.at(normalized({0.1, 0, -1})),
              0.9 / (1 + 0.5 * std::pow(0.1 / std::sqrt(1.01) / 0.1, 2)), 1e-12);
+
+  // Random directions near the axis: deterministic, from the source stream.
+  const auto direction = [](std::uint64_t i) {
+    const auto u = uniform4(1234, i, Stream::source);
+    return normalized({u[0] - 0.5, u[1] - 0.5, u[2] + 0.1});
+  };
+  const auto bits = [](double x) { return std::bit_cast<std::uint64_t>(x); };
+  // Amplitude 0: exactly on_axis, bit for bit, for every direction.
+  for (const double on_axis : {1.0, 0.9, 0.123456789}) {
+    const TelescopeTransmission constant{on_axis, 0.0, 0.1, 2.0, 1.0};
+    for (std::uint64_t i = 0; i < 1000; ++i)
+      CHECK(bits(constant.at(direction(i))) == bits(on_axis));
+  }
+  // Amplitude not 0: the formula of the header, bit for bit.
+  const TelescopeTransmission varying[] = {{0.9, 0.5, 0.1, 2.0, 1.0}, {0.95, 0.3, 0.2, 1.7, 1.3}};
+  for (const auto &v : varying)
+    for (std::uint64_t i = 0; i < 1000; ++i) {
+      const Vec3 d = direction(i);
+      const double s = std::hypot(d.x, d.y);
+      const double formula =
+          v.on_axis /
+          std::pow(1.0 + v.amplitude * std::pow(s / v.angular_scale_rad, v.power), v.outer_power);
+      CHECK(bits(v.at(d)) == bits(formula));
+    }
 }
 
 } // namespace
@@ -804,6 +893,7 @@ void all_tests() {
   obscurers();
   obscurer_hierarchy();
   obscurer_grid();
+  obscurer_grid_boundaries();
   sources();
   densities();
   emitters();
