@@ -42,7 +42,7 @@ jobs:
             args+=(--dev-ref origin/main)
           fi
           python docs/build_versions.py "${args[@]}"
-      - uses: actions/upload-pages-artifact@v4
+      - uses: actions/upload-pages-artifact@v5
         with:
           path: docs/_build/site
 
