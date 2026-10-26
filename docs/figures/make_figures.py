@@ -3,11 +3,11 @@
 They need inputs that are not part of this repository, given as arguments:
 
     python docs/figures/make_figures.py \
-        --simulation-models <simulation-models checkout>/simulation-models \
         --validate-optics <results of run_psf.sh: TEL/BACKEND/results/*.ecsv> \
         [--baffle <results of run_baffle.sh: TEL/BACKEND-with|without/results/*.ecsv>]
 
 The validation scripts are in the obdeect-validation repository.
+Telescope drawings and MST shadowing use the separate telescopes.yml workflow.
 """
 
 from __future__ import annotations
@@ -21,16 +21,11 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 from astropy.table import QTable  # noqa: E402
-from matplotlib.patches import Patch  # noqa: E402
-from obdeect import OpticalModel  # noqa: E402
 
 OUTPUT = Path(__file__).resolve().parents[1] / "_static" / "figures"
 # Reference palette (dataviz skill): series 1 and 2, text and grid inks.
 BLUE, ORANGE = "#2a78d6", "#eb6834"
 INK, MUTED, GRID = "#0b0b0b", "#52514e", "#e4e3df"
-STRUCTURE_MODEL = ("MSTx-FlashCam", "7.0.0")
-# Mirror facets and camera housing in the structure figure, apart from the blue scale.
-MIRROR, MIRROR_EDGE, HOUSING = "#e6eef6", "#a9bdd0", "#52514e"
 
 plt.rcParams.update({
     "axes.edgecolor": MUTED,
@@ -82,114 +77,6 @@ def validation(root: Path) -> None:
     plt.close(figure)
 
 
-def _hull(points: np.ndarray) -> np.ndarray:
-    """Convex hull of 2-D points (monotone chain), closed."""
-    p = sorted(map(tuple, np.round(points, 9)))
-    if len(p) < 3:
-        return np.array(p)
-
-    def half(sequence):
-        out = []
-        for q in sequence:
-            while (
-                len(out) >= 2
-                and (out[-1][0] - out[-2][0]) * (q[1] - out[-2][1])
-                - (out[-1][1] - out[-2][1]) * (q[0] - out[-2][0])
-                <= 0
-            ):
-                out.pop()
-            out.append(q)
-        return out
-
-    lower, upper = half(p), half(reversed(p))
-    ring = lower[:-1] + upper[:-1]
-    return np.array([*ring, ring[0]])
-
-
-def _outline(centre, normal, tangent, aperture: str, half_width: float) -> np.ndarray:
-    """Corners in 3-D of a planar aperture, in the frame of obdeect (v = normal x tangent)."""
-    n = np.asarray(normal, dtype=float)
-    u = np.asarray(tangent, dtype=float)
-    u /= np.linalg.norm(u)
-    v = np.cross(n / np.linalg.norm(n), u)
-    h = half_width
-    r = 2 * h / np.sqrt(3)  # Circumradius of a hexagon with flats at +-h.
-    corners = {
-        "square": [(h, h), (-h, h), (-h, -h), (h, -h)],
-        "hexagon_flat_x": [(0, r), (h, r / 2), (h, -r / 2), (0, -r), (-h, -r / 2), (-h, r / 2)],
-        "hexagon_flat_y": [(r, 0), (r / 2, h), (-r / 2, h), (-r, 0), (-r / 2, -h), (r / 2, -h)],
-    }[aperture]
-    return np.asarray(centre, dtype=float) + np.array([a * u + b * v for a, b in corners])
-
-
-def structure(simulation_models: Path) -> None:
-    """The MST structure seen from the sky and from the side, by the light each element stops."""
-    name, version = STRUCTURE_MODEL
-    model = OpticalModel.from_simulation_models(
-        simulation_models, name, version, configuration_seed=1, zenith_deg=20.0
-    )
-    photons = model.star_photons(1_000_000, seed=11)
-    hits = model.obscurer_hits(photons, seed=12)
-    body = hits["group"] != "camera"
-    sole = dict(zip(hits["name"][body], 100 * hits["sole"][body] / hits["unobscured"], strict=True))
-    crossed = dict(zip(hits["name"][body], hits["crossed"][body], strict=True))
-    optics = model.document["optics"]
-    colormap = plt.get_cmap("Blues")
-    top = max(sole.values())
-    figure, axes = plt.subplots(1, 2, figsize=(10, 5.2))
-    for ax, (i, j), title in zip(
-        axes, ((0, 1), (0, 2)), ("seen from the sky (x, y)", "side view (x, z)"), strict=True
-    ):
-        for facet in optics["primary"].get("facets", []):
-            corners = _outline(
-                facet["centre_m"],
-                facet["normal"],
-                facet["tangent"],
-                facet["shape"],
-                0.5 * facet["diameter_m"],
-            )
-            ax.fill(corners[:, i], corners[:, j], fc=MIRROR, ec=MIRROR_EDGE, lw=0.4, zorder=0)
-        for o in optics["obscurers"]:
-            if o["group"] == "camera":
-                corners = _outline(
-                    o["centre_m"], o["normal"], o["tangent"], o["aperture"], 0.5 * o["diameter_m"]
-                )
-                ax.fill(corners[:, i], corners[:, j], fc=HOUSING, ec=HOUSING, lw=1.2, zorder=2)
-                continue
-            share = sole.get(o["name"], 0.0)
-            colour = colormap(0.25 + 0.75 * min(share / top, 1.0)) if share > 0 else "#c3c2b7"
-            style = {"color": colour, "zorder": 1 + share, "alpha": 1.0 if share > 0 else 0.6}
-            if crossed.get(o["name"], 0) == 0:
-                style |= {"ls": ":"}
-            if o["shape"] == "cylinder":
-                a, b = o["start_m"], o["end_m"]
-                ax.plot([a[i], b[i]], [a[j], b[j]], lw=1.6, solid_capstyle="round", **style)
-            elif o["shape"] == "polyhedron":
-                ring = _hull(np.array(o["vertices_m"])[:, [i, j]])
-                ax.fill(ring[:, 0], ring[:, 1], ec=style["color"], fc=style["color"], lw=0.5)
-        ax.set(aspect="equal", xlabel="x [m]", ylabel="y [m]" if j == 1 else "z [m]", title=title)
-    axes[0].legend(
-        handles=[
-            Patch(fc=MIRROR, ec=MIRROR_EDGE, label="mirror facets"),
-            Patch(fc=HOUSING, ec=HOUSING, label="camera housing"),
-        ],
-        loc="lower left",
-        frameon=False,
-        fontsize=8,
-    )
-    mappable = plt.cm.ScalarMappable(cmap=colormap, norm=plt.Normalize(0, top))
-    bar = figure.colorbar(mappable, ax=axes, shrink=0.7, pad=0.02)
-    bar.set_label("light stopped by this element alone [% of the unobscured light]")
-    never = int(sum(v == 0 for v in crossed.values()))
-    figure.suptitle(
-        f"{name} {version} telescope_structure, star on axis: grey = stops nothing alone, "
-        f"dotted = never met ({never} of {len(crossed)} elements)",
-        color=MUTED,
-    )
-    figure.savefig(OUTPUT / "structure_census.png", bbox_inches="tight")
-    plt.close(figure)
-
-
 def baffle(root: Path) -> None:
     """Effective area with and without the secondary baffle, both backends."""
     telescopes = sorted(p.name for p in root.iterdir() if p.is_dir())
@@ -220,13 +107,11 @@ def baffle(root: Path) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--simulation-models", type=Path, required=True)
     parser.add_argument("--validate-optics", type=Path, required=True)
     parser.add_argument("--baffle", type=Path)
     args = parser.parse_args()
     OUTPUT.mkdir(parents=True, exist_ok=True)
     validation(args.validate_optics)
-    structure(args.simulation_models)
     if args.baffle:
         baffle(args.baffle)
     print(f"figures written to {OUTPUT}")

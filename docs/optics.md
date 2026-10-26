@@ -9,6 +9,8 @@ comparisons and their limits are recorded in [Validation](VALIDATION.md).
 :maxdepth: 1
 
 optical-elements
+telescopes
+shadowing
 sim-telarray-differences
 limitations
 ```

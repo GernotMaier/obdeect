@@ -76,12 +76,6 @@ Which elements actually shade the light is shown by
 [shadowing](shadowing.md)): per obscurer, the light whose path meets it, that
 it absorbs, and that only it stops.
 
-```{toctree}
-:maxdepth: 1
-
-shadowing
-```
-
 ## Focal surface
 
 The focal surface records arriving photons and ends the optical trace.
