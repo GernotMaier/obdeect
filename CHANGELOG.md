@@ -3,10 +3,16 @@
 This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and uses semantic versioning after the first stable release.
 
-The entries for 0.1.0 to 0.3.0 were reconstructed from the git history and the
-merged pull requests; the changelog was not maintained before 0.4.0.
+## [0.5.0]
 
-## [Unreleased]
+Maintenance release: CI workflows and changelog. No change to the code or the Python API.
+
+### Changed
+
+- The documentation workflow uses `actions/deploy-pages` v5 (Node.js 24).
+- The publishing workflow uses `actions/download-artifact` v8. A download whose hash does not
+  match the expected hash now fails the workflow.
+- The changelog is rebuilt from the git history for all releases from 0.1.0 on.
 
 ## [0.4.0]
 
@@ -22,6 +28,11 @@ command line. The optical-model format is unchanged (`obdeect.optical-model.v2`)
   of each photon, counted as `crossed`, `first` and `sole`.
 - Optional fused multiply-add build, `-DOBDEECT_USE_FMA=ON` (x86-64, `-mfma`; off by default).
 - CI job that builds and tests with `OBDEECT_USE_FMA=ON`.
+- Documentation site (Sphinx, MyST Markdown) with the user guide, shadowing, telescope and optical
+  element descriptions, light sources, batch tracing, physics limitations and the Python API.
+  Figures show the telescope structure and the deviations from sim_telarray.
+- Versioned documentation: development and tagged versions are published together to GitHub Pages,
+  with a version switcher.
 
 ### Changed
 
@@ -35,9 +46,13 @@ command line. The optical-model format is unchanged (`obdeect.optical-model.v2`)
 - `telescope_transmission` is checked by `response_bound`, which raises `ModelError` for an
   unsupported transmission instead of accepting it.
 - Replay comparison has tiers, used to check results across builds.
+- Source comments and docstrings describe obdeect's own conventions instead of sim_telarray's.
+  No change in behaviour.
 
 ### Fixed
 
+- Secondary baffle: a fourth value not below R1 is read as the outer radius, as in sim_telarray,
+  instead of as the wall thickness. No current model uses this value.
 - Bunch acceptance rejects axes that are not finite or not increasing; wavelength density nodes
   must start above 0 nm.
 - A failure while starting the thread pool no longer leaves joinable threads behind; an
