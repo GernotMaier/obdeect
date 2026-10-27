@@ -56,7 +56,7 @@ def _parameter_path(root: Path, instrument: str, name: str, version: str) -> Pat
 
 def _production_versions(root: Path, version: str) -> list[str]:
     """The production and, for a patch production, the productions it patches
-    (its model_version_history), oldest first, as simtools merges them."""
+    (its model_version_history), oldest first."""
     versions = {version}
     info = root / "productions" / version / "info.yml"
     text = info.read_text(encoding="utf-8") if info.is_file() else ""

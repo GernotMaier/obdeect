@@ -11,13 +11,12 @@ or `after_secondary` legs. A blocked photon records the obscurer's id in
 :alt: MST structure coloured by the fraction of light each element alone blocks.
 
 MSTS-01 (FlashCam), simulation models 7.0.0: an on-axis star at infinity,
-1,000,000 photons, zenith angle 20 degrees and source seed 11.
+1,000,000 photons, zenith angle 20 degrees and source seed 11. [1](#figure-provenance)
 ```
 
 Dotted elements are never crossed in this sample. Blue shows the fraction of unobscured light that each element alone blocks;
 grey elements stop no light on their own in this sample. The nominal layout is
-drawn by simtools, with shadowing calculated by obdeect. Input revisions and
-hashes are in the [figure provenance](_static/figures/telescopes-provenance.json).
+drawn by simtools, with shadowing calculated by obdeect.
 
 ## Which elements matter?
 
@@ -51,3 +50,7 @@ An element that blocks nothing in one sample may matter at another source
 position. Check the full field of view and internal calibration sources before
 removing elements. The [optical elements](optical-elements.md#telescope-structure)
 section describes the structure table.
+
+## Figure provenance
+
+[1] [MST shadowing figure](_static/figures/telescopes-provenance.json).

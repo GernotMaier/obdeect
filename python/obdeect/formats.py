@@ -80,7 +80,7 @@ def _data_lines(contents: str, comments: tuple[str, ...] = ("#", "%")) -> list[l
 def read_mirror_list(contents: str) -> list[dict[str, Any]]:
     """Read a sim_telarray mirror list: x, y, diameter, focal length [cm], shape, [z].
 
-    Text after the documented columns is ignored, as sim_telarray does. A focal
+    Text after the documented columns is ignored. A focal
     length of zero asks for the automatic prescription; a negative one fixes its
     magnitude but asks for a random manufacturing error.
     """
@@ -234,7 +234,7 @@ def segmentation_from_record(record: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def secondary_segment_frame(segments: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Apply sim_telarray's pi rotation about y of the secondary mirror frame."""
+    """Rotate the secondary mirror frame by pi about y."""
     result = []
     for segment in segments:
         if segment["shape"] == "polygon":

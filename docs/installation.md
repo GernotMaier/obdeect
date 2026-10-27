@@ -32,7 +32,7 @@ sphinx-build -W --keep-going -b html docs docs/_build/html
 - `-DOBDEECT_USE_FMA=ON` (CMake, default OFF) evaluates the aspheric polynomials
   with `std::fma`. Use it only on hardware with fused multiply-add: without it
   `std::fma` is emulated and very slow. Results differ from builds without it
-  at the rounding level. Default builds, wheels and CI do not use it.
+  at the rounding level. It is disabled by default.
 - Results also remain platform-dependent in the last bits, because the math
   library (`std::pow`, `std::hypot`, trigonometric functions) differs between
   platforms; see [Validation](VALIDATION.md#rounding-level-changes).

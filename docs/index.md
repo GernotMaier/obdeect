@@ -54,7 +54,7 @@ Understand mirrors, photon paths, optical responses and shadowing.
 :link-type: doc
 :class-card: sd-shadow-sm
 
-Explore accuracy checks, sim_telarray comparisons and measured performance.
+Explore accuracy checks, comparisons with other codes, and measured performance.
 :::
 
 :::{grid-item-card} {fas}`book;pst-color-primary` Python API

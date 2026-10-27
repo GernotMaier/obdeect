@@ -21,8 +21,7 @@ obdeect obscurers --model lst.json --seed 2 --photons 100000 --field-deg 2 0
 ```
 
 `compile` reads full and patch productions of the simulation models; a patch
-production is laid over the productions in its `model_version_history`, as in
-simtools. `--seed` fixes the random mirror errors (focal
+production is laid over the productions in its `model_version_history`. `--seed` fixes the random mirror errors (focal
 lengths, alignment); `--zenith-deg` is the telescope zenith angle used by
 zenith-dependent focus offsets and alignment errors. `trace --seed` fixes source
 sampling and mirror scattering. `--geometry-only` leaves the photon weights

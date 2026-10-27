@@ -16,7 +16,7 @@
 namespace obdeect {
 
 // Planar aperture outlines. `half_width` is half the circle diameter or half
-// the flat-to-flat width (sim_telarray mirror shape types 0, 2, 1 and 3).
+// the flat-to-flat width.
 enum class Aperture : std::uint8_t { circle, square, hexagon_flat_x, hexagon_flat_y };
 
 [[nodiscard]] inline bool inside_aperture(Aperture shape, double half_width, double u, double v) {
@@ -120,7 +120,7 @@ struct Facet {
       const Vec3 p = ray.at(t);
       const Vec3 inward = (sphere - p) * (1.0 / radius);
       // Only the concave cap around the vertex reflects, and only from its
-      // front; back-face crossings are not mirror hits (as in sim_telarray).
+      // front; back-face crossings are not mirror hits.
       if (dot(inward, normal) <= 0.0 || dot(ray.direction, inward) >= 0.0)
         continue;
       const Vec3 offset = p - centre;
@@ -512,7 +512,7 @@ struct Asphere {
   static constexpr double kTolerance = 1e-10; // Metres along z.
 };
 
-// Footprint of one segment of an aspheric mirror (sim_telarray segmentation).
+// Footprint of one segment of an aspheric mirror.
 struct Segment {
   enum class Shape : std::uint8_t { hexagon, square, circle, annular_sector, polygon };
   std::uint32_t id{};

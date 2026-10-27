@@ -2,14 +2,13 @@
 
 ## Frames and units
 
-All lengths are metres, angles in degrees unless named `_rad`. The telescope
-frame is sim_telarray's: +z along the optical axis towards the sky, the dish
-vertex at z = -`mirror_offset`, and x, y as in the mirror lists and the camera
-photon lists of sim_telarray (with the telescope pointing above the horizon, x
-points down). `star_photons` samples a disk of radius 1.2 times the dish radius
-around the optical axis, perpendicular to it and centred on the dish vertex, as
-sim_telarray does for star light; `sampling_area_m2` is its area. The distance
-of a point source is measured from the disk centre.
+All lengths are metres, angles in degrees unless named `_rad`. In the telescope
+frame, +z points along the optical axis towards the sky and the dish vertex is
+at z = -`mirror_offset`. The x and y axes follow the mirror-list coordinates;
+when the telescope points above the horizon, x points down. `star_photons`
+samples a disk centred on the dish vertex, perpendicular to the optical axis,
+with a radius 1.2 times the dish radius. `sampling_area_m2` is its area. The
+distance of a point source is measured from the disk centre.
 
 ## File format
 

@@ -1,10 +1,8 @@
 # Scope and limitations
 
-obdeect replaces the ray tracing of sim_telarray. The effects below are
-deliberately left out: sim_telarray does not trace them either, so leaving
-them out keeps the two backends equivalent, and their size is small compared
-with the uncertainties of the parameters that describe them. Each section says
-what would change if they were added.
+obdeect traces light through the optical model to the camera entrance. The
+following effects are outside the current trace. Their impact depends on the
+instrument and its optical-model parameters.
 
 ## Misalignment of aspheric (dual-mirror) mirrors
 
@@ -13,26 +11,14 @@ telescopes (SST, SCT) are even polynomial surfaces (`mirror_class` 2) built
 from segments. In the real telescope each segment, and the secondary as a
 whole, can be tilted or shifted with respect to the design.
 
-**sim_telarray:** the alignment errors (`mirror_align_random_distance`,
-`_horizontal`, `_vertical`) and `random_focal_length` act only on the facets of
-segmented dishes (`mirror_class` 0; `sim_config.c`). Dual-mirror surfaces are
-traced at their design position; `primary_segmentation` and
-`secondary_segmentation` only define the gaps between segments. The measured
-PSF of the dual-mirror telescopes is reproduced by the surface-scattering
-parameter `mirror_reflection_random_angle`, which tilts the surface normal at
-every reflection.
+The alignment errors (`mirror_align_random_distance`, `_horizontal`,
+`_vertical`) and `random_focal_length` act only on the facets of segmented
+dishes (`mirror_class` 0). Dual-mirror surfaces are traced at their design
+position; `primary_segmentation` and `secondary_segmentation` define gaps
+between segments. The surface-scattering parameter
+`mirror_reflection_random_angle` tilts the surface normal at each reflection.
+See [validation](VALIDATION.md) for the resulting dual-mirror PSF comparisons.
 
-**obdeect:** the same. The dual-mirror PSF agrees with sim_telarray within
-0.15% (SST) and 0.10% (SCT) in D80 ([validation](VALIDATION.md)).
-
-**If it were added:** segment tilts and secondary decentring need per-segment
-frames and two random streams (segment, then secondary) keyed by the
-configuration seed, as for facets. Without measured misalignment
-distributions, the parameters would have to be tuned to the measured PSF,
-which the random reflection angle already does. Moving PSF width from
-scattering to misalignment changes the PSF shape (misalignment broadens
-differently with off-axis angle), so it should come with a PSF measurement
-that distinguishes the two. Not needed for sim_telarray equivalence.
 
 ## Curvature and refraction of the camera window (LST and others)
 
@@ -41,14 +27,9 @@ the pixels. Refraction in it shifts each photon sideways, moves the focus
 backwards, and delays the photon. A curved window additionally acts as a weak
 lens.
 
-**sim_telarray:** the window is part of the camera simulation, as a
-transmission only (`camera_filter`, over wavelength and, where given, incidence
-angle; `camera_transmission`). It has no geometry and no refraction.
-
-**obdeect:** stops at the camera entrance (the focal surface); everything
-after it, the window included, belongs to the camera simulation. simtools hands
-the photons to sim_telarray with the optics bypassed, where `camera_filter`
-acts as before. Nothing is lost relative to sim_telarray.
+obdeect stops at the camera entrance (the focal surface). The window and its
+transmission belong to the downstream camera simulation; window geometry and
+refraction are not traced.
 
 **Size of the effects** for a flat plate of thickness t and refractive index n
 (PMMA n = 1.49 as an example; the thickness of each camera window has to be
@@ -75,22 +56,14 @@ ray tracing would count it twice unless `focus_offset` were re-derived at the
 same time. The origin of each telescope's `focus_offset` has to be audited
 before any window refraction is added.
 
-**If it were added:** a window surface (plane or sphere) with thickness and an
-index table on the leg after the last mirror, applied after the focal-surface
-crossing has been redefined as the window entrance; the camera position of
-every telescope audited at the same time. Not needed for sim_telarray
-equivalence.
 
 ## Other effects not traced
 
 - **Telescope structure of LST, SST and SCT.** Only the MST has a
-  `telescope_structure` table (simulation-models branch
-  `simulation-model-masts`). The other telescopes use `telescope_transmission`,
-  sim_telarray's parametrised shadowing, in both backends. Tracing their masts
-  needs their geometry from the instrument teams (the sources of the shadowing
-  studies that the parametrisations were fitted to).
-- **Pixels, light guides, photodetectors:** camera simulation (sim_telarray).
+  `telescope_structure` table in the models examined. The other telescopes use
+  `telescope_transmission`, a parametrisation of shadowing.
+- **Pixels, light guides, photodetectors:** handled by downstream camera simulation.
 - **Refraction in air** between an illuminator and the telescope: a few arcsec
-  over hundreds of metres ([Differences from sim_telarray](sim-telarray-differences.md)).
+  over hundreds of metres.
 - **Diffraction and polarisation:** irrelevant at the size of IACT mirrors and
   for unpolarised Cherenkov light.

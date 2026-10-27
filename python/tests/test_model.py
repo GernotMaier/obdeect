@@ -201,7 +201,7 @@ def test_dual_mirror_focus():
     photons = model.star_photons(100000, seed=6, distance_m=1e7)
     arrivals = model.trace(photons, seed=6, apply_responses=False)
     result = summary(arrivals, model.sampling_area_m2)
-    # The SST design images a star on-axis into ~6 mm (sim_telarray: 7.05 mm with mirror errors).
+    # The SST design images an on-axis star into approximately 6 mm.
     assert 0.005 < result["d80_m"] < 0.007
     detected = arrivals["status"] == DETECTED
     assert np.all(np.isfinite(arrivals["secondary_point_m"][detected]))

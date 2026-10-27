@@ -19,8 +19,7 @@ struct ModelError : std::runtime_error {
 
 // Random reflection error: with probability fraction2 the Gaussian width is
 // sigma2, otherwise sigma1 (radians, per axis). `surface_slopes` perturbs the
-// surface slope by half the angle (sim_telarray polynomial mirrors);
-// otherwise the reflected direction is rotated (sim_telarray facets).
+// surface slope by half the angle; otherwise the reflected direction is rotated.
 struct Scatter {
   double sigma1_rad{}, fraction2{}, sigma2_rad{};
   bool surface_slopes{};
@@ -56,7 +55,7 @@ struct TelescopeTransmission {
 };
 
 // Photons end on the focal surface: a plane z = plane_z or an asphere. The
-// plane is unbounded, as in sim_telarray, so the image is never truncated.
+// plane is unbounded, so the image is never truncated.
 struct FocalSurface {
   std::uint32_t id{};
   double plane_z{};

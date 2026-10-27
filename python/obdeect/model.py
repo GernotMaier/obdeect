@@ -109,7 +109,7 @@ class OpticalModel:
 
     @property
     def sampling_area_m2(self) -> float:
-        """Area of the disk star photons are sampled on (sim_telarray convention)."""
+        """Area of the disk on which star photons are sampled."""
         return math.pi * self._document["sampling"]["disk_radius_m"] ** 2
 
     @property
@@ -233,12 +233,12 @@ class OpticalModel:
         wavelength_nm: float = 400.0,
         first_id: int = 0,
     ) -> dict[str, np.ndarray]:
-        """Photons from a star or a point source, as in sim_telarray's star light.
+        """Sample photons from a star or a point source.
 
         `towards_source` is the unit vector to the source in the telescope frame
         (+z along the optical axis, towards the sky); `distance_m` is the
-        source distance from the dish vertex (the centre of the sampled disk,
-        as in sim_telarray). Times are zero for the wavefront at that point.
+        source distance from the dish vertex, the centre of the sampled disk.
+        Times are zero for the wavefront at that point.
         """
         sampling = self._document["sampling"]
         direction = np.asarray(towards_source, dtype=float)

@@ -1,8 +1,7 @@
 """Compile simulation-models parameter records into an obdeect optical model.
 
-The optical model reproduces sim_telarray's telescope set-up (``tel_setup_*``
-in ``sim_imaging.c`` and ``sim_config.c``) up to the camera entrance:
-mirrors, their random errors, shadowing and optical responses. Camera filter,
+The optical model describes mirrors, their random errors, shadowing and optical
+responses up to the camera entrance. Camera filter,
 light guides, quantum efficiency and pixels belong to the camera simulation.
 
 The input is a mapping from parameter name to its simulation-models record
@@ -166,8 +165,7 @@ def compile_model(
 
 
 def _sampling(p: _Parameters, optics: dict[str, Any]) -> dict[str, float]:
-    """sim_telarray star-light sampling (sim_config.c setup_starlight): a disk of
-    1.2 times the dish radius, perpendicular to the optical axis at the dish
+    """Sample a disk of 1.2 times the dish radius, perpendicular to the optical axis at the dish
     reference height; rays start above every surface and obscurer."""
     overall = (
         signed_length_m(p.record("mirror_offset"), "mirror_offset") if "mirror_offset" in p else 0.0
@@ -219,7 +217,7 @@ def _surface_ids(optics: dict[str, Any]) -> list[int]:
     return ids
 
 
-# --- Segmented single-mirror telescopes (LST, MST): sim_imaging.c tel_setup_primary ---
+# --- Segmented single-mirror telescopes ---
 
 
 def _segmented_telescope(p: _Parameters, seed: int, zenith_deg: float | None) -> dict[str, Any]:
@@ -274,7 +272,7 @@ def _file_args(p: _Parameters, name: str) -> tuple[str, str, str]:
 
 
 def _panel_prescription(facets: list[dict[str, Any]], p: _Parameters, seed: int) -> None:
-    """Focal lengths and distances to the focus, with sim_telarray's random errors."""
+    """Focal lengths and distances to the focus, with random errors."""
     if p.value("flip_mirrors", False) not in (False, True, 0, 1):
         raise ModelError("flip_mirrors must be boolean")
     if p.value("flip_mirrors", False):
@@ -351,7 +349,7 @@ def _panel_prescription(facets: list[dict[str, Any]], p: _Parameters, seed: int)
         if limit > 100 * sigma:
             error = limit * (rng.random() - 0.5)
         elif sigma:
-            # Clipped Gaussian by inverse CDF; sim_telarray rejects and redraws.
+            # Sample a clipped Gaussian by inverse CDF.
             lo = NormalDist().cdf(-limit / sigma) if limit else 0.0
             hi = NormalDist().cdf(limit / sigma) if limit else 1.0
             u = min(max(lo + (hi - lo) * rng.random(), 1e-300), 1 - 1e-16)
@@ -371,7 +369,7 @@ def _gauss(rng: random.Random) -> float:
 def _nominal_placement(
     facets: list[dict[str, Any]], p: _Parameters, focal: float, overall: float
 ) -> None:
-    """Mirror centres on the dish (sim_imaging.c tel_setup_primary)."""
+    """Place mirror centres on the dish."""
     opt = [number(v, "mirror_opt") for v in p.value("mirror_opt", [0.0, 0.0, 0.0])]
     for facet in facets:
         x, y, z_file = facet["centre_m"]
@@ -387,7 +385,7 @@ def _nominal_placement(
 def _panel_alignment(
     facets: list[dict[str, Any]], p: _Parameters, seed: int, zenith_deg: float | None
 ) -> None:
-    """Random mirror tilts and the mirror frame (Euler angles of sim_telarray's make_trafo)."""
+    """Apply random mirror tilts and compute the mirror frame."""
     widths = []
     for name in ("mirror_align_random_horizontal", "mirror_align_random_vertical"):
         if name not in p:
@@ -424,14 +422,13 @@ def _panel_alignment(
         facet["normal"] = [-c * si * cg - t * sg, -t * si * cg + c * sg, ci * cg]
         u = [c * ci, t * ci, si]
         v = [-t * cg + c * si * sg, c * cg + t * si * sg, -ci * sg]
-        # Aperture frame rotated by the mirror azimuth (sim_telarray's phi_m).
+        # Rotate the aperture frame by the mirror azimuth.
         facet["tangent"] = [c * a - t * b for a, b in zip(u, v, strict=True)]
         facet["map_tangent"] = u
 
 
 def _focus_offset(p: _Parameters, zenith_deg: float | None) -> float:
-    """Camera focus offset; the zenith terms apply only when both are non-zero,
-    as in sim_config.c."""
+    """Camera focus offset; zenith terms apply only when both are non-zero."""
     if "focus_offset" not in p:
         return 0.0
     values, units = components(p.record("focus_offset"), "focus_offset", 4)
@@ -449,7 +446,7 @@ def _focus_offset(p: _Parameters, zenith_deg: float | None) -> float:
 
 
 def _camera_body(p: _Parameters, front_z: float, *, after_primary: bool) -> list[dict[str, Any]]:
-    """Camera body shadow as sim_telarray tests it.
+    """Construct camera body obscurers.
 
     Single-mirror telescopes test the projection of the incoming ray onto the
     camera front plane and, with a camera depth, onto its back plane. Dual-mirror
@@ -512,7 +509,7 @@ def _mirror_response(
     """Reflectivity resampled on a 1 nm grid, times the degradation factor.
 
     A secondary mirror without its own table (value "same" or no parameter)
-    reflects like the primary, as in sim_telarray.
+    uses the primary reflectivity.
     """
     if same_as and (table not in p or str(p.value(table)).lower() == "same"):
         table = same_as
@@ -536,8 +533,7 @@ def _response_json(contents: str, name: str, options: str, factor: float) -> str
 def response_grid(table: dict[str, Any], factor: float = 1.0) -> dict[str, Any]:
     """Resample a response table onto a 1 nm wavelength grid.
 
-    1-D tables use their declared RPOL interpolation; 2-D tables are bilinear,
-    as in sim_telarray.
+    1-D tables use their declared RPOL interpolation; 2-D tables are bilinear.
     """
     x, y, values = table["x"], table["y"], table["values"]
     start, stop = math.floor(x[0]), math.ceil(x[-1])
@@ -576,7 +572,7 @@ def _scatter(p: _Parameters, mirror: dict[str, Any], *, surface_slopes: bool) ->
 
 
 def _telescope_transmission(p: _Parameters, *, dual: bool) -> dict[str, float]:
-    """sim_config.c conventions: method 1 enables the angular term; a zero scale
+    """Method 1 enables the angular term; a zero scale
     means the camera half-angle."""
     values = p.value("telescope_transmission")
     values = values if isinstance(values, list) else [values]
@@ -609,7 +605,7 @@ def _telescope_transmission(p: _Parameters, *, dual: bool) -> dict[str, float]:
     }
 
 
-# --- Dual-mirror telescopes (SST, SCT): sim_imaging.c tel_setup_secondary ---
+# --- Dual-mirror telescopes ---
 
 
 def _dual_mirror_telescope(p: _Parameters, zenith_deg: float | None) -> dict[str, Any]:
@@ -619,8 +615,7 @@ def _dual_mirror_telescope(p: _Parameters, zenith_deg: float | None) -> dict[str
     primary_surface = _asphere(p, "primary_mirror")
     secondary_surface = _asphere(p, "secondary_mirror")
     focal_surface = _asphere(p, "focal_surface", aperture=False)
-    # sim_telarray rotates the secondary frame by pi about y: in the telescope
-    # frame its sag changes sign.
+    # Rotate the secondary frame by pi about y; its sag changes sign.
     coefficients = secondary_surface["coefficients_m"]
     if coefficients[0] < primary_surface["coefficients_m"][0]:
         coefficients[0] = -coefficients[0]
@@ -742,7 +737,7 @@ def _vertex_form(surface: dict[str, Any]) -> dict[str, Any]:
 
 
 def _asphere(p: _Parameters, prefix: str, *, aperture: bool = True) -> dict[str, Any]:
-    """Even polynomial z(r) in metres, as in sim_config.c.
+    """Even polynomial z(r) in metres.
 
     Without a reference radius the coefficients are physical-centimetre powers;
     with one, z = R sum a_i (r/R)^(2i).
@@ -775,10 +770,10 @@ def _asphere(p: _Parameters, prefix: str, *, aperture: bool = True) -> dict[str,
 
 
 def _baffle(record: dict[str, Any], overall: float) -> dict[str, Any] | None:
-    """Secondary baffle (sim_telarray manual 12.3.3): an open cone wall.
+    """Secondary baffle: an open cone wall.
 
-    The values are z1, z2, R1, the wall thickness and R2 (zero: R2 = R1). As in
-    sim_config.c, a thickness not below R1 is the outer radius at z1.
+    The values are z1, z2, R1, the wall thickness and R2 (zero: R2 = R1).
+    A thickness not below R1 is the outer radius at z1.
     """
     values = record.get("value")
     if not isinstance(values, list) or not 3 <= len(values) <= 5:
@@ -807,7 +802,7 @@ def _baffle(record: dict[str, Any], overall: float) -> dict[str, Any] | None:
     }
 
 
-# --- Telescope structure (beyond sim_telarray): masts, quadrupods, dish frame ---
+# --- Telescope structure: masts, quadrupods, dish frame ---
 
 
 def _structure(p: _Parameters, first_id: int) -> list[dict[str, Any]]:

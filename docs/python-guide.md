@@ -12,7 +12,7 @@ image = arrivals["position_m"][arrivals["status"] == DETECTED]
 ```
 
 `OpticalModel.from_records(records, read_file, ...)` compiles parameter records
-held in memory (simtools uses it); `save`/`load` store the optical model as JSON.
+held in memory; `save`/`load` store the optical model as JSON.
 
 `trace` takes photons as arrays: `position_m` (n, 3), `direction` (n, 3, unit
 vectors), `wavelength_nm`, `time_ns`, `weight` and `photon_id` (uint64; the
