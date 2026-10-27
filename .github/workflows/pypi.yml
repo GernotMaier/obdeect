@@ -1,5 +1,5 @@
 ---
-name: Build and publish obdeect-dev
+name: Build and publish obdeect
 
 on:
   pull_request:

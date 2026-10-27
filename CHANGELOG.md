@@ -3,6 +3,13 @@
 This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and uses semantic versioning after the first stable release.
 
+## [0.6.0]
+
+### Changed
+
+- The PyPI distribution is named `obdeect`. Install with `pip install obdeect`.
+  The repository is hosted in the `gammasim` organisation.
+
 ## [0.5.0]
 
 Maintenance release: CI workflows and changelog. No change to the code or the Python API.

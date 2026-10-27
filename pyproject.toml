@@ -3,7 +3,7 @@ build-backend = "scikit_build_core.build"
 requires = [ "nanobind>=3.1", "scikit-build-core>=0.10", "setuptools-scm>=8" ]
 
 [project]
-name = "obdeect-dev"
+name = "obdeect"
 description = "Ray tracing for imaging atmospheric Cherenkov telescopes"
 readme = "README.md"
 license = { file = "LICENSE" }
