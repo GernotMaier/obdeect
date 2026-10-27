@@ -14,11 +14,10 @@
 
 namespace obdeect {
 
-// Light from a star (plane wave) or a point source at a finite distance,
-// sampled as in sim_telarray's star-light set-up: target points uniform on a
-// disk perpendicular to the optical axis, centred on the axis at height
-// `disk_z_m`. As in sim_telarray, `distance_m` is measured from the disk
-// centre. Each ray then starts where it crosses the plane `start_z_m`, above
+// Light from a star (plane wave) or a point source at a finite distance.
+// Target points are uniform on a disk perpendicular to the optical axis,
+// centred on the axis at height `disk_z_m`. `distance_m` is measured from
+// the disk centre. Each ray then starts where it crosses the plane `start_z_m`, above
 // all telescope structure. The disk area is the sampled area for
 // effective-area estimates.
 struct PointSource {

@@ -963,7 +963,7 @@ void sources() {
   }
   CHECK_NEAR(inside / 100000.0, 0.25, 0.005);
   // A nearby point source emits from its own position below the start plane;
-  // its distance is measured from the disk centre (sim_telarray).
+  // its distance is measured from the disk centre.
   PointSource lamp{normalized({0.6, 0, 0.8}), 20.0, 1.0, 1.5, 30.0, 400.0};
   const auto p = sample_source(lamp, 0, 3);
   CHECK_NEAR(p.ray.origin.x, 12.0, 1e-12);

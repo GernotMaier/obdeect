@@ -54,7 +54,7 @@ def test_focus_offset_zenith_terms_need_both_components():
         ]
 
     assert plane([2.0, 20.0, 0.0, 0.0]) == pytest.approx(8.52)
-    assert plane([2.0, 20.0, 3.0, 0.0]) == pytest.approx(8.52)  # As sim_config.c: needs both terms.
+    assert plane([2.0, 20.0, 3.0, 0.0]) == pytest.approx(8.52)  # Both zenith terms are required.
     expected = 8.52 + 0.01 * (
         3.0 * (math.cos(math.radians(60)) - math.cos(math.radians(20)))
         + 4.0 * (math.sin(math.radians(60)) - math.sin(math.radians(20)))
@@ -137,7 +137,7 @@ def test_dual_mirror_telescope():
     optics = model["optics"]
     primary, secondary = optics["primary"]["asphere"], optics["secondary"]["asphere"]
     assert primary["vertex_z_m"] == 0.0 and secondary["vertex_z_m"] == pytest.approx(3.1084)
-    # sim_telarray's secondary frame is rotated by pi: its curvature flips sign.
+    # The secondary frame is rotated by pi: its curvature flips sign.
     assert secondary["coefficients_m"][1] == pytest.approx(-0.00229358 * 100)
     assert optics["focal_surface"]["asphere"]["vertex_z_m"] == pytest.approx(2.5888)
     assert not optics["secondary_blocks_incoming"]
@@ -162,7 +162,7 @@ def test_secondary_baffle_wall_thickness_or_outer_radius():
     wall = baffle([294.8, 273.6, 97.0, 10.0, 0.0])
     assert wall["thickness_m"] == pytest.approx(0.10)
     assert wall["start_radius_m"] == wall["end_radius_m"] == pytest.approx(0.97)
-    # A fourth value not below R1 is the outer radius (sim_config.c).
+    # A fourth value not below R1 is the outer radius.
     assert baffle([294.8, 273.6, 97.0, 107.0, 0.0])["thickness_m"] == pytest.approx(0.10)
     cone = baffle([294.8, 273.6, 97.0, 5.0, 90.0])
     assert cone["end_radius_m"] == pytest.approx(0.90) and cone["thickness_m"] == pytest.approx(

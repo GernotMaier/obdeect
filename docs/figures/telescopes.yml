@@ -1,0 +1,68 @@
+---
+schema_name: application_workflow.metaschema
+schema_version: 0.5.0
+applications:
+- application: simtools-plot-telescope-structure
+  configuration:
+    site: North
+    telescope: LSTN-01
+    model_version: 7.0.0
+    simulation_models_git_path: __SIMULATION_MODELS__
+    simulation_models_git_revision: __MODEL_REVISION__
+    output_path: __OUTPUT__/LSTN-01
+    figure_format: [png]
+    figure_dpi: 160
+- application: simtools-plot-telescope-structure
+  configuration:
+    site: North
+    telescope: MSTN-01
+    model_version: 7.0.0
+    simulation_models_git_path: __SIMULATION_MODELS__
+    simulation_models_git_revision: __MODEL_REVISION__
+    output_path: __OUTPUT__/MSTN-01
+    figure_format: [png]
+    figure_dpi: 160
+- application: simtools-plot-telescope-structure
+  configuration:
+    site: South
+    telescope: MSTS-01
+    model_version: 7.0.0
+    simulation_models_git_path: __SIMULATION_MODELS__
+    simulation_models_git_revision: __MODEL_REVISION__
+    output_path: __OUTPUT__/MSTS-01
+    figure_format: [png]
+    figure_dpi: 160
+- application: simtools-plot-telescope-structure
+  configuration:
+    site: South
+    telescope: SSTS-01
+    model_version: 7.0.0
+    simulation_models_git_path: __SIMULATION_MODELS__
+    simulation_models_git_revision: __MODEL_REVISION__
+    output_path: __OUTPUT__/SSTS-01
+    figure_format: [png]
+    figure_dpi: 160
+- application: simtools-plot-telescope-structure
+  configuration:
+    site: South
+    telescope: SCTS-design
+    model_version: 7.0.0
+    simulation_models_git_path: __SIMULATION_MODELS__
+    simulation_models_git_revision: __MODEL_REVISION__
+    output_path: __OUTPUT__/SCTS-design
+    figure_format: [png]
+    figure_dpi: 160
+- application: simtools-plot-telescope-structure
+  configuration:
+    site: South
+    telescope: MSTS-01
+    model_version: 7.0.0
+    simulation_models_git_path: __SIMULATION_MODELS__
+    simulation_models_git_revision: __MODEL_REVISION__
+    output_path: __OUTPUT__/MSTS-shadowing
+    figure_format: [png]
+    figure_dpi: 160
+    shadowing: true
+    zenith_angle: 20.0
+    photons: 1000000
+    seed: 11

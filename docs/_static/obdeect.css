@@ -1,0 +1,55 @@
+.navbar-brand .logo__image {
+  height: 4.5rem;
+  width: auto;
+}
+
+/* Keep prose readable while giving navigation cards room to breathe. */
+.bd-main .bd-content .bd-article-container {
+  max-width: 58rem;
+}
+
+.bd-article h1 {
+  margin-bottom: 1.5rem;
+  letter-spacing: -0.025em;
+}
+
+.bd-article h2 {
+  margin-top: 2.25rem;
+}
+
+.sd-card {
+  border-radius: 0.75rem;
+}
+
+.sd-card-title {
+  font-size: 1.15rem;
+}
+
+.sd-card-body {
+  padding: 1.4rem;
+}
+
+.bd-article table {
+  font-size: 0.9rem;
+}
+
+/* Landing-page banner and links, matching the simtools documentation layout. */
+.homepage-logo {
+  display: block;
+  width: 100%;
+  max-width: 48rem;
+  height: auto;
+  margin: 0 auto 2rem;
+  border-radius: 0.75rem;
+}
+
+.homepage-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin: 1.5rem 0 2rem;
+}
+
+.homepage-actions p {
+  margin: 0;
+}

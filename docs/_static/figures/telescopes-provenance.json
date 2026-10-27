@@ -1,0 +1,80 @@
+{
+  "simulation_models_version": "7.0.0",
+  "simulation_models_revision": "2ed8d06347c8552367288eacab28ec0b75aaf01c",
+  "simulation_models_source": "Git revision; local working-tree edits are not used",
+  "simtools_revision": "da999d2b02b6a8eb59ca0b0469e5b00b733aa8dc",
+  "obdeect_revision": "7d361aceaea463dcc0066e52b78ac03e5826d584",
+  "workflow": "docs/figures/telescopes.yml",
+  "workflow_sha256": "14bf4b8a91969cb44271f04a90cb6da45099f39d9f8ed13825b4a5835d533d19",
+  "application": "simtools-plot-telescope-structure",
+  "figures": [
+    {
+      "file": "telescope_lst.png",
+      "telescope": "LSTN-01",
+      "sha256": "1937c12997fa50e15df6954422aa0f5ec377bbd3fd5e7baa48883cc4c117a5e3",
+      "geometry_tables_sha256": {
+        "mirror_list-2.0.0-LSTN-01.ecsv": "fc52bbf004931693de94ad1c0265a1bbb034b34ea8b6052ac4c3491d03c675f3"
+      },
+      "shadowing": false
+    },
+    {
+      "file": "telescope_mst_nectarcam.png",
+      "telescope": "MSTN-01",
+      "sha256": "01832b0a2501ff7fd1860982df8b013a7b4a369e4a5cecbe1a88ef921911d07e",
+      "geometry_tables_sha256": {
+        "mirror_list-1.0.0-MSTx-NectarCam.ecsv": "d8cd4089e9853890f98540e2d9215e8de5e3b85831d0ef63041105694b27afa1"
+      },
+      "shadowing": false
+    },
+    {
+      "file": "telescope_mst_flashcam.png",
+      "telescope": "MSTS-01",
+      "sha256": "a3276b34d3ea6e85772159f3da1b591cb207b214a7c2f608f7d222144b3c0776",
+      "geometry_tables_sha256": {
+        "mirror_list-1.0.0-MSTx-FlashCam.ecsv": "58e0c74448ca03121f28336bd56775410654d4026630c5782c8c3f38a1261968",
+        "telescope_structure-1.0.0-MSTx-FlashCam.ecsv": "7db2ad66edd53d21c69ad86d16852eb855405b02934dc28e02531dc6d3510f12"
+      },
+      "shadowing": false
+    },
+    {
+      "file": "telescope_sst.png",
+      "telescope": "SSTS-01",
+      "sha256": "71f5081d9ced10158f3ac258d5d074b534f0f7b512d84df0af1dc1ded74584fe",
+      "geometry_tables_sha256": {
+        "mirror_list-1.0.0-SSTS-design.ecsv": "89ea971fc243760fe8cd6bc8f85f8e9b33c723435ce326af7fdfb33c5ddfb4a0"
+      },
+      "shadowing": false
+    },
+    {
+      "file": "telescope_sct.png",
+      "telescope": "SCTS-design",
+      "sha256": "ad486f54ba2e783cf07e447233dcacb35c899bfeff7d88d255f2e1d494961512",
+      "geometry_tables_sha256": {
+        "mirror_list-1.0.0-SCTS-design.ecsv": "eae91b6ad135ec43297bee1d733f7b6a2a759a8fef9b3e9a161257af4f508c0d"
+      },
+      "shadowing": false
+    },
+    {
+      "file": "mst_shadowing.png",
+      "telescope": "MSTS-01",
+      "sha256": "dd78e095099d58c3488d7db40cc092ee9a3bfa19c727e537047aec1950d7ce62",
+      "geometry_tables_sha256": {
+        "mirror_list-1.0.0-MSTx-FlashCam.ecsv": "58e0c74448ca03121f28336bd56775410654d4026630c5782c8c3f38a1261968",
+        "telescope_structure-1.0.0-MSTx-FlashCam.ecsv": "7db2ad66edd53d21c69ad86d16852eb855405b02934dc28e02531dc6d3510f12"
+      },
+      "shadowing": true,
+      "sampling": {
+        "photons": 1000000,
+        "zenith_deg": 20.0,
+        "field_deg": [
+          0.0,
+          0.0
+        ],
+        "distance": "infinity",
+        "source_seed": 11,
+        "trace_seed": 12,
+        "configuration_seed": 1
+      }
+    }
+  ]
+}
