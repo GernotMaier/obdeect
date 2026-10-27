@@ -12,14 +12,14 @@ structure to the camera entrance, using a compiled optical model.
 
 :::{container} homepage-actions
 
-```{button-link} https://github.com/GernotMaier/obdeect
+```{button-link} https://github.com/gammasim/obdeect
 :color: primary
 :shadow:
 
 {fab}`github` GitHub Repository
 ```
 
-```{button-link} https://github.com/GernotMaier/obdeect/blob/main/LICENSE
+```{button-link} https://github.com/gammasim/obdeect/blob/main/LICENSE
 :color: secondary
 :outline:
 

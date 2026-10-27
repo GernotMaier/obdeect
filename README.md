@@ -19,7 +19,7 @@ Install from PyPI with:
 ```sh
 python -m venv .venv
 source .venv/bin/activate
-python -m pip install obdeect-dev
+python -m pip install obdeect
 ```
 
 (requires python 3.14 or higher)

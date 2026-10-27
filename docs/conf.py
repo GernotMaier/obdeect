@@ -46,7 +46,7 @@ html_logo = "_static/images/obdeect_21ratio_small.jpg"
 html_css_files = ["obdeect.css"]
 DOCS_SOURCE = Path(os.environ.get("OBDEECT_DOCS_SOURCE", Path(__file__).parent))
 DOCS_VERSION = os.environ.get("OBDEECT_DOCS_VERSION", "dev")
-DOCS_BASE_URL = os.environ.get("OBDEECT_DOCS_BASE_URL", "https://GernotMaier.github.io/obdeect")
+DOCS_BASE_URL = os.environ.get("OBDEECT_DOCS_BASE_URL", "https://gammasim.github.io/obdeect")
 html_static_path = [str(DOCS_SOURCE / "_static")]
 # The current theme/CSS also applies to releases predating the documentation site.
 html_static_path.append(str(Path(__file__).parent / "_static"))
@@ -66,7 +66,7 @@ html_theme_options = {
     "icon_links": [
         {
             "name": "GitHub",
-            "url": "https://github.com/GernotMaier/obdeect",
+            "url": "https://github.com/gammasim/obdeect",
             "icon": "fa-brands fa-github",
         },
     ],

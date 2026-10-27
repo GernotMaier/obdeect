@@ -7,8 +7,8 @@ and uses semantic versioning after the first stable release.
 
 ### Changed
 
-- The PyPI distribution is named `obdeect` (previously `obdeect-dev`). Install with
-  `pip install obdeect`. The repository moves to the `gammasim` organisation.
+- The PyPI distribution is named `obdeect`. Install with `pip install obdeect`.
+  The repository is hosted in the `gammasim` organisation.
 
 ## [0.5.0]
 

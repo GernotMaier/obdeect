@@ -5,7 +5,7 @@ Install the Python package and the `obdeect` command in a virtual environment:
 ```sh
 python3.14 -m venv .venv
 source .venv/bin/activate
-python -m pip install obdeect-dev
+python -m pip install obdeect
 obdeect --help
 ```
 
