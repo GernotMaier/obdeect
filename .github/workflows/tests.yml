@@ -32,6 +32,15 @@ jobs:
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build --parallel
       - name: Run native and Python tests
         run: ctest --test-dir build --output-on-failure && pytest python/tests
+  fma:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Configure, build, and test with OBDEECT_USE_FMA
+        run: >-
+          cmake -S . -B build-fma -DCMAKE_BUILD_TYPE=Release -DOBDEECT_USE_FMA=ON
+          && cmake --build build-fma --parallel
+          && ctest --test-dir build-fma --output-on-failure
   sanitizers:
     runs-on: ubuntu-24.04
     steps:
