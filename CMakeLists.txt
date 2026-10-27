@@ -28,6 +28,10 @@ endif()
 option(OBDEECT_USE_FMA "Use std::fma in the aspheric polynomial evaluation" OFF)
 if(OBDEECT_USE_FMA)
   target_compile_definitions(obdeect_core INTERFACE OBDEECT_USE_FMA=1)
+  # Without -mfma, x86-64 compilers call the math library for std::fma instead of inlining it.
+  if(NOT MSVC AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64|amd64")
+    target_compile_options(obdeect_core INTERFACE -mfma)
+  endif()
 endif()
 
 function(obdeect_enable_warnings target)
