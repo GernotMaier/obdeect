@@ -4,7 +4,7 @@ import importlib
 from importlib.metadata import PackageNotFoundError, version
 
 try:
-    __version__ = version("obdeect-dev")
+    __version__ = version("obdeect")
 except PackageNotFoundError:
     __version__ = "0.0.0"
 
