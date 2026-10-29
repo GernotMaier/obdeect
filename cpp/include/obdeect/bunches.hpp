@@ -33,13 +33,24 @@ struct BunchFrame {
   double plane_z{};          // Input units.
 };
 
+// Wavelength of bunches with wavelength 0: density proportional to 1/lambda^2
+// on [lo_nm, hi_nm], truncated to integer nm.
+struct InverseSquareLaw {
+  double lo_nm{};
+  double hi_nm{};
+};
+
 struct BunchOptions {
   // Acceptance outside the telescope as a function of wavelength [nm] (x) and
   // emission height [m] (y), values in [0, 1]; null means 1.
   const Map2D *acceptance{};
   const LinearDensity *wavelength_density{}; // Over nm, for bunches of wavelength 0.
+  // Alternative to wavelength_density for bunches of wavelength 0 (not both).
+  const InverseSquareLaw *wavelength_law{};
   bool roulette{true};                       // Survivors get weight 1 (else the weight ratio).
   bool classify_losses{true};
+  // Roulette weights and bound relative to the telescope transmission's on-axis value.
+  bool normalise_transmission{false};
 };
 
 // Output columns, with room for the rows the allocator was asked for. Vectors
@@ -102,7 +113,8 @@ public:
       const double size = in_.size[i];
       const double lambda = in_.wavelength_nm[i];
       if (!(size > 0.0 && size <= kMaxBunchSize) || !std::isfinite(lambda) || lambda < 0.0 ||
-          (lambda == 0.0 && !options_.wavelength_density) || !std::isfinite(in_.x[i]) ||
+          (lambda == 0.0 && !options_.wavelength_density && !options_.wavelength_law) ||
+          !std::isfinite(in_.x[i]) ||
           !std::isfinite(in_.y[i]) || !std::isfinite(in_.cx[i]) || !std::isfinite(in_.cy[i]) ||
           !(static_cast<double>(in_.cx[i]) * in_.cx[i] +
                 static_cast<double>(in_.cy[i]) * in_.cy[i] <=
@@ -134,13 +146,20 @@ public:
                  {r[0] * cx + r[1] * cy + r[2] * cz, r[3] * cx + r[4] * cy + r[5] * cz,
                   r[6] * cx + r[7] * cy + r[8] * cz}};
     };
-    // Bound and acceptance of the last wavelength (and height): showers have
-    // many bunches of one wavelength.
+    // Divisor of the bound and of the roulette weight: the on-axis transmission,
+    // if normalised. The telescope transmission enters the photon weights as
+    // t(theta) / t0 because sim_telarray already applies t0 in its bunch loop.
+    const double norm = options_.normalise_transmission && model_.telescope_transmission &&
+                                model_.telescope_transmission->on_axis > 0.0
+                            ? model_.telescope_transmission->on_axis
+                            : 1.0;
+    // Bound (relative to norm) and acceptance of the last wavelength (and
+    // height): showers have many bunches of one wavelength.
     double cached_lambda = -1.0, cached_zem = 0.0, cached_bound = 0.0, cached_acceptance = 1.0;
     const auto response = [&](double lambda, double zem_m) {
       if (lambda != cached_lambda) {
         cached_lambda = lambda;
-        cached_bound = response_bound(model_, lambda);
+        cached_bound = response_bound(model_, lambda) / norm;
         cached_zem = std::numeric_limits<double>::quiet_NaN();
       }
       if (zem_m != cached_zem) {
@@ -163,8 +182,18 @@ public:
         const auto sub = static_cast<std::uint32_t>(k);
         const double frac = static_cast<double>(k + 1) <= size ? 1.0 : size - std::floor(size);
         if (!fixed) {
-          lambda =
-              options_.wavelength_density->sample(uniform4(seed_, id, Stream::wavelength, sub)[0]);
+          if (options_.wavelength_law) {
+            // Inverse transform of 1/lambda^2; u in (0, 1), so the value lies in (lo, hi).
+            const auto &law = *options_.wavelength_law;
+            const double u = uniform4(seed_, id, Stream::wavelength, sub)[0];
+            const double exact =
+                1.0 / (1.0 / law.lo_nm - u * (1.0 / law.lo_nm - 1.0 / law.hi_nm));
+            // Truncation to integer nm as sim_telarray does: lambda in [floor(lo), hi).
+            lambda = std::floor(exact);
+          } else {
+            lambda = options_.wavelength_density->sample(
+                uniform4(seed_, id, Stream::wavelength, sub)[0]);
+          }
           response(lambda, zem_m);
         }
         const double bound = cached_bound;
@@ -180,7 +209,7 @@ public:
                                     options_.classify_losses, sub);
         if (t.status != Status::detected)
           continue;
-        const double ratio = std::min(1.0, t.weight / bound);
+        const double ratio = std::min(1.0, (t.weight / norm) / cached_bound);
         if (options_.roulette && !(draw[1] < ratio))
           continue;
         out.position_m[3 * row] = t.position.x;
@@ -236,6 +265,14 @@ std::size_t trace_bunches(const OpticalModel &model, const BunchBlock &in, const
     detail::validate_acceptance(*options.acceptance);
   if (options.wavelength_density && !(options.wavelength_density->lower() > 0.0))
     throw std::invalid_argument("bunch wavelength density: nodes must start above 0 nm");
+  if (options.wavelength_law) {
+    const auto &law = *options.wavelength_law;
+    if (!std::isfinite(law.lo_nm) || !std::isfinite(law.hi_nm) || !(law.lo_nm > 0.0) ||
+        !(law.hi_nm > law.lo_nm))
+      throw std::invalid_argument("bunch wavelength law: need finite 0 < lo_nm < hi_nm");
+    if (options.wavelength_density)
+      throw std::invalid_argument("bunch wavelength: set one wavelength law");
+  }
   validate_bound_support(model); // Throws ModelError for an unsupported transmission.
   const detail::BunchTask task(model, in, frame, options, seed);
 

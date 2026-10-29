@@ -339,6 +339,51 @@ def test_sampled_wavelengths_follow_the_density():
     assert out["wavelength_nm"].min() >= 300.0 and out["wavelength_nm"].max() <= 600.0
 
 
+def test_inverse_square_law_gives_integer_wavelengths_in_range():
+    model = edited(compiled(telescope_transmission=None), constant_reflectivity(1.0))
+    bunches, plane_z = star_bunches(model, 20000, wavelength_nm=0.0)
+    out = trace_bunches(model, bunches, plane_z, wavelength_law=(300.0, 600.0), roulette=False)
+    w = out["wavelength_nm"]
+    assert len(w) > 1000
+    assert np.all(w == np.floor(w))
+    assert np.all((w >= 300.0) & (w < 600.0))
+
+
+def test_inverse_square_law_follows_the_law():
+    # Density p(l) = (1/l^2) / (1/lo - 1/hi) on [lo, hi] has E[l] = ln(hi/lo) / (1/lo - 1/hi).
+    # Truncating to integer nm lowers each wavelength by its fractional part, which is
+    # uniform to good accuracy, so the mean of the floored values is E[l] - 0.5.
+    lo, hi = 300.0, 600.0
+    model = edited(compiled(telescope_transmission=None), constant_reflectivity(1.0))
+    n = 200_000
+    bunches, plane_z = star_bunches(model, n, wavelength_nm=0.0)
+    out = trace_bunches(model, bunches, plane_z, wavelength_law=(lo, hi), roulette=False)
+    w = out["wavelength_nm"]
+    expected = math.log(hi / lo) / (1.0 / lo - 1.0 / hi) - 0.5
+    sd = w.std(ddof=1)
+    print(
+        f"wavelength mean {w.mean():.4f} vs {expected:.4f}, limit {5 * sd / math.sqrt(len(w)):.4f}"
+    )
+    assert len(w) > 50_000
+    assert abs(w.mean() - expected) < 5 * sd / math.sqrt(len(w))
+
+
+def test_wavelength_law_rejects_invalid_limits():
+    model = compiled(telescope_transmission=None)
+    bunches, plane_z = star_bunches(model, 100, wavelength_nm=0.0)
+    for law in ((0.0, 600.0), (-300.0, 600.0), (600.0, 600.0), (600.0, 300.0), (300.0, np.inf)):
+        with pytest.raises(ValueError, match="wavelength law"):
+            trace_bunches(model, bunches, plane_z, wavelength_law=law)
+    with pytest.raises(ValueError, match="one wavelength law"):
+        trace_bunches(
+            model,
+            bunches,
+            plane_z,
+            wavelength_law=(300.0, 600.0),
+            wavelength_density=(np.array([300.0, 600.0]), np.ones(2)),
+        )
+
+
 def test_frame_places_the_input_plane():
     # Rotating the input frame by 90 degrees about z and shifting it moves the photons.
     model = compiled(telescope_transmission=None)
@@ -364,3 +409,156 @@ def test_frame_places_the_input_plane():
     }
     scaled = trace_bunches(model, centimetres, plane_z * 100.0, length_unit_m=0.01)
     assert abs(len(scaled["weight"]) - len(base["weight"])) < 0.01 * len(base["weight"])
+
+
+def with_transmission(on_axis):
+    """A single-mirror telescope with this on-axis transmission (other values as in `segmented`)."""
+    return compiled(
+        telescope_transmission=record("telescope_transmission", [on_axis, 1, 0.1, 5.0, 2.0, 0.0])
+    )
+
+
+def test_normalised_transmission_is_off_by_default_and_weights_stay_within_bound():
+    model = with_transmission(0.8)
+    bunches, plane_z = star_bunches(model, 20000)
+    default = trace_bunches(model, bunches, plane_z, roulette=False)
+    off = trace_bunches(model, bunches, plane_z, roulette=False, normalise_transmission=False)
+    assert len(default["weight"]) > 1000
+    for name in default:
+        assert np.array_equal(default[name], off[name]), name
+    # Roulette-off weights are the ratio t / bound, so they lie in (0, 1].
+    assert np.all(off["weight"] > 0.0) and np.all(off["weight"] <= 1.0)
+
+
+def test_normalised_transmission_count_scales_by_inverse_on_axis():
+    # Reflectivity 1: the bound is the on-axis transmission. With roulette, the
+    # normalised bound keeps 1 / on_axis more photons, so N_norm * on_axis ~ N_abs.
+    on_axis = 0.8
+    model = edited(with_transmission(on_axis), constant_reflectivity(1.0))
+    n = 200_000
+    bunches, plane_z = star_bunches(model, n)
+    absolute = trace_bunches(model, bunches, plane_z, acceptance=constant_acceptance(1.0))
+    normalised = trace_bunches(
+        model,
+        bunches,
+        plane_z,
+        acceptance=constant_acceptance(1.0),
+        normalise_transmission=True,
+    )
+    n_abs = len(absolute["weight"])
+    n_norm = len(normalised["weight"])
+    limit = 5 * math.sqrt(n_abs * on_axis)
+    print(f"normalised count: {n_norm * on_axis:.1f} vs {n_abs}, limit {limit:.1f}")
+    assert n_abs > 1000
+    assert abs(n_norm * on_axis - n_abs) < limit
+    assert np.all(normalised["weight"] == 1.0)
+
+
+def test_normalised_transmission_scales_weight_sums_by_inverse_on_axis():
+    # Roulette off: the weights are t / bound, and the thinning keeps more photons,
+    # so the expected sum of weights grows by 1 / on_axis. The tolerance uses the
+    # plug-in variance sum(w^2) of each output (a Bernoulli sum with w <= 1); the
+    # two runs share photons, so this is an approximate check, not a bound.
+    on_axis = 0.8
+    model = edited(with_transmission(on_axis), constant_reflectivity(1.0))
+    n = 200_000
+    bunches, plane_z = star_bunches(model, n)
+    absolute = trace_bunches(
+        model, bunches, plane_z, roulette=False, acceptance=constant_acceptance(1.0)
+    )
+    normalised = trace_bunches(
+        model,
+        bunches,
+        plane_z,
+        roulette=False,
+        acceptance=constant_acceptance(1.0),
+        normalise_transmission=True,
+    )
+    assert np.all(absolute["weight"] <= 1.0) and np.all(normalised["weight"] <= 1.0)
+    sum_abs = absolute["weight"].sum()
+    sum_norm = normalised["weight"].sum()
+    variance = np.sum(absolute["weight"] ** 2) + on_axis**2 * np.sum(normalised["weight"] ** 2)
+    limit = 5 * math.sqrt(variance)
+    print(f"weight sums: {on_axis * sum_norm:.1f} vs {sum_abs:.1f}, limit {limit:.1f}")
+    assert abs(on_axis * sum_norm - sum_abs) < limit
+
+
+def test_normalised_transmission_keeps_errors():
+    model = with_transmission(0.8)
+    bunches, plane_z = star_bunches(model, 100)
+    with pytest.raises(ValueError, match="orthonormal"):
+        trace_bunches(
+            model, bunches, plane_z, normalise_transmission=True, frame_rotation=np.eye(3) * 1.1
+        )
+    with pytest.raises(ValueError, match="acceptance"):
+        trace_bunches(
+            model,
+            bunches,
+            plane_z,
+            normalise_transmission=True,
+            acceptance=constant_acceptance(1.01),
+        )
+    broken = {**bunches, "size": np.zeros(100, dtype=np.float32)}
+    with pytest.raises(ValueError, match="invalid"):
+        trace_bunches(model, broken, plane_z, normalise_transmission=True)
+
+
+def test_input_plane_below_an_incoming_obscurer_is_rejected():
+    model = compiled(telescope_transmission=None)
+    top = model.max_incoming_obscurer_z_m()
+    assert top is not None
+    bunches, _ = star_bunches(model, 1000)
+    # The default model's incoming obscurer is the camera-front plate, a horizontal disk: its
+    # highest point is its centre height.
+    plate = next(o for o in model.document["optics"]["obscurers"] if o["name"] == "camera-front")
+    assert top == pytest.approx(plate["centre_m"][2])
+    with pytest.raises(ValueError, match="input plane below incoming obscurer 'camera-front'"):
+        trace_bunches(model, bunches, 0.5 * top)
+
+
+def test_input_plane_above_an_incoming_obscurer_is_accepted():
+    model = compiled(telescope_transmission=None)
+    top = model.max_incoming_obscurer_z_m()
+    bunches, plane_z = star_bunches(model, 1000)
+    assert plane_z > top
+    assert "weight" in trace_bunches(model, bunches, plane_z)
+    assert "weight" in trace_bunches(model, bunches, 1.02 * top)
+
+
+def test_plane_height_is_taken_along_the_telescope_axis():
+    model = compiled(telescope_transmission=None)
+    top = model.max_incoming_obscurer_z_m()
+    bunches, _ = star_bunches(model, 1000)
+    # Rotation about x by 20 deg: the input z axis makes an angle of 20 deg with the telescope axis.
+    angle = math.radians(20.0)
+    tilted = np.array([
+        [1.0, 0.0, 0.0],
+        [0.0, math.cos(angle), -math.sin(angle)],
+        [0.0, math.sin(angle), math.cos(angle)],
+    ])
+    # 1.02 top input units give 1.02 * cos(20 deg) top along the telescope axis: below the top.
+    with pytest.raises(ValueError, match="below incoming obscurer"):
+        trace_bunches(model, bunches, 1.02 * top, frame_rotation=tilted)
+    # 1.02 top / cos(20 deg) input units give 1.02 top along the telescope axis: accepted.
+    assert "weight" in trace_bunches(
+        model, bunches, 1.02 * top / math.cos(angle), frame_rotation=tilted
+    )
+
+
+def test_plane_height_uses_the_length_unit():
+    model = compiled(telescope_transmission=None)
+    top = model.max_incoming_obscurer_z_m()
+    bunches, _ = star_bunches(model, 1000)
+    # Input in centimetres: the same height is 102 * top in input units.
+    with pytest.raises(ValueError, match="below incoming obscurer"):
+        trace_bunches(model, bunches, 50.0 * top, length_unit_m=0.01)
+    assert "weight" in trace_bunches(model, bunches, 102.0 * top, length_unit_m=0.01)
+
+
+def test_without_incoming_obscurers_no_height_is_rejected():
+    model = compiled(
+        telescope_transmission=None, camera_body_diameter=record("camera_body_diameter", 0.0, "cm")
+    )
+    assert model.max_incoming_obscurer_z_m() is None
+    bunches, plane_z = star_bunches(model, 1000)
+    assert "weight" in trace_bunches(model, bunches, plane_z)

@@ -146,6 +146,9 @@ def compile_model(
     if not propagation_group_index >= 1.0:
         raise ModelError("propagation group index must be >= 1")
     optics["propagation_group_index"] = propagation_group_index
+    axes_offset = _axes_offset_m(p, zenith_deg)
+    if any(axes_offset):
+        optics["axes_offset_m"] = axes_offset
     model = {
         "format": MODEL_FORMAT,
         "sampling": _sampling(p, optics),
@@ -162,6 +165,41 @@ def compile_model(
     }
     model["sha256"] = model_hash(model)
     return model
+
+
+def _axes_offset_m(p: _Parameters, zenith_deg: float | None) -> list[float]:
+    """Offset of the optical origin from the telescope sphere centre, telescope frame [m].
+
+    The ``axes_offsets`` record (sim_telarray ``axes_offset``, cm) holds the horizontal offset
+    of the altitude axis from the azimuth axis, measured along x of the azimuth-rotated frame,
+    and the displacement perpendicular to the optical axis, which must be zero. A photon at
+    ground point P is then at R (P - O) in the telescope frame, where R maps the ground frame to
+    the telescope frame. R O does not depend on the azimuth, so the offset is stored in the
+    telescope frame at the compiled zenith angle: (O cos(theta), 0, O sin(theta)). Zero when the
+    record is absent or zero; a non-zero offset needs the zenith angle.
+    """
+    if "axes_offsets" not in p:
+        return [0.0, 0.0, 0.0]
+    values, units = components(p.record("axes_offsets"), "axes_offsets")
+    if len(values) > 2:
+        raise ModelError("axes_offsets has more than two components")
+    along = number(values[0], "axes_offsets") * length_unit_m(units[0], "axes_offsets")
+    perpendicular = (
+        number(values[1], "axes_offsets") * length_unit_m(units[1], "axes_offsets")
+        if len(values) == 2
+        else 0.0
+    )
+    if perpendicular != 0.0:
+        raise NotImplementedError(
+            "a non-zero second axes_offsets component (displacement perpendicular to the optical "
+            "axis) is not supported"
+        )
+    if along == 0.0:
+        return [0.0, 0.0, 0.0]
+    if zenith_deg is None:
+        raise ModelError("axes_offsets needs the telescope zenith angle")
+    theta = math.radians(zenith_deg)
+    return [along * math.cos(theta), 0.0, along * math.sin(theta)]
 
 
 def _sampling(p: _Parameters, optics: dict[str, Any]) -> dict[str, float]:

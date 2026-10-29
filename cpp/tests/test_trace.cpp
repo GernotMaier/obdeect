@@ -628,6 +628,17 @@ void bunch_option_validation() {
     bad.acceptance = &acceptance;
     CHECK(throws_invalid_argument([&] { run(bad); }));
   }
+
+  // An unsupported telescope transmission is rejected with ModelError before any bunch is traced.
+  auto unsupported = model;
+  unsupported.telescope_transmission = TelescopeTransmission{1.0, -1.0, 0.1, 2.0, 1.0};
+  bool model_error = false;
+  try {
+    trace_bunches(unsupported, in, frame, BunchOptions{}, 1, pool, allocate);
+  } catch (const ModelError &) {
+    model_error = true;
+  }
+  CHECK(model_error);
 }
 
 } // namespace

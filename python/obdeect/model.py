@@ -119,9 +119,40 @@ class OpticalModel:
         return focal["asphere"]["vertex_z_m"] if "asphere" in focal else focal["plane_z_m"]
 
     @property
+    def axes_offset_m(self) -> tuple[float, float, float]:
+        """Offset O [m, telescope frame] of the optical origin from the telescope sphere centre.
+
+        A ground-frame point P is traced at R P - O in the telescope frame, with R the input
+        rotation of `trace_bunches`, so the dish sits at +O relative to the rotation axes.
+        Zero for models without an axes offset.
+        """
+        x, y, z = self._document["optics"].get("axes_offset_m", (0.0, 0.0, 0.0))
+        return (float(x), float(y), float(z))
+
+    @property
     def propagation_group_index(self) -> float:
         """Group index of air the photon times use."""
         return self._document["optics"]["propagation_group_index"]
+
+    def max_incoming_obscurer_z_m(self) -> float | None:
+        """Highest z [m, telescope frame] of any obscurer on the incoming leg, or None.
+
+        Each obscurer is bounded from above: a plate by its centre plus its radius,
+        a cylinder or frustum by its end points plus the end radii, a polyhedron by
+        its highest vertex. Photons starting below this height never meet those
+        obscurers.
+        """
+        top = self._incoming_top()
+        return None if top is None else top[0]
+
+    def _incoming_top(self) -> tuple[float, str] | None:
+        """Highest incoming obscurer top [m] and its name, or None without incoming obscurers."""
+        tops = [
+            (_obscurer_top_z_m(o), o["name"])
+            for o in self._document["optics"]["obscurers"]
+            if "incoming" in o.get("legs", [])
+        ]
+        return max(tops) if tops else None
 
     def emitter_photons(
         self,
@@ -387,21 +418,30 @@ class OpticalModel:
         plane_z: float,
         acceptance: tuple[np.ndarray, np.ndarray, np.ndarray] | None = None,
         wavelength_density: tuple[np.ndarray, np.ndarray] | None = None,
+        wavelength_law: tuple[float, float] | None = None,
         roulette: bool = True,
         classify_losses: bool = True,
+        normalise_transmission: bool = False,
         pool: ThreadPool | None = None,
         threads: int = 0,
     ) -> dict[str, np.ndarray]:
         """Trace photon bunches of an air shower (see docs/batch-tracing.md).
 
         `bunches` holds x, y, cx, cy, time_ns, zem, size, wavelength_nm (all
-        float32; wavelength 0 means "sample one from `wavelength_density`")
-        and bunch_id (uint64, unique per bunch for one `seed`). `frame_rotation`
-        (3 x 3, input to telescope frame), `frame_offset_m`, `length_unit_m`
-        (metres per input length unit) and `plane_z` (input units) place the
-        input plane in the telescope frame. `acceptance` is
-        ``(wavelength_nm, zem_m, values)`` with values (n_wavelength, n_zem) in
-        [0, 1]; `wavelength_density` is ``(nm, values)``.
+        float32; wavelength 0 means "sample one from `wavelength_density` or
+        `wavelength_law`") and bunch_id (uint64, unique per bunch for one
+        `seed`). `frame_rotation` (3 x 3, input to telescope frame),
+        `frame_offset_m`, `length_unit_m` (metres per input length unit) and
+        `plane_z` (input units) place the input plane in the telescope frame. The
+        model's `axes_offset_m` is subtracted from `frame_offset_m`, so a ground-frame
+        point P is traced at R (P - O); this assumes `frame_rotation` is the ground-to-
+        telescope rotation at the zenith angle the model was compiled for.
+        `acceptance` is ``(wavelength_nm, zem_m, values)`` with values
+        (n_wavelength, n_zem) in [0, 1]; `wavelength_density` is ``(nm,
+        values)``. `wavelength_law` is ``(lo_nm, hi_nm)``: it samples
+        wavelength-0 bunches as sim_telarray does, with density proportional to
+        1/lambda^2 on [lo_nm, hi_nm] and wavelengths truncated to integer nm.
+        Give at most one of `wavelength_density` and `wavelength_law`.
 
         Each photon of a bunch is thinned by the acceptance and the model's
         response bound, traced, and, with `roulette`, kept with the probability
@@ -409,7 +449,10 @@ class OpticalModel:
         ratio as weight). Returns the surviving photons as columns position_m,
         direction, time_ns, weight, wavelength_nm, bunch_index (input row) and
         sub_photon, in input order. Invalid input raises ``ValueError`` before
-        any tracing. The result does not depend on `threads` or `pool`.
+        any tracing. With `normalise_transmission` the roulette weight and
+        bound are relative to the telescope transmission's on-axis value (the
+        caller applies that value itself). The result does not depend on
+        `threads` or `pool`.
         """
         dtypes = {
             "x": np.float32,
@@ -428,7 +471,26 @@ class OpticalModel:
         rotation = np.ascontiguousarray(frame_rotation, dtype=np.float64)
         if rotation.shape != (3, 3):
             raise ValueError("frame_rotation must be a 3 x 3 matrix")
-        offset = np.ascontiguousarray(frame_offset_m, dtype=np.float64)
+        # The model's axes offset displaces the input origin as well (see `axes_offset_m`).
+        offset = np.ascontiguousarray(frame_offset_m, dtype=np.float64) - np.asarray(
+            self.axes_offset_m, dtype=np.float64
+        )
+        # The input plane is z = plane_z in input units. Its height along the telescope
+        # axis, at the input origin (x = y = 0), is the telescope-frame z of that point.
+        # Photons starting below an incoming obscurer never meet it, so the plane must
+        # lie above every one of them. A length unit that is not positive is left to the
+        # tracer, which rejects it.
+        top = self._incoming_top()
+        if top is not None and float(length_unit_m) > 0.0:
+            plane_height_m = float(offset[2]) + float(rotation[2, 2]) * float(plane_z) * float(
+                length_unit_m
+            )
+            if plane_height_m < top[0]:
+                raise ValueError(
+                    f"input plane below incoming obscurer {top[1]!r}: the plane is at "
+                    f"{plane_height_m:.3f} m along the telescope axis, but the obscurer reaches "
+                    f"{top[0]:.3f} m; raise the input plane above it"
+                )
         if acceptance is not None:
             wavelengths, heights, values = (np.asarray(a, dtype=np.float64) for a in acceptance)
             if wavelengths.ndim != 1 or heights.ndim != 1:
@@ -462,10 +524,41 @@ class OpticalModel:
             seed=seed,
             acceptance=acceptance,
             wavelength_density=wavelength_density,
+            wavelength_law=None
+            if wavelength_law is None
+            else tuple(float(v) for v in wavelength_law),
             roulette=roulette,
             classify_losses=classify_losses,
+            normalise_transmission=normalise_transmission,
             pool=pool if pool is not None else ThreadPool(threads),
         )
+
+
+def _obscurer_top_z_m(obscurer: Mapping[str, Any]) -> float:
+    """Highest z [m] of one obscurer record (see the accessor).
+
+    A flat disk of radius r with unit normal n reaches r * sqrt(1 - n_z^2) above its centre; plates
+    and the flat ends of cylinders and frustums are disks, polyhedra are bounded by their vertices.
+    """
+    if "vertices_m" in obscurer:
+        return max(float(v[2]) for v in obscurer["vertices_m"])
+    if "centre_m" in obscurer:
+        normal = np.asarray(obscurer["normal"], dtype=float)
+        normal /= np.linalg.norm(normal)
+        radius = 0.5 * float(obscurer["diameter_m"])
+        return float(obscurer["centre_m"][2]) + radius * math.sqrt(max(0.0, 1.0 - normal[2] ** 2))
+    start, end = (np.asarray(obscurer[key], dtype=float) for key in ("start_m", "end_m"))
+    axis = (end - start) / np.linalg.norm(end - start)
+    radii = (
+        (obscurer["start_radius_m"], obscurer["end_radius_m"])
+        if "start_radius_m" in obscurer
+        else (0.5 * obscurer["diameter_m"],) * 2
+    )
+    sine = math.sqrt(max(0.0, 1.0 - axis[2] ** 2))
+    return max(
+        float(point[2]) + float(radius) * sine
+        for point, radius in zip((start, end), radii, strict=True)
+    )
 
 
 def _photon_arrays(photons: Mapping[str, np.ndarray]) -> dict[str, np.ndarray]:
