@@ -6,7 +6,6 @@ import numpy as np
 import pytest
 from obdeect import OpticalModel, ThreadPool
 from obdeect.compiler import model_hash
-from scipy.stats import ks_2samp
 from telescopes import record, segmented
 
 IDENTITY = np.eye(3)
@@ -212,6 +211,24 @@ def test_mean_rows_per_bunch_equal_the_size():
         assert np.all(np.diff(out["bunch_index"].astype(np.int64)) >= 0)
 
 
+def ks_distance(first, second):
+    """Two-sample empirical CDF distance, including ties in both samples."""
+    first, second = np.sort(first), np.sort(second)
+    values = np.concatenate((first, second))
+    return np.max(
+        np.abs(
+            np.searchsorted(first, values, side="right") / len(first)
+            - np.searchsorted(second, values, side="right") / len(second)
+        )
+    )
+
+
+def test_ks_distance_with_ties_and_unequal_sizes():
+    assert ks_distance([0, 0, 1, 2], [0, 1, 1]) == pytest.approx(1 / 4)
+    assert ks_distance([1, 1], [1, 1, 1]) == 0
+    assert ks_distance([0, 0], [1, 1]) == 1
+
+
 def test_survivors_follow_the_weighted_trace_distribution():
     model = edited(compiled(telescope_transmission=None), graded_responses)
     n = 400_000
@@ -226,9 +243,13 @@ def test_survivors_follow_the_weighted_trace_distribution():
     keep = np.random.default_rng(77).random(len(traced["weight"])) < traced["weight"]
     assert len(out["weight"]) > 20_000 and keep.sum() > 20_000
     for axis in (0, 1):
-        statistic = ks_2samp(out["position_m"][:, axis], traced["position_m"][keep, axis])
-        print(f"KS on axis {axis}: D={statistic.statistic:.5f}, p={statistic.pvalue:.4f}")
-        assert statistic.pvalue > 1e-3
+        first = out["position_m"][:, axis]
+        second = traced["position_m"][keep, axis]
+        distance = ks_distance(first, second)
+        # Asymptotic two-sided KS critical value at alpha=0.001.
+        limit = math.sqrt(-0.5 * math.log(0.001 / 2) * (1 / len(first) + 1 / len(second)))
+        print(f"KS on axis {axis}: D={distance:.5f}, limit={limit:.5f}")
+        assert distance < limit
     # The mean weight also agrees: survivors / traced photons.
     expected = traced["weight"].sum()
     assert abs(len(out["weight"]) - expected) < 5 * math.sqrt(expected)

@@ -2,7 +2,8 @@
 
 Compile an optical model once, then reuse it for tracing and plotting.
 The example below uses an explicit CTAO simulation-models checkout, telescope
-and version; choose values available in your checkout.
+and version; choose values available in your checkout. Plotting requires the
+`obdeect[plot]` extra.
 
 ```sh
 # Compile an optical model from a simulation-models checkout.
