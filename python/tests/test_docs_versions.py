@@ -1,7 +1,10 @@
 """Version selection and publishing layout for the documentation site."""
 
 import importlib.util
+import runpy
+import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -68,3 +71,15 @@ def test_publish_preserves_root_pages_and_provides_version_aliases(tmp_path):
 def test_refuse_to_publish_into_an_existing_directory(tmp_path):
     with pytest.raises(FileExistsError):
         versions.publish_dev(tmp_path / "build", tmp_path)
+
+
+def test_docs_authors_come_from_citation(monkeypatch):
+    root = SCRIPT.parents[1]
+    authors = [
+        {"given-names": "Ada", "family-names": "Lovelace"},
+        {"given-names": "Grace", "family-names": "Hopper"},
+    ]
+    monkeypatch.setitem(
+        sys.modules, "yaml", SimpleNamespace(safe_load=lambda file: {"authors": authors})
+    )
+    assert runpy.run_path(str(root / "docs" / "conf.py"))["author"] == "Ada Lovelace, Grace Hopper"

@@ -94,7 +94,12 @@ def _write(path: Path, photons: dict, arrivals: dict) -> None:
 
 
 def _plot(args: argparse.Namespace) -> None:
-    from obdeect.plot import plot
+    try:
+        from obdeect.plot import plot
+    except ModuleNotFoundError as error:
+        if error.name != "matplotlib":
+            raise
+        raise ModelError("plotting requires Matplotlib; install obdeect[plot]") from error
 
     arrivals = dict(np.load(args.arrivals)) if args.arrivals else None
     plot(OpticalModel.load(args.model), arrivals, args.output)

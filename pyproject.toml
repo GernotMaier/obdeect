@@ -18,11 +18,12 @@ classifiers = [
 ]
 dynamic = [ "version" ]
 dependencies = [
-  "matplotlib>=3.8",
   "numpy>=2.3",
 ]
-optional-dependencies.dev = [ "nanobind>=3.1", "pre-commit", "pytest", "ruff", "scipy" ]
-optional-dependencies.docs = [ "astropy", "myst-parser", "pydata-sphinx-theme", "pyyaml", "sphinx", "sphinx-design" ]
+optional-dependencies.dev = [ "nanobind>=3.1", "pre-commit", "pytest", "ruff" ]
+optional-dependencies.docs = [ "myst-parser", "pydata-sphinx-theme", "pyyaml", "sphinx", "sphinx-design" ]
+optional-dependencies.figures = [ "astropy", "matplotlib>=3.8" ]
+optional-dependencies.plot = [ "matplotlib>=3.8" ]
 scripts.obdeect = "obdeect.cli:main"
 
 [tool.setuptools_scm]

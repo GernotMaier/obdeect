@@ -1,7 +1,9 @@
 """Optical models end to end: compile, store, trace, analyse, command line."""
 
+import importlib.util
 import json
 import math
+import sys
 
 import numpy as np
 import pytest
@@ -234,8 +236,13 @@ def test_repository_and_command_line(tmp_path, capsys):
     assert main(f"trace --model {model} --seed 1 --photons 10 --output {csv}".split()) == 0
     assert csv.read_text().startswith("photon_id,status,")
     plot = tmp_path / "plot.png"
-    assert main(f"plot --model {model} --arrivals {arrivals} --output {plot}".split()) == 0
-    assert plot.stat().st_size > 0
+    result = main(f"plot --model {model} --arrivals {arrivals} --output {plot}".split())
+    if importlib.util.find_spec("matplotlib") is None:
+        assert result == 1
+        assert "obdeect[plot]" in capsys.readouterr().err
+    else:
+        assert result == 0
+        assert plot.stat().st_size > 0
     capsys.readouterr()
     assert main(f"obscurers --model {model} --seed 1 --photons 2000".split()) == 0
     assert "camera-front" in capsys.readouterr().out
@@ -408,3 +415,10 @@ def test_obscurer_hits_count_what_each_obscurer_takes_away(telescope, removed):
     )
     gained = np.count_nonzero(without["status"] == DETECTED) - hits["detected"]
     assert gained == hits["sole"][k]
+
+
+def test_plot_without_matplotlib_reports_extra(monkeypatch, capsys):
+    monkeypatch.setitem(sys.modules, "matplotlib", None)
+    monkeypatch.delitem(sys.modules, "obdeect.plot", raising=False)
+    assert main(["plot", "--model", "unused.json", "--output", "unused.png"]) == 1
+    assert "obdeect[plot]" in capsys.readouterr().err

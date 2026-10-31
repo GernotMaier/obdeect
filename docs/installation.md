@@ -12,6 +12,9 @@ obdeect --help
 The package requires Python 3.14 or later. If no wheel is available for your
 platform, installation builds the extension and requires a C++20 compiler.
 
+For plotting, install the optional Matplotlib dependency with
+`python -m pip install "obdeect[plot]"`.
+
 ## Install from source
 
 From an obdeect checkout, install the package in editable mode:
@@ -26,6 +29,8 @@ To build the documentation, also install the documentation dependencies:
 python -m pip install -e ".[docs]"
 sphinx-build -W --keep-going -b html docs docs/_build/html
 ```
+
+To regenerate validation figures from their external inputs, install `.[figures]`.
 
 ## Build options
 
